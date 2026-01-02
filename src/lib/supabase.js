@@ -4,7 +4,8 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error("Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY");
+  console.error('Missing Supabase environment variables!')
+  console.error('Make sure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set in .env.local')
 }
 
 export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '', {
@@ -22,12 +23,11 @@ export const auth = {
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
-        redirectTo: window.location.origin
+        redirectTo: `${window.location.origin}/`
       }
     })
     return { data, error }
-  }
-  ,
+  },
 
   // Sign in with email/password
   async signInWithEmail(email, password) {
@@ -119,17 +119,44 @@ export const db = {
 
   // Deals
   async getDeals(userId) {
-    const { data, error } = await supabase
-      .from('deals')
-      .select(`
-        *,
-        founders:deal_founders(*),
-        milestones:deal_milestones(*),
-        attachments:deal_attachments(*)
-      `)
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-    return { data, error }
+    try {
+      // First try with related tables
+      const { data, error } = await supabase
+        .from('deals')
+        .select(`
+          *,
+          founders:deal_founders(*),
+          milestones:deal_milestones(*),
+          attachments:deal_attachments(*)
+        `)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+      
+      // If error mentions missing table, try simpler query
+      if (error && (error.message?.includes('does not exist') || error.code === '42P01')) {
+        console.warn('Related tables not found, fetching deals only:', error.message)
+        const { data: simpleData, error: simpleError } = await supabase
+          .from('deals')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+        
+        // Add empty arrays for missing relations
+        const dealsWithEmptyRelations = (simpleData || []).map(d => ({
+          ...d,
+          founders: [],
+          milestones: [],
+          attachments: []
+        }))
+        
+        return { data: dealsWithEmptyRelations, error: simpleError }
+      }
+      
+      return { data, error }
+    } catch (e) {
+      console.error('getDeals error:', e)
+      return { data: [], error: e }
+    }
   },
 
   async getDeal(dealId) {
