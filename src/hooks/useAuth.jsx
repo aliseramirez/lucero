@@ -15,20 +15,29 @@ export function AuthProvider({ children }) {
   // Load profile and settings
   const loadUserData = useCallback(async (userId) => {
     try {
-      // Get profile
-      const { data: profileData, error: profileError } = await db.getProfile(userId)
-      if (profileError && profileError.code !== 'PGRST116') {
-        console.error('Error loading profile:', profileError)
-      } else if (profileData) {
-        setProfile(profileData)
+      // Get profile - don't let this block auth
+      try {
+        const { data: profileData, error: profileError } = await db.getProfile(userId)
+        if (!profileError && profileData) {
+          setProfile(profileData)
+        } else if (profileError) {
+          console.warn('Profile not found or error:', profileError.message)
+          // Set a minimal profile so onboarding works
+          setProfile({ id: userId, onboarding_complete: false })
+        }
+      } catch (e) {
+        console.warn('Failed to load profile:', e)
+        setProfile({ id: userId, onboarding_complete: false })
       }
 
-      // Get settings
-      const { data: settingsData, error: settingsError } = await db.getSettings(userId)
-      if (settingsError && settingsError.code !== 'PGRST116') {
-        console.error('Error loading settings:', settingsError)
-      } else if (settingsData) {
-        setSettings(settingsData)
+      // Get settings - don't let this block auth
+      try {
+        const { data: settingsData, error: settingsError } = await db.getSettings(userId)
+        if (!settingsError && settingsData) {
+          setSettings(settingsData)
+        }
+      } catch (e) {
+        console.warn('Failed to load settings:', e)
       }
     } catch (e) {
       console.error('Error loading user data:', e)
@@ -41,8 +50,13 @@ export function AuthProvider({ children }) {
 
     const initAuth = async () => {
       try {
-        // Check for existing session
-        const { session } = await auth.getSession()
+        // Check for existing session with timeout
+        const sessionPromise = auth.getSession()
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Auth timeout')), 10000)
+        )
+        
+        const { session } = await Promise.race([sessionPromise, timeoutPromise])
         
         if (mounted) {
           if (session?.user) {
@@ -64,14 +78,25 @@ export function AuthProvider({ children }) {
 
     // Listen for auth changes
     const { data: { subscription } } = auth.onAuthStateChange(async (event, session) => {
+      console.log('Auth state change:', event)
       if (mounted) {
         if (event === 'SIGNED_IN' && session?.user) {
           setUser(session.user)
           await loadUserData(session.user.id)
+          setIsLoading(false)
         } else if (event === 'SIGNED_OUT') {
           setUser(null)
           setProfile(null)
           setSettings(null)
+          setIsLoading(false)
+        } else if (event === 'TOKEN_REFRESHED') {
+          // Session refreshed, user still logged in
+          setIsLoading(false)
+        } else if (event === 'INITIAL_SESSION') {
+          // Initial session check complete
+          if (!session) {
+            setIsLoading(false)
+          }
         }
       }
     })
