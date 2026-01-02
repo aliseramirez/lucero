@@ -11,21 +11,30 @@ export function useDeals() {
 
   // Load deals
   const loadDeals = useCallback(async () => {
-    if (!user) return
+    if (!user) {
+      setIsLoading(false)
+      return
+    }
     
     setIsLoading(true)
     setError(null)
     
     try {
       const { data, error } = await db.getDeals(user.id)
-      if (error) throw error
       
-      // Transform data to match app format
-      const transformedDeals = (data || []).map(transformDealFromDb)
-      setDeals(transformedDeals)
+      if (error) {
+        console.error('Error loading deals:', error)
+        setError(error.message || 'Failed to load deals')
+        setDeals([])
+      } else {
+        // Transform data to match app format
+        const transformedDeals = (data || []).map(transformDealFromDb).filter(Boolean)
+        setDeals(transformedDeals)
+      }
     } catch (e) {
-      console.error('Error loading deals:', e)
-      setError(e.message)
+      console.error('Exception loading deals:', e)
+      setError(e.message || 'An unexpected error occurred')
+      setDeals([])
     } finally {
       setIsLoading(false)
     }
