@@ -795,6 +795,15 @@ const formatDate = (d) => new Date(d).toLocaleDateString('en-US', { month: 'shor
 const daysAgo = (d) => Math.floor((Date.now() - new Date(d).getTime()) / 86400000);
 const generateId = () => Math.random().toString(36).substr(2, 9);
 const daysUntil = (d) => Math.ceil((new Date(d).getTime() - Date.now()) / 86400000);
+const formatRelativeTime = (d) => {
+  const days = daysAgo(d);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return `${days}d ago`;
+  if (days < 30) return `${Math.floor(days / 7)}w ago`;
+  if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
+};
 
 // Default settings
 const DEFAULT_SETTINGS = {
@@ -7152,9 +7161,9 @@ function AngelFlowApp({ userMenu, syncStatus }) {
   const tabFilters = getTabFilters();
 
   const getEmptyState = () => {
-    if (activeTab === 'active') return { title: 'No leads yet', subtitle: 'Add a new company to start evaluating opportunities.' };
-    if (activeTab === 'deferred') return { title: 'No deferred deals', subtitle: 'Deals you defer will appear here for future review.' };
-    if (activeTab === 'portfolio') return { title: 'No investments yet', subtitle: 'Companies you invest in will appear here.' };
+    if (activeTab === 'active') return { title: 'No leads yet', subtitle: 'Add a company to start evaluating. Take your time.' };
+    if (activeTab === 'deferred') return { title: 'Nothing paused', subtitle: 'Deals you defer will rest here quietly.' };
+    if (activeTab === 'portfolio') return { title: 'No investments yet', subtitle: 'When you invest, your portfolio builds here.' };
     return { title: 'No deals', subtitle: '' };
   };
 
@@ -7163,8 +7172,8 @@ function AngelFlowApp({ userMenu, syncStatus }) {
   // Get tab subtitle
   const getTabSubtitle = () => {
     if (activeTab === 'active') return 'Companies you\'re evaluating';
-    if (activeTab === 'deferred') return 'Decisions paused until new signals appear';
-    if (activeTab === 'portfolio') return 'Companies you\'ve invested in';
+    if (activeTab === 'deferred') return 'Deferred doesn\'t mean no. It means not yet.';
+    if (activeTab === 'portfolio') return 'Decisions you stand behind';
     return '';
   };
 
@@ -7237,7 +7246,7 @@ function AngelFlowApp({ userMenu, syncStatus }) {
               className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${activeTab === 'deferred' ? 'bg-stone-100 dark:bg-stone-700 border border-stone-200 dark:border-stone-600' : 'hover:bg-stone-50 dark:hover:bg-stone-700/50'}`}
               style={{ color: activeTab === 'deferred' ? '#1c1917' : '#78716c' }}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/></svg>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="10" y2="9"/><line x1="14" y1="15" x2="14" y2="9"/></svg>
               Deferred
               <span className="px-1.5 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: activeTab === 'deferred' ? '#5B6DC4' : '#e7e5e4', color: activeTab === 'deferred' ? 'white' : '#78716c' }}>{tabCounts.deferred}</span>
             </button>
@@ -7256,9 +7265,151 @@ function AngelFlowApp({ userMenu, syncStatus }) {
 
       {/* Content */}
       <div className="px-6 py-6">
+        {/* LEADS TAB - Momentum Summary */}
+        {activeTab === 'active' && activeDeals.length > 0 && (() => {
+          const dealsWithNotes = activeDeals.filter(d => d.workingNotes?.length > 0 || d.notes?.length > 0).length;
+          const dealsWithProgress = activeDeals.filter(d => {
+            const explored = d.workingNotes?.filter(n => n.type === 'ai' && n.userConfirmed)?.length || 0;
+            return explored > 0;
+          }).length;
+          const upcomingReminders = activeDeals.filter(d => d.loiDue && daysUntil(d.loiDue) <= 7 && daysUntil(d.loiDue) >= 0).length;
+          const dealsWithSignals = activeDeals.filter(d => d.hasNewSignal).length;
+          
+          return (
+            <div className="mb-6 bg-white dark:bg-stone-800 rounded-2xl p-5 border border-stone-200 dark:border-stone-700">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-sm font-medium text-stone-900 dark:text-stone-100">Your momentum this week</h2>
+                  <p className="text-xs text-stone-400 mt-0.5">Based on your activity across {activeDeals.length} active leads</p>
+                </div>
+                {dealsWithProgress > 0 && (
+                  <div className="flex items-center gap-1.5 text-emerald-600">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+                    <span className="text-sm font-medium">Making progress</span>
+                  </div>
+                )}
+              </div>
+              
+              <div className="grid grid-cols-4 gap-4">
+                <div className="text-center">
+                  <div className="text-2xl font-semibold text-stone-900 dark:text-stone-100">{dealsWithProgress}</div>
+                  <div className="text-xs text-stone-500 dark:text-stone-400">in motion</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-semibold text-stone-900 dark:text-stone-100">{dealsWithNotes}</div>
+                  <div className="text-xs text-stone-500 dark:text-stone-400">with your notes</div>
+                </div>
+                <div className="text-center">
+                  <div className={`text-2xl font-semibold ${upcomingReminders > 0 ? 'text-amber-600' : 'text-stone-900 dark:text-stone-100'}`}>
+                    {upcomingReminders}
+                  </div>
+                  <div className="text-xs text-stone-500 dark:text-stone-400">due this week</div>
+                </div>
+                <div className="text-center">
+                  <div className={`text-2xl font-semibold ${dealsWithSignals > 0 ? 'text-[#5B6DC4]' : 'text-stone-900 dark:text-stone-100'}`}>
+                    {dealsWithSignals}
+                  </div>
+                  <div className="text-xs text-stone-500 dark:text-stone-400">new signals</div>
+                </div>
+              </div>
+
+              {/* Process reflection - Pride through mirrors */}
+              {dealsWithNotes >= 2 && (
+                <div className="mt-4 pt-4 border-t border-stone-100 dark:border-stone-700">
+                  <div className="flex items-start gap-2 text-stone-600 dark:text-stone-400">
+                    <svg className="mt-0.5 text-stone-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+                    <p className="text-sm">
+                      You've captured notes on {dealsWithNotes} of {activeDeals.length} leads. Your future self will thank you.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* DEFERRED TAB - Relief message */}
+        {activeTab === 'deferred' && deferredDeals.length > 0 && (() => {
+          const dealsWithSignals = deferredDeals.filter(d => d.hasNewSignal).length;
+          return (
+            <>
+              {/* Reframe message */}
+              <div className="mb-6 text-center py-6">
+                <div className="w-10 h-10 rounded-full bg-stone-100 dark:bg-stone-700 flex items-center justify-center mx-auto mb-3">
+                  <svg className="text-stone-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
+                </div>
+                <p className="text-sm text-stone-400 max-w-sm mx-auto">
+                  These are conscious pauses, not forgotten deals. They'll surface when conditions change.
+                </p>
+              </div>
+
+              {/* Signal alert - gentle */}
+              {dealsWithSignals > 0 && (
+                <div className="mb-5 bg-white dark:bg-stone-800 rounded-2xl p-4 border border-stone-200 dark:border-stone-700">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-[#5B6DC4]/10 flex items-center justify-center">
+                      <svg className="text-[#5B6DC4]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                    </div>
+                    <div>
+                      <p className="text-sm text-stone-700 dark:text-stone-300">
+                        <span className="font-medium">{dealsWithSignals} paused {dealsWithSignals === 1 ? 'deal has' : 'deals have'} new signals</span>
+                      </p>
+                      <p className="text-xs text-stone-400">Worth checking when you have a moment</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          );
+        })()}
+
+        {/* PORTFOLIO TAB - Identity summary */}
+        {activeTab === 'portfolio' && portfolioDeals.length > 0 && (() => {
+          const totalDeployed = portfolioDeals.reduce((sum, d) => sum + (d.investment?.amount || 0), 0);
+          const avgCheck = portfolioDeals.length > 0 ? totalDeployed / portfolioDeals.length : 0;
+          const industries = [...new Set(portfolioDeals.map(d => d.industry))];
+          const fmtCurrency = (n) => n >= 1000000 ? `$${(n / 1000000).toFixed(1)}M` : n >= 1000 ? `$${(n / 1000).toFixed(0)}K` : `$${n}`;
+          
+          return (
+            <div className="mb-6 bg-white dark:bg-stone-800 rounded-2xl p-6 border border-stone-200 dark:border-stone-700">
+              <div className="flex items-start justify-between mb-5">
+                <div>
+                  <h2 className="text-base font-medium text-stone-900 dark:text-stone-100">Your portfolio</h2>
+                  <p className="text-sm text-stone-400 mt-0.5">
+                    {portfolioDeals.length} {portfolioDeals.length === 1 ? 'company' : 'companies'} you've chosen to back
+                  </p>
+                </div>
+                {totalDeployed > 0 && (
+                  <div className="text-right">
+                    <div className="text-xl font-semibold text-stone-900 dark:text-stone-100">{fmtCurrency(totalDeployed)}</div>
+                    <p className="text-xs text-stone-400">deployed</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Pattern reflection - narrative coherence */}
+              <div className="pt-4 border-t border-stone-100 dark:border-stone-700 space-y-2">
+                {industries.length > 0 && (
+                  <div className="flex items-start gap-2 text-stone-600 dark:text-stone-400">
+                    <svg className="mt-0.5 text-stone-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="5" r="3"/><line x1="12" y1="22" x2="12" y2="8"/><path d="M5 12H2a10 10 0 0 0 20 0h-3"/></svg>
+                    <p className="text-sm">
+                      You invest across <span className="font-medium text-stone-900 dark:text-stone-100">{industries.slice(0, 3).join(', ')}{industries.length > 3 ? ` +${industries.length - 3} more` : ''}</span>.
+                      {avgCheck > 0 && <> Average check: {fmtCurrency(avgCheck)}.</>}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Subtitle + Portfolio Monitor button */}
         <div className="flex items-center justify-between mb-4">
-          <p className="text-sm text-stone-500 dark:text-stone-400">{getTabSubtitle()}</p>
+          <p className="text-sm text-stone-500 dark:text-stone-400">
+            {activeTab === 'active' ? 'Companies you\'re evaluating' : 
+             activeTab === 'deferred' ? '' : 
+             activeTab === 'portfolio' ? 'Companies' : ''}
+          </p>
           {activeTab === 'portfolio' && portfolioDeals.length > 0 && (
             <button
               onClick={() => setPage('portfolio-monitor')}
@@ -7394,6 +7545,25 @@ function AngelFlowApp({ userMenu, syncStatus }) {
               
               const qualitativeHook = getQualitativeHook();
               
+              // Calculate progress for Leads tab (areas explored)
+              const getExploredCount = () => {
+                if (!deal.workingNotes) return 0;
+                const confirmedLenses = new Set(deal.workingNotes.filter(n => n.type === 'ai' && n.userConfirmed).map(n => n.lens));
+                return confirmedLenses.size;
+              };
+              const exploredCount = getExploredCount();
+              const progressPercent = (exploredCount / 5) * 100;
+              
+              // Check if this deal has a new signal
+              const hasSignal = deal.hasNewSignal;
+              
+              // Get deferred reason display
+              const getDeferReason = () => {
+                if (!deal.deferData) return null;
+                const reasons = { timing: 'Timing', conviction: 'Conviction', information: 'Information', life: 'Life happened' };
+                return reasons[deal.deferData.condition] || deal.deferData.condition;
+              };
+              
               return (
                 <div 
                   key={deal.id} 
@@ -7407,49 +7577,207 @@ function AngelFlowApp({ userMenu, syncStatus }) {
                       setPage('detail'); 
                     }
                   }}
-                  className="bg-white dark:bg-stone-800 rounded-2xl p-5 border border-stone-200 dark:border-stone-700 hover:border-stone-300 dark:hover:border-stone-600 cursor-pointer transition-all hover:shadow-sm flex items-center"
+                  className={`bg-white dark:bg-stone-800 rounded-2xl border cursor-pointer transition-all hover:shadow-sm ${
+                    hasSignal && activeTab === 'active' 
+                      ? 'border-[#5B6DC4]/30 shadow-sm' 
+                      : activeTab === 'deferred'
+                        ? 'border-stone-150 dark:border-stone-700 hover:border-stone-200'
+                        : 'border-stone-200 dark:border-stone-700 hover:border-stone-300 dark:hover:border-stone-600'
+                  }`}
+                  style={activeTab === 'deferred' ? { borderColor: '#E7E5E4' } : {}}
                 >
-                  {/* Company Initial */}
-                  <div className="w-12 h-12 rounded-xl bg-stone-200 dark:bg-stone-700 flex items-center justify-center mr-4 flex-shrink-0">
-                    <span className="text-lg font-semibold text-stone-500 dark:text-stone-400">{deal.companyName?.charAt(0)?.toUpperCase()}</span>
-                  </div>
+                  {/* Signal banner for Leads with new signals - Curiosity */}
+                  {hasSignal && activeTab === 'active' && deal.signalText && (
+                    <div className="px-5 py-2.5 bg-[#5B6DC4]/5 dark:bg-[#5B6DC4]/10 border-b border-[#5B6DC4]/10 rounded-t-2xl">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <svg className="text-[#5B6DC4]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                          <span className="text-sm text-stone-600 dark:text-stone-300">{deal.signalText}</span>
+                        </div>
+                        <span className="text-xs font-medium text-[#5B6DC4]">Worth a look →</span>
+                      </div>
+                    </div>
+                  )}
                   
-                  {/* Company Info */}
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-semibold text-stone-900 dark:text-stone-100 mb-0.5">{deal.companyName}</h3>
-                    <p className="text-sm text-stone-500 dark:text-stone-400">{deal.industry} · {deal.stage}</p>
-                    <p className="text-sm text-stone-400 dark:text-stone-500">{founderName}</p>
-                    {qualitativeHook && (
-                      <p className="text-xs text-stone-400 dark:text-stone-500 mt-1 italic truncate">{qualitativeHook}</p>
-                    )}
-                  </div>
+                  {/* Signal banner for Deferred - softer */}
+                  {hasSignal && activeTab === 'deferred' && deal.signalText && (
+                    <div className="px-5 py-2.5 bg-stone-50 dark:bg-stone-700/50 border-b border-stone-100 dark:border-stone-600 rounded-t-2xl">
+                      <div className="flex items-center gap-2">
+                        <svg className="text-[#5B6DC4]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                        <span className="text-sm text-stone-600 dark:text-stone-300">{deal.signalText}</span>
+                        <span className="text-xs text-stone-400 ml-auto">Something shifted</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="p-5 flex items-center">
+                    {/* Company Initial with progress ring for Leads */}
+                    <div className="relative mr-4 flex-shrink-0">
+                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
+                        activeTab === 'deferred' 
+                          ? 'bg-stone-50 dark:bg-stone-700' 
+                          : activeTab === 'portfolio'
+                            ? 'bg-emerald-50 dark:bg-emerald-900/30'
+                            : 'bg-stone-200 dark:bg-stone-700'
+                      }`}>
+                        <span className={`text-lg font-semibold ${
+                          activeTab === 'deferred'
+                            ? 'text-stone-300 dark:text-stone-500'
+                            : activeTab === 'portfolio'
+                              ? 'text-emerald-600 dark:text-emerald-400'
+                              : 'text-stone-500 dark:text-stone-400'
+                        }`}>{deal.companyName?.charAt(0)?.toUpperCase()}</span>
+                      </div>
+                      {/* Progress ring for Leads - Momentum */}
+                      {activeTab === 'active' && exploredCount > 0 && (
+                        <svg className="absolute -inset-1 w-14 h-14" viewBox="0 0 56 56">
+                          <circle cx="28" cy="28" r="26" fill="none" stroke="#E7E5E4" strokeWidth="2"/>
+                          <circle cx="28" cy="28" r="26" fill="none" stroke="#5B6DC4" strokeWidth="2"
+                            strokeDasharray={`${progressPercent * 1.63} 163`} strokeLinecap="round"
+                            transform="rotate(-90 28 28)" className="transition-all duration-500"/>
+                        </svg>
+                      )}
+                    </div>
+                    
+                    {/* Company Info */}
+                    <div className="flex-1 min-w-0">
+                      <h3 className={`font-semibold mb-0.5 ${
+                        activeTab === 'deferred' 
+                          ? 'text-stone-700 dark:text-stone-300' 
+                          : 'text-stone-900 dark:text-stone-100'
+                      }`}>{deal.companyName}</h3>
+                      <p className={`text-sm ${
+                        activeTab === 'deferred' 
+                          ? 'text-stone-400 dark:text-stone-500' 
+                          : 'text-stone-500 dark:text-stone-400'
+                      }`}>{deal.industry} · {deal.stage}</p>
+                      <p className={`text-sm ${
+                        activeTab === 'deferred' 
+                          ? 'text-stone-400 dark:text-stone-500' 
+                          : 'text-stone-400 dark:text-stone-500'
+                      }`}>{founderName}</p>
+                      
+                      {/* Leads: Show your note with "Your note:" prefix */}
+                      {activeTab === 'active' && qualitativeHook && (
+                        <p className="text-sm text-stone-500 dark:text-stone-400 mt-2 italic truncate">
+                          {qualitativeHook.startsWith('Last note:') 
+                            ? <><span className="text-stone-400 dark:text-stone-500 not-italic">Your note:</span> {qualitativeHook.replace('Last note: ', '')}</>
+                            : qualitativeHook
+                          }
+                        </p>
+                      )}
+                      
+                      {/* Deferred: Show your reasoning when you paused */}
+                      {activeTab === 'deferred' && deal.deferData?.conditionDetail && (
+                        <div className="mt-3 p-3 bg-stone-50 dark:bg-stone-700/50 rounded-xl">
+                          <p className="text-sm text-stone-500 dark:text-stone-400 italic">"{deal.deferData.conditionDetail}"</p>
+                          {deal.deferData.waitingFor && (
+                            <p className="text-xs text-stone-400 dark:text-stone-500 mt-1">
+                              Waiting for: {deal.deferData.waitingFor}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      
+                      {/* Portfolio: Show your thesis */}
+                      {activeTab === 'portfolio' && deal.investment?.whyYes && (
+                        <div className="mt-3 p-3 bg-stone-50 dark:bg-stone-700/50 rounded-xl">
+                          <p className="text-xs text-stone-400 dark:text-stone-500 uppercase tracking-wide mb-1">Your thesis</p>
+                          <p className="text-sm text-stone-600 dark:text-stone-300 line-clamp-2">"{deal.investment.whyYes}"</p>
+                        </div>
+                      )}
+                    </div>
                   
-                  {/* Right side - Badge and Info */}
-                  <div className="flex flex-col items-end gap-1.5 ml-4">
-                    <span 
-                      className="px-2.5 py-1 rounded-lg text-xs font-medium"
-                      style={{ backgroundColor: badge.bg, color: badge.color, border: `1px solid ${badge.border}` }}
-                    >
-                      {badge.label}
-                    </span>
-                    {secondaryInfo && (
-                      <span className="text-xs flex items-center gap-1" style={{ color: secondaryInfo.color }}>
-                        {secondaryInfo.icon && <span>{secondaryInfo.icon}</span>}
-                        {secondaryInfo.text}
-                        {secondaryInfo.suffix && <span className="text-stone-400 ml-1">{secondaryInfo.suffix}</span>}
-                      </span>
-                    )}
-                  </div>
+                    {/* Right side - Badge and Info */}
+                    <div className="flex flex-col items-end gap-1.5 ml-4">
+                      {/* Badge - different styling for Deferred (muted) */}
+                      {activeTab === 'deferred' ? (
+                        <>
+                          <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400">
+                            {getDeferReason() || badge.label}
+                          </span>
+                          {deal.deferData?.deferredAt && (
+                            <span className="text-xs text-stone-400 dark:text-stone-500">
+                              Paused {formatRelativeTime(deal.deferData.deferredAt)}
+                            </span>
+                          )}
+                        </>
+                      ) : activeTab === 'portfolio' ? (
+                        <>
+                          <span className="text-sm font-medium text-stone-900 dark:text-stone-100">
+                            {deal.investment?.amount ? `$${(deal.investment.amount / 1000).toFixed(0)}K` : ''}
+                          </span>
+                          {deal.investment?.date && (
+                            <span className="text-xs text-stone-400 dark:text-stone-500">
+                              {formatRelativeTime(deal.investment.date)}
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <span 
+                            className="px-2.5 py-1 rounded-lg text-xs font-medium"
+                            style={{ backgroundColor: badge.bg, color: badge.color, border: `1px solid ${badge.border}` }}
+                          >
+                            {badge.label}
+                          </span>
+                          {secondaryInfo && (
+                            <span className="text-xs flex items-center gap-1" style={{ color: secondaryInfo.color }}>
+                              {secondaryInfo.icon && <span>{secondaryInfo.icon}</span>}
+                              {secondaryInfo.text}
+                              {secondaryInfo.suffix && <span className="text-stone-400 ml-1">{secondaryInfo.suffix}</span>}
+                            </span>
+                          )}
+                        </>
+                      )}
+                    </div>
                   
-                  {/* Chevron */}
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d6d3d1" strokeWidth="2" className="ml-3 flex-shrink-0">
-                    <polyline points="9 18 15 12 9 6"/>
-                  </svg>
+                    {/* Chevron - more muted for Deferred */}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" 
+                      stroke={activeTab === 'deferred' ? '#d6d3d1' : '#a8a29e'} 
+                      strokeWidth="2" className="ml-3 flex-shrink-0">
+                      <polyline points="9 18 15 12 9 6"/>
+                    </svg>
+                  </div>
                 </div>
               );
             })
           )}
         </div>
+        
+        {/* Footer messages - emotional closure for each tab */}
+        {filtered.length > 0 && (
+          <div className="mt-8 text-center space-y-1">
+            {activeTab === 'active' && (
+              <p className="text-sm text-stone-400 dark:text-stone-500">
+                {(() => {
+                  const inMotion = activeDeals.filter(d => {
+                    const explored = d.workingNotes?.filter(n => n.type === 'ai' && n.userConfirmed)?.length || 0;
+                    return explored > 0;
+                  }).length;
+                  if (inMotion === activeDeals.length) return "All leads in motion. You're building a deliberate practice.";
+                  if (inMotion > 0) return `${inMotion} of ${activeDeals.length} leads have your attention. That's how good decisions get made.`;
+                  return "Pick a company when you're ready. Thoughtful beats fast.";
+                })()}
+              </p>
+            )}
+            {activeTab === 'deferred' && (
+              <p className="text-sm text-stone-400 dark:text-stone-500">
+                {deferredDeals.length} {deferredDeals.length === 1 ? 'decision' : 'decisions'} resting. No rush to resolve them.
+              </p>
+            )}
+            {activeTab === 'portfolio' && (
+              <>
+                <p className="text-sm text-stone-400 dark:text-stone-500">
+                  {portfolioDeals.length} {portfolioDeals.length === 1 ? 'investment' : 'investments'}. Each one a deliberate choice.
+                </p>
+                <p className="text-xs text-stone-300 dark:text-stone-600">
+                  The best investors stay curious about their own patterns
+                </p>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Modals */}
