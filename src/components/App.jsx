@@ -4896,7 +4896,7 @@ const ScreeningView = ({ deal, onUpdate, onTransition, setToast }) => {
                 <div className="flex gap-3 ml-4">
                   <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 bg-stone-200 dark:bg-stone-600">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#78716C" strokeWidth="2">
-                      <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                      <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z"/>
                     </svg>
                   </div>
                   <div className="flex-1 bg-stone-50/50 dark:bg-stone-700/30 rounded-xl p-4 border border-stone-100 dark:border-stone-700">
@@ -6491,7 +6491,7 @@ const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) 
       label: 'Too Early to Tell', 
       color: '#78716c', 
       bg: 'bg-stone-100',
-      icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
     },
     'unclear': { 
       label: 'Unclear', 
@@ -6643,8 +6643,8 @@ const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) 
               <div className="flex items-start gap-2 p-3 rounded-lg bg-white/50 border border-stone-200">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2" className="mt-0.5 flex-shrink-0">
                   <circle cx="12" cy="12" r="10"/>
-                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                  <line x1="12" y1="17" x2="12.01" y2="17"/>
+                  <line x1="12" y1="16" x2="12" y2="12"/>
+                  <line x1="12" y1="8" x2="12.01" y2="8"/>
                 </svg>
                 <p className="text-sm text-stone-500">{selectedTrajectory.uncertainty}</p>
               </div>
@@ -6700,7 +6700,8 @@ const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) 
                     <div className="flex items-center gap-1.5 text-xs text-stone-400 mb-3">
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <circle cx="12" cy="12" r="10"/>
-                        <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                        <line x1="12" y1="16" x2="12" y2="12"/>
+                        <line x1="12" y1="8" x2="12.01" y2="8"/>
                       </svg>
                       <span className="truncate">{trajectory.uncertainty.split('—')[0]}</span>
                     </div>
@@ -6746,9 +6747,7 @@ const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) 
             {filteredActivities.length === 0 ? (
               <div className="p-8 text-center">
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#d6d3d1" strokeWidth="1.5" className="mx-auto mb-3">
-                  <circle cx="12" cy="12" r="10"/>
-                  <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                  <line x1="12" y1="17" x2="12.01" y2="17"/>
+                  <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
                 </svg>
                 <p className="text-stone-500 font-medium mb-1">No signals yet</p>
                 <p className="text-sm text-stone-400">Observable facts will appear here as we track public sources</p>
