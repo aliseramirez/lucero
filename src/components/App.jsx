@@ -3651,16 +3651,303 @@ const ScreeningView = ({ deal, onUpdate, onTransition, setToast }) => {
     onUpdate({ ...deal, ...updates });
   };
 
-  // Detect which lens a note relates to
-  const detectLens = (text) => {
+  // ============================================================================
+  // CONTEXTUAL AI QUESTION GENERATION
+  // Questions emerge from deal context + user notes, not fixed categories
+  // ============================================================================
+
+  // Extract key context from deal
+  const dealContext = React.useMemo(() => ({
+    industry: deal.industry || '',
+    stage: deal.stage || '',
+    companyName: deal.companyName || '',
+    founders: deal.founders || [],
+    overview: deal.overview || '',
+    terms: deal.terms || {},
+    source: deal.source || {},
+  }), [deal]);
+
+  // Analyze all user notes to understand what's been discussed
+  const notesAnalysis = React.useMemo(() => {
+    const userNotes = entries.filter(e => e.type === 'user' || e.type === 'voice');
+    const allText = userNotes.map(n => n.content).join(' ').toLowerCase();
+    
+    // Track what topics have been mentioned
+    const mentioned = {
+      founders: allText.match(/founder|ceo|cto|team|experience|background|hire|who/),
+      market: allText.match(/market|tam|opportunity|size|grow|segment|timing/),
+      traction: allText.match(/revenue|mrr|arr|growth|customer|metric|user|sales/),
+      competition: allText.match(/compet|moat|unique|different|edge|advantage|vs|versus/),
+      product: allText.match(/product|tech|platform|feature|ux|demo|build/),
+      risk: allText.match(/risk|concern|worry|fail|problem|issue|red flag/),
+      valuation: allText.match(/valuation|price|cap|raise|round|terms|dilution/),
+      regulatory: allText.match(/regulat|compliance|legal|license|permit/),
+      unitEconomics: allText.match(/unit economics|ltv|cac|margin|burn|runway/),
+      distribution: allText.match(/distribution|channel|sales|gtm|go to market|acquire/),
+    };
+    
+    // Extract specific concerns or questions user has raised
+    const concerns = userNotes
+      .filter(n => n.content.match(/\?|concern|worry|unclear|don't know|not sure|wonder/i))
+      .map(n => n.content);
+    
+    // Extract positive signals user has noted
+    const positives = userNotes
+      .filter(n => n.content.match(/like|strong|good|impressive|interesting|excited/i))
+      .map(n => n.content);
+    
+    return { mentioned, concerns, positives, allText, noteCount: userNotes.length };
+  }, [entries]);
+
+  // Generate contextual questions based on deal + notes
+  const generateContextualQuestions = React.useCallback(() => {
+    const questions = [];
+    const { industry, stage, founders, overview } = dealContext;
+    const { mentioned, concerns, noteCount } = notesAnalysis;
+    const industryLower = industry.toLowerCase();
+    
+    // INDUSTRY-SPECIFIC QUESTIONS
+    if (industryLower.includes('fintech') || industryLower.includes('finance')) {
+      if (!mentioned.regulatory) {
+        questions.push({
+          id: 'reg-fintech',
+          question: 'What regulatory requirements apply here?',
+          context: `${industry} companies typically need licenses or compliance frameworks`,
+          category: 'regulatory',
+          priority: 'high'
+        });
+      }
+      if (!mentioned.unitEconomics) {
+        questions.push({
+          id: 'unit-fintech',
+          question: 'What are the unit economics on each transaction?',
+          context: 'Payment and fintech margins vary dramatically by model',
+          category: 'economics',
+          priority: 'medium'
+        });
+      }
+    }
+    
+    if (industryLower.includes('health') || industryLower.includes('med') || industryLower.includes('bio')) {
+      if (!mentioned.regulatory) {
+        questions.push({
+          id: 'reg-health',
+          question: 'What\'s the regulatory pathway (FDA, HIPAA, etc)?',
+          context: 'Healthcare products often require regulatory approval',
+          category: 'regulatory',
+          priority: 'high'
+        });
+      }
+      questions.push({
+        id: 'clinical-health',
+        question: 'Is clinical validation required? What\'s the timeline?',
+        context: 'Clinical trials can take years and significant capital',
+        category: 'validation',
+        priority: 'high'
+      });
+    }
+    
+    if (industryLower.includes('ai') || industryLower.includes('ml')) {
+      if (!mentioned.product) {
+        questions.push({
+          id: 'moat-ai',
+          question: 'What\'s the defensible moat beyond the model?',
+          context: 'AI capabilities are increasingly commoditized',
+          category: 'edge',
+          priority: 'high'
+        });
+      }
+      questions.push({
+        id: 'data-ai',
+        question: 'What proprietary data or training advantage do they have?',
+        context: 'Data moats are often stronger than model moats in AI',
+        category: 'edge',
+        priority: 'medium'
+      });
+    }
+    
+    if (industryLower.includes('saas') || industryLower.includes('software')) {
+      if (!mentioned.traction) {
+        questions.push({
+          id: 'metrics-saas',
+          question: 'What are the core SaaS metrics (MRR, churn, NRR)?',
+          context: 'SaaS businesses live and die by retention metrics',
+          category: 'traction',
+          priority: 'high'
+        });
+      }
+    }
+    
+    if (industryLower.includes('marketplace') || industryLower.includes('platform')) {
+      questions.push({
+        id: 'chicken-egg',
+        question: 'How are they solving the chicken-and-egg problem?',
+        context: 'Marketplaces need both supply and demand to work',
+        category: 'strategy',
+        priority: 'high'
+      });
+    }
+    
+    if (industryLower.includes('hardware') || industryLower.includes('device')) {
+      questions.push({
+        id: 'manufacturing',
+        question: 'What\'s the manufacturing and supply chain strategy?',
+        context: 'Hardware scaling requires significant capital and expertise',
+        category: 'operations',
+        priority: 'high'
+      });
+    }
+
+    // STAGE-SPECIFIC QUESTIONS
+    if (stage === 'pre-seed' || stage === 'Pre-seed') {
+      if (!mentioned.founders) {
+        questions.push({
+          id: 'founder-preseed',
+          question: 'Why are these founders the right people for this problem?',
+          context: 'At pre-seed, the bet is almost entirely on the team',
+          category: 'team',
+          priority: 'high'
+        });
+      }
+      if (!mentioned.market) {
+        questions.push({
+          id: 'insight-preseed',
+          question: 'What unique insight do they have that others don\'t?',
+          context: 'Pre-seed companies need a contrarian but correct view',
+          category: 'thesis',
+          priority: 'high'
+        });
+      }
+    }
+    
+    if (stage === 'seed' || stage === 'Seed') {
+      if (!mentioned.traction) {
+        questions.push({
+          id: 'signal-seed',
+          question: 'What early traction signals exist?',
+          context: 'Seed stage should show some evidence of demand',
+          category: 'traction',
+          priority: 'high'
+        });
+      }
+      if (!mentioned.distribution) {
+        questions.push({
+          id: 'gtm-seed',
+          question: 'What\'s the go-to-market strategy?',
+          context: 'Seed companies need a clear path to first customers',
+          category: 'strategy',
+          priority: 'medium'
+        });
+      }
+    }
+    
+    if (stage === 'series-a' || stage === 'Series A') {
+      if (!mentioned.traction) {
+        questions.push({
+          id: 'pmf-seriesa',
+          question: 'Is there clear product-market fit? What\'s the evidence?',
+          context: 'Series A should demonstrate repeatable demand',
+          category: 'traction',
+          priority: 'high'
+        });
+      }
+      questions.push({
+        id: 'scale-seriesa',
+        question: 'Can this scale? What needs to be true?',
+        context: 'Series A is about proving the model can scale',
+        category: 'strategy',
+        priority: 'high'
+      });
+    }
+
+    // FOUNDER-CONTEXT QUESTIONS
+    if (founders.length > 0) {
+      const founderNames = founders.map(f => f.name).join(', ');
+      if (!mentioned.founders) {
+        questions.push({
+          id: 'founder-context',
+          question: `What's ${founders.length > 1 ? 'the founders\'' : founders[0]?.name + '\'s'} relevant background?`,
+          context: `Current team: ${founderNames}`,
+          category: 'team',
+          priority: 'high'
+        });
+      }
+    }
+
+    // NOTE-REACTIVE QUESTIONS (based on what user has written)
+    if (concerns.length > 0) {
+      // User has expressed concerns - dig deeper
+      const lastConcern = concerns[concerns.length - 1];
+      if (lastConcern.match(/founder|team|experience/i) && !mentioned.founders) {
+        questions.push({
+          id: 'concern-team',
+          question: 'What would make you confident in this team despite the concern?',
+          context: `You noted: "${lastConcern.slice(0, 50)}..."`,
+          category: 'team',
+          priority: 'high',
+          triggeredBy: 'your note'
+        });
+      }
+      if (lastConcern.match(/market|competition|crowded/i)) {
+        questions.push({
+          id: 'concern-market',
+          question: 'What would need to be true for them to win despite competition?',
+          context: `You noted: "${lastConcern.slice(0, 50)}..."`,
+          category: 'edge',
+          priority: 'high',
+          triggeredBy: 'your note'
+        });
+      }
+    }
+
+    // UNIVERSAL QUESTIONS (if not much has been explored)
+    if (noteCount < 3) {
+      if (!mentioned.risk) {
+        questions.push({
+          id: 'risk-universal',
+          question: 'What would make this investment fail?',
+          context: 'Pre-mortem thinking helps surface blind spots',
+          category: 'risk',
+          priority: 'medium'
+        });
+      }
+      if (!mentioned.valuation) {
+        questions.push({
+          id: 'terms-universal',
+          question: 'Do the terms make sense for the stage and traction?',
+          context: 'Valuation should reflect risk and progress',
+          category: 'terms',
+          priority: 'medium'
+        });
+      }
+    }
+
+    // Sort by priority and return top questions
+    const priorityOrder = { high: 0, medium: 1, low: 2 };
+    return questions
+      .sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority])
+      .slice(0, 5);
+  }, [dealContext, notesAnalysis]);
+
+  // Get current contextual questions
+  const contextualQuestions = generateContextualQuestions();
+
+  // Detect what topic a note is about (more flexible than fixed lenses)
+  const detectTopic = (text) => {
     const lower = text.toLowerCase();
     if (lower.match(/market|tam|timing|opportunity|growing|size|segment/)) return 'market';
     if (lower.match(/founder|team|ceo|cto|experience|background|hire/)) return 'team';
     if (lower.match(/revenue|mrr|arr|growth|customer|traction|metric|user/)) return 'traction';
     if (lower.match(/compet|moat|unique|different|edge|defensi|advantage/)) return 'edge';
     if (lower.match(/product|tech|platform|feature|ux|quality|build/)) return 'product';
+    if (lower.match(/risk|concern|fail|worry|red flag/)) return 'risk';
+    if (lower.match(/valuation|price|terms|cap|raise/)) return 'terms';
+    if (lower.match(/regulat|compliance|legal|license/)) return 'regulatory';
     return null;
   };
+
+  // Legacy alias for compatibility
+  const detectLens = detectTopic;
 
   // Get the user's original question that triggered an AI response
   const getOriginalQuestion = (entry) => {
@@ -4820,8 +5107,57 @@ const ScreeningView = ({ deal, onUpdate, onTransition, setToast }) => {
         </div>
       </div>
 
-      {/* Quick prompts - only show after first input, reframe as suggestions */}
-      {hasStarted && (() => {
+      {/* Contextual Questions - dynamically generated based on deal + notes */}
+      {contextualQuestions.length > 0 && (
+        <div className="bg-stone-50 dark:bg-stone-800/50 rounded-xl p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <svg className="text-[#5B6DC4]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M9 18h6"/><path d="M10 22h4"/>
+              <path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/>
+            </svg>
+            <span className="text-xs font-medium text-stone-600 dark:text-stone-300">
+              Questions worth exploring for this {deal.industry} {deal.stage}
+            </span>
+          </div>
+          <div className="space-y-2">
+            {contextualQuestions.slice(0, 3).map((q) => (
+              <button
+                key={q.id}
+                onClick={() => autoSubmitPrompt(q.question)}
+                disabled={isAIThinking}
+                className="w-full text-left p-3 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed hover:bg-white dark:hover:bg-stone-700 group"
+                style={{ backgroundColor: 'transparent', border: '1px solid #E7E5E4' }}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-stone-700 dark:text-stone-200 group-hover:text-[#5B6DC4]">
+                      {q.question}
+                    </p>
+                    <p className="text-xs text-stone-400 mt-0.5">
+                      {q.triggeredBy ? `Based on ${q.triggeredBy}` : q.context}
+                    </p>
+                  </div>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${
+                    q.priority === 'high' 
+                      ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' 
+                      : 'bg-stone-100 text-stone-500 dark:bg-stone-700 dark:text-stone-400'
+                  }`}>
+                    {q.category}
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
+          {contextualQuestions.length > 3 && (
+            <p className="text-xs text-stone-400 text-center">
+              +{contextualQuestions.length - 3} more questions available
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Fallback quick prompts if no contextual questions (edge case) */}
+      {contextualQuestions.length === 0 && hasStarted && (() => {
         const allPrompts = ['How big is this market?', 'What do we know about the founders?', 'Who are the competitors?', 'Is there any traction data?'];
         const askedQuestions = entries.filter(e => e.type === 'user').map(e => e.content);
         const remainingPrompts = allPrompts.filter(p => !askedQuestions.includes(p));
