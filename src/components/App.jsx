@@ -592,7 +592,7 @@ const LoginPage = () => {
               <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
             </svg>
           </div>
-          <h1 className="text-2xl font-bold text-stone-900 dark:text-white mb-2">AngelFlow</h1>
+          <h1 className="text-2xl font-bold text-stone-900 dark:text-white mb-2">Convex</h1>
           <p className="text-stone-500 dark:text-stone-400">Track your angel investments with clarity</p>
         </div>
         
@@ -6842,7 +6842,7 @@ const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) 
 };
 
 // Main App (internal, wrapped by auth)
-function AngelFlowApp({ userMenu, syncStatus }) {
+function ConvexApp({ userMenu, syncStatus }) {
   const [page, setPage] = useState('list'); // Start at list instead of login since auth handles that
   const [activeTab, setActiveTab] = useState('active'); // 'active' | 'deferred' | 'portfolio'
   const [deals, setDeals] = useState([]);
@@ -7525,7 +7525,7 @@ function AngelFlowApp({ userMenu, syncStatus }) {
                   <rect x="3" y="3" width="18" height="18" rx="2"/>
                 </svg>
               </div>
-              <span className="font-semibold text-stone-900 dark:text-stone-100">AngelFlow</span>
+              <span className="font-semibold text-stone-900 dark:text-stone-100">Convex</span>
             </div>
             {/* Sync Status */}
             {syncStatus}
@@ -8192,7 +8192,7 @@ const AuthenticatedApp = () => {
   
   // Pass deals and settings to main app
   return (
-    <AngelFlowAppWithData 
+    <ConvexAppWithData 
       initialDeals={deals}
       initialSettings={settings}
       onDealsChange={setDeals}
@@ -8204,7 +8204,7 @@ const AuthenticatedApp = () => {
 };
 
 // Wrapper that injects user data into the main app
-const AngelFlowAppWithData = ({ 
+const ConvexAppWithData = ({ 
   initialDeals, 
   initialSettings, 
   onDealsChange, 
@@ -8212,12 +8212,12 @@ const AngelFlowAppWithData = ({
   userMenu,
   syncStatus 
 }) => {
-  // This component bridges the auth system with the existing AngelFlowApp
+  // This component bridges the auth system with the existing ConvexApp
   // For now, we'll render the existing app structure
-  // The actual integration would modify AngelFlowApp to accept these props
+  // The actual integration would modify ConvexApp to accept these props
   
   return (
-    <AngelFlowApp 
+    <ConvexApp 
       userMenu={userMenu}
       syncStatus={syncStatus}
     />
@@ -8321,7 +8321,7 @@ const App = () => {
   
   // Show main app for authenticated users who completed onboarding
   return (
-    <AngelFlowApp 
+    <ConvexApp 
       userMenu={<SimpleUserMenu user={user} onLogout={handleLogout} />}
       syncStatus={null}
     />
@@ -8353,7 +8353,7 @@ const OnboardingFlow = ({ user, onComplete, onLogout }) => {
                 <rect x="3" y="3" width="18" height="18" rx="2"/>
               </svg>
             </div>
-            <span style={{ fontWeight: '600', color: '#1c1917' }}>AngelFlow</span>
+            <span style={{ fontWeight: '600', color: '#1c1917' }}>Convex</span>
           </div>
           <button 
             onClick={onLogout}
@@ -8375,7 +8375,7 @@ const OnboardingFlow = ({ user, onComplete, onLogout }) => {
             Welcome{user?.name ? `, ${user.name.split(' ')[0]}` : ''}!
           </h1>
           <p style={{ fontSize: '16px', color: '#78716c', marginBottom: '32px', maxWidth: '400px' }}>
-            Let's set up AngelFlow to match how you invest. This takes about 2 minutes.
+            Let's set up Convex to match how you invest. This takes about 2 minutes.
           </p>
           
           <button
@@ -8469,7 +8469,7 @@ const OnboardingFlow = ({ user, onComplete, onLogout }) => {
         {/* Content */}
         <div style={{ flex: 1, padding: '24px', maxWidth: '500px', margin: '0 auto' }}>
           <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-            <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#1c1917', marginBottom: '8px' }}>How AngelFlow Works</h1>
+            <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#1c1917', marginBottom: '8px' }}>How Convex Works</h1>
             <p style={{ color: '#78716c', fontSize: '14px' }}>A simple loop you'll repeat over time</p>
           </div>
           
@@ -8682,7 +8682,7 @@ const OnboardingFlow = ({ user, onComplete, onLogout }) => {
                 You're all set!
               </h2>
               <p style={{ color: '#78716c', marginBottom: '32px' }}>
-                AngelFlow is configured for your investing style.
+                Convex is configured for your investing style.
               </p>
               
               <button
@@ -8698,7 +8698,7 @@ const OnboardingFlow = ({ user, onComplete, onLogout }) => {
                   cursor: 'pointer'
                 }}
               >
-                Start Using AngelFlow
+                Start Using Convex
               </button>
             </div>
           )}
@@ -8729,7 +8729,7 @@ const SimpleLoginPage = ({ onLogin }) => {
               <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
             </svg>
           </div>
-          <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#1c1917', marginBottom: '8px' }}>AngelFlow</h1>
+          <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#1c1917', marginBottom: '8px' }}>Convex</h1>
           <p style={{ color: '#78716c' }}>Track your angel investments with clarity</p>
         </div>
         
