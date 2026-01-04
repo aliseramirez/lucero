@@ -5640,9 +5640,15 @@ const ScreeningView = ({ deal, onUpdate, onTransition, setToast }) => {
                 </button>
                 <button
                   onClick={() => {
+                    // Save pass reason in the correct format for PassedView
+                    const passData = {
+                      reasons: passReason ? [passReason] : [],
+                      whyPass: passReason,
+                      passedAt: new Date().toISOString()
+                    };
                     onUpdate({ 
                       ...deal, 
-                      passReason,
+                      passed: passData,
                       workingNotes: entries 
                     });
                     onTransition('passed');
@@ -5876,6 +5882,8 @@ const DeferredView = ({ deal, onUpdate, onTransition }) => {
   const [revisitCriteria, setRevisitCriteria] = useState(deal.watching?.trigger || '');
   const [isMonitoring, setIsMonitoring] = useState(deal.tracked !== false);
   const [showFullNotes, setShowFullNotes] = useState(false);
+  const [showPassModal, setShowPassModal] = useState(false);
+  const [passReason, setPassReason] = useState('');
   
   // Get deferred date
   const deferredDate = deal.statusEnteredAt || deal.deferData?.deferredAt;
@@ -6073,7 +6081,7 @@ const DeferredView = ({ deal, onUpdate, onTransition }) => {
 
       {/* Close for now */}
       <button 
-        onClick={() => onTransition('passed')}
+        onClick={() => setShowPassModal(true)}
         className="w-full bg-white dark:bg-stone-800 rounded-2xl border border-stone-200 dark:border-stone-700 p-5 hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors text-center"
       >
         <div className="flex items-center justify-center gap-2 text-stone-500 dark:text-stone-400">
@@ -6083,9 +6091,85 @@ const DeferredView = ({ deal, onUpdate, onTransition }) => {
           <span className="font-semibold">Close for now</span>
         </div>
         <p className="text-sm text-stone-400 dark:text-stone-500 mt-1">
-          You can continue tracking and revisit later.
+          Record why you're passing on this opportunity.
         </p>
       </button>
+      
+      {/* Pass Modal */}
+      {showPassModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-stone-800 rounded-2xl max-w-md w-full shadow-xl">
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="15" y1="9" x2="9" y2="15"/>
+                    <line x1="9" y1="9" x2="15" y2="15"/>
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-lg font-semibold text-stone-900 dark:text-white">Pass on {deal.companyName}</h3>
+                  <p className="text-sm text-stone-500">Capture your reasoning</p>
+                </div>
+              </div>
+
+              {/* Pass reason buttons */}
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">
+                  Main reason for passing
+                </label>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  {['Not thesis fit', 'Team concerns', 'Market too small', 'Too early', 'Valuation too high', 'Competitive concerns'].map(reason => (
+                    <button
+                      key={reason}
+                      onClick={() => setPassReason(reason)}
+                      className={`px-3 py-2 rounded-lg text-sm text-left transition-colors ${
+                        passReason === reason 
+                          ? 'bg-red-100 text-red-700 border border-red-300' 
+                          : 'bg-stone-50 text-stone-600 border border-stone-200 hover:border-stone-300'
+                      }`}
+                    >
+                      {reason}
+                    </button>
+                  ))}
+                </div>
+                <textarea
+                  value={passReason}
+                  onChange={(e) => setPassReason(e.target.value)}
+                  placeholder="Add any additional notes..."
+                  className="w-full bg-stone-50 dark:bg-stone-700/50 rounded-xl p-4 text-stone-800 dark:text-stone-200 placeholder-stone-400 text-sm focus:outline-none focus:ring-2 focus:ring-red-300 min-h-[60px] resize-none border border-stone-200 dark:border-stone-600"
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-stone-100 dark:border-stone-700">
+                <button
+                  onClick={() => { setShowPassModal(false); setPassReason(''); }}
+                  className="px-5 py-2.5 rounded-lg text-sm font-medium text-stone-600 hover:bg-stone-100 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    const passData = {
+                      reasons: passReason ? [passReason] : [],
+                      whyPass: passReason,
+                      passedAt: new Date().toISOString()
+                    };
+                    onUpdate({ ...deal, passed: passData });
+                    onTransition('passed');
+                    setShowPassModal(false);
+                  }}
+                  className="px-5 py-2.5 rounded-lg text-sm font-medium text-white bg-red-600 hover:bg-red-700 transition-colors"
+                >
+                  Confirm Pass
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -6256,34 +6340,250 @@ const InvestedView = ({ deal, onUpdate, onTransition, setToast }) => {
 // Monitoring View
 // Passed View
 const PassedView = ({ deal, onUpdate, onTransition }) => {
-  const p = deal.passed || { reasons: [], notes: '' };
+  const [keyLearning, setKeyLearning] = useState(deal.passed?.keyLearning || '');
+  const [isEditingLearning, setIsEditingLearning] = useState(false);
+  const [showNotes, setShowNotes] = useState(false);
+  
+  // Handle both old format (passReason on deal) and new format (passed object)
+  const p = deal.passed || {};
+  const reasons = p.reasons || (deal.passReason ? [deal.passReason] : []);
+  const passedAt = p.passedAt || deal.statusEnteredAt;
+  const passedDaysAgo = passedAt ? Math.floor((Date.now() - new Date(passedAt).getTime()) / 86400000) : null;
+  
+  // Get founder info
+  const founderName = deal.founders?.[0]?.name || '';
+  
+  // Save key learning
+  const saveKeyLearning = () => {
+    onUpdate({
+      ...deal,
+      passed: { ...deal.passed, keyLearning }
+    });
+    setIsEditingLearning(false);
+  };
   
   return (
-    <div className="space-y-4">
-      <div className="bg-stone-100 border border-stone-300 rounded-xl p-4">
-        <p className="text-stone-600 font-medium text-center">{STATUS_CONFIG['passed'].question}</p>
+    <div className="space-y-5">
+      {/* Company Header */}
+      <div className="bg-white dark:bg-stone-800 rounded-2xl p-5">
+        <div className="flex items-start gap-4">
+          <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-stone-300 to-stone-400 flex items-center justify-center text-white font-bold text-lg">
+            {deal.companyName?.slice(0, 2).toUpperCase()}
+          </div>
+          <div className="flex-1">
+            <h2 className="text-xl font-semibold text-stone-900 dark:text-white">{deal.companyName}</h2>
+            <p className="text-stone-500 dark:text-stone-400">{deal.industry} · {deal.stage}</p>
+            {founderName && <p className="text-sm text-stone-400 mt-1">{founderName}</p>}
+          </div>
+          <div className="text-right">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-300 rounded-lg text-sm font-medium">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+              </svg>
+              Passed
+            </span>
+            {passedDaysAgo !== null && (
+              <p className="text-xs text-stone-400 mt-1">{passedDaysAgo === 0 ? 'Today' : `${passedDaysAgo}d ago`}</p>
+            )}
+          </div>
+        </div>
       </div>
 
-      <Card>
-        <h3 className="text-sm font-medium text-stone-900 mb-3">Pass Reasons</h3>
-        <div className="flex flex-wrap gap-2">
-          {p.reasons?.map((r, i) => <span key={i} className="px-3 py-1 bg-red-50 text-red-700 rounded-full text-sm">{r}</span>)}
+      {/* Why You Passed - Primary Focus */}
+      <div className="bg-white dark:bg-stone-800 rounded-2xl p-5 border-l-4 border-red-400">
+        <div className="flex items-start gap-3 mb-4">
+          <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2">
+              <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
+            </svg>
+          </div>
+          <div>
+            <h3 className="font-semibold text-stone-900 dark:text-white">Why you passed</h3>
+            <p className="text-sm text-stone-500 dark:text-stone-400">Your reasoning at the time</p>
+          </div>
         </div>
-      </Card>
+        
+        {reasons.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {reasons.map((r, i) => (
+              <span key={i} className="px-4 py-2 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-xl text-sm font-medium">
+                {r}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <p className="text-stone-400 italic">No reason recorded</p>
+        )}
+      </div>
 
-      {p.notes && (
-        <Card>
-          <h3 className="text-sm font-medium text-stone-900 mb-2">Notes</h3>
-          <p className="text-sm text-stone-600">{p.notes}</p>
-        </Card>
+      {/* Key Learning - Editable */}
+      <div className="bg-white dark:bg-stone-800 rounded-2xl p-5">
+        <div className="flex items-start justify-between mb-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+              </svg>
+            </div>
+            <div>
+              <h3 className="font-semibold text-stone-900 dark:text-white">Key learning</h3>
+              <p className="text-sm text-stone-500 dark:text-stone-400">What did this teach you?</p>
+            </div>
+          </div>
+          {!isEditingLearning && (
+            <button 
+              onClick={() => setIsEditingLearning(true)}
+              className="p-2 text-stone-400 hover:text-stone-600 hover:bg-stone-100 dark:hover:bg-stone-700 rounded-lg transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+            </button>
+          )}
+        </div>
+        
+        {isEditingLearning ? (
+          <div className="space-y-3">
+            <textarea
+              value={keyLearning}
+              onChange={(e) => setKeyLearning(e.target.value)}
+              placeholder="e.g., 'I tend to overvalue market size claims without proof points' or 'Team chemistry matters more than individual pedigree'"
+              className="w-full bg-stone-50 dark:bg-stone-700/50 rounded-xl p-4 text-stone-800 dark:text-stone-200 placeholder-stone-400 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 min-h-[100px] resize-none border border-stone-200 dark:border-stone-600"
+            />
+            <div className="flex justify-end gap-2">
+              <button 
+                onClick={() => { setKeyLearning(deal.passed?.keyLearning || ''); setIsEditingLearning(false); }}
+                className="px-4 py-2 text-sm text-stone-600 hover:bg-stone-100 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={saveKeyLearning}
+                className="px-4 py-2 text-sm font-medium text-white bg-amber-500 hover:bg-amber-600 rounded-lg transition-colors"
+              >
+                Save Learning
+              </button>
+            </div>
+          </div>
+        ) : keyLearning ? (
+          <p className="text-stone-700 dark:text-stone-300 bg-amber-50 dark:bg-amber-900/20 rounded-xl p-4 italic">"{keyLearning}"</p>
+        ) : (
+          <button 
+            onClick={() => setIsEditingLearning(true)}
+            className="w-full p-4 border-2 border-dashed border-stone-200 dark:border-stone-600 rounded-xl text-stone-400 hover:border-amber-300 hover:text-amber-600 transition-colors text-sm"
+          >
+            + Add a learning to reference for future deals
+          </button>
+        )}
+      </div>
+
+      {/* Deal Snapshot - Compact */}
+      <div className="bg-white dark:bg-stone-800 rounded-2xl p-5">
+        <h3 className="text-xs font-medium text-stone-400 uppercase tracking-wide mb-4">Deal snapshot</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-stone-100 dark:bg-stone-700 flex items-center justify-center">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2">
+                <circle cx="12" cy="5" r="3"/><line x1="12" y1="22" x2="12" y2="8"/><path d="M5 12H2a10 10 0 0 0 20 0h-3"/>
+              </svg>
+            </div>
+            <div>
+              <p className="text-xs text-stone-400">Sector</p>
+              <p className="text-sm font-medium text-stone-700 dark:text-stone-300">{deal.industry || '—'}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-stone-100 dark:bg-stone-700 flex items-center justify-center">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2">
+                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
+              </svg>
+            </div>
+            <div>
+              <p className="text-xs text-stone-400">Stage</p>
+              <p className="text-sm font-medium text-stone-700 dark:text-stone-300">{deal.stage || '—'}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-stone-100 dark:bg-stone-700 flex items-center justify-center">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2">
+                <line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+              </svg>
+            </div>
+            <div>
+              <p className="text-xs text-stone-400">Ask</p>
+              <p className="text-sm font-medium text-stone-700 dark:text-stone-300">
+                {deal.dealTerms?.raising ? `$${(deal.dealTerms.raising / 1000000).toFixed(1)}M` : '—'}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-stone-100 dark:bg-stone-700 flex items-center justify-center">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+              </svg>
+            </div>
+            <div>
+              <p className="text-xs text-stone-400">Passed on</p>
+              <p className="text-sm font-medium text-stone-700 dark:text-stone-300">
+                {passedAt ? new Date(passedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Screening Notes - Collapsible */}
+      {(deal.workingNotes?.length > 0 || deal.notes?.length > 0) && (
+        <div className="bg-white dark:bg-stone-800 rounded-2xl overflow-hidden">
+          <button 
+            onClick={() => setShowNotes(!showNotes)}
+            className="w-full px-5 py-4 flex items-center justify-between hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+              </svg>
+              <span className="text-sm font-medium text-stone-700 dark:text-stone-300">Screening notes</span>
+              <span className="text-xs text-stone-400">({deal.workingNotes?.length || deal.notes?.length || 0} entries)</span>
+            </div>
+            <svg 
+              width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a8a29e" strokeWidth="2"
+              className={`transition-transform ${showNotes ? 'rotate-180' : ''}`}
+            >
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+          
+          {showNotes && (
+            <div className="px-5 pb-5 pt-0 border-t border-stone-100 dark:border-stone-700">
+              <div className="space-y-3 mt-4 max-h-64 overflow-y-auto">
+                {(deal.workingNotes || deal.notes?.map((n, i) => ({ id: i, content: n, type: 'user' })) || []).map((note, i) => (
+                  <div key={note.id || i} className="text-sm text-stone-600 dark:text-stone-400 bg-stone-50 dark:bg-stone-700/50 rounded-lg p-3">
+                    {note.content || note}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
-      <Card>
-        <TimeStamp label="Passed on" date={p.passedAt} />
-      </Card>
-
-      <div className="pt-2">
-        <ActionButton variant="ghost" onClick={() => onTransition('screening')} className="w-full">Reactivate as Screening</ActionButton>
+      {/* Actions */}
+      <div className="pt-2 space-y-3">
+        <button
+          onClick={() => onTransition('screening')}
+          className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 rounded-xl font-medium hover:bg-stone-800 dark:hover:bg-stone-200 transition-colors"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+          </svg>
+          Reactivate as Screening
+        </button>
+        
+        <p className="text-xs text-stone-400 text-center">
+          Changed your mind? Bring this deal back into your active pipeline.
+        </p>
       </div>
     </div>
   );
@@ -7073,6 +7373,7 @@ function ConvexApp({ userMenu, syncStatus }) {
     if (activeTab === 'active') base = activeDeals;
     else if (activeTab === 'deferred') base = deferredDeals;
     else if (activeTab === 'portfolio') base = portfolioDeals;
+    else if (activeTab === 'passed') base = passedDeals;
     
     if (search) base = base.filter(d => d.companyName.toLowerCase().includes(search.toLowerCase()));
     
@@ -7083,6 +7384,14 @@ function ConvexApp({ userMenu, syncStatus }) {
       } else if (activeTab === 'portfolio') {
         if (filter === 'invested') base = base.filter(d => !d.needsAttention);
         if (filter === 'needsAttention') base = base.filter(d => d.needsAttention);
+      } else if (activeTab === 'passed') {
+        // Filter by pass reason
+        if (filter !== 'all') {
+          base = base.filter(d => {
+            const reasons = d.passed?.reasons || (d.passReason ? [d.passReason] : []);
+            return reasons.some(r => r.toLowerCase().includes(filter.toLowerCase()));
+          });
+        }
       }
     }
     
@@ -7665,6 +7974,27 @@ function ConvexApp({ userMenu, syncStatus }) {
       { key: 'invested', label: 'Invested', count: portfolioDeals.filter(d => !d.needsAttention).length, color: '#10b981' },
       { key: 'needsAttention', label: 'Needs Attention', count: portfolioDeals.filter(d => d.needsAttention).length, color: '#ef4444' },
     ];
+    if (activeTab === 'passed') {
+      // Get unique pass reasons for filters
+      const allReasons = passedDeals.flatMap(d => d.passed?.reasons || (d.passReason ? [d.passReason] : []));
+      const reasonCounts = allReasons.reduce((acc, r) => {
+        acc[r] = (acc[r] || 0) + 1;
+        return acc;
+      }, {});
+      const topReasons = Object.entries(reasonCounts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4);
+      
+      return [
+        { key: 'all', label: 'All', count: passedDeals.length },
+        ...topReasons.map(([reason, count]) => ({
+          key: reason.toLowerCase(),
+          label: reason,
+          count,
+          color: '#dc2626'
+        }))
+      ];
+    }
     return [];
   };
 
@@ -7674,6 +8004,7 @@ function ConvexApp({ userMenu, syncStatus }) {
     if (activeTab === 'active') return { title: 'No leads yet', subtitle: 'Add a company to start evaluating. Take your time.' };
     if (activeTab === 'deferred') return { title: 'Nothing paused', subtitle: 'Deals you defer will rest here quietly.' };
     if (activeTab === 'portfolio') return { title: 'No investments yet', subtitle: 'When you invest, your portfolio builds here.' };
+    if (activeTab === 'passed') return { title: 'No passed deals', subtitle: 'Deals you pass on will be archived here for reference.' };
     return { title: 'No deals', subtitle: '' };
   };
 
@@ -7684,6 +8015,7 @@ function ConvexApp({ userMenu, syncStatus }) {
     if (activeTab === 'active') return 'Companies you\'re evaluating';
     if (activeTab === 'deferred') return 'Deferred doesn\'t mean no. It means not yet.';
     if (activeTab === 'portfolio') return 'Decisions you stand behind';
+    if (activeTab === 'passed') return 'Learning from the deals you declined';
     return '';
   };
 
@@ -7768,6 +8100,15 @@ function ConvexApp({ userMenu, syncStatus }) {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
               Portfolio
               <span className="px-1.5 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: activeTab === 'portfolio' ? '#5B6DC4' : '#e7e5e4', color: activeTab === 'portfolio' ? 'white' : '#78716c' }}>{tabCounts.portfolio}</span>
+            </button>
+            <button 
+              onClick={() => { setActiveTab('passed'); setFilter('all'); }}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${activeTab === 'passed' ? 'bg-stone-100 dark:bg-stone-700 border border-stone-200 dark:border-stone-600' : 'hover:bg-stone-50 dark:hover:bg-stone-700/50'}`}
+              style={{ color: activeTab === 'passed' ? '#1c1917' : '#78716c' }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+              Passed
+              <span className="px-1.5 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: activeTab === 'passed' ? '#5B6DC4' : '#e7e5e4', color: activeTab === 'passed' ? 'white' : '#78716c' }}>{tabCounts.passed}</span>
             </button>
           </div>
         </div>
@@ -7913,12 +8254,56 @@ function ConvexApp({ userMenu, syncStatus }) {
           );
         })()}
 
+        {/* PASSED TAB - Learning summary */}
+        {activeTab === 'passed' && passedDeals.length > 0 && (() => {
+          // Group pass reasons
+          const allReasons = passedDeals.flatMap(d => d.passed?.reasons || (d.passReason ? [d.passReason] : []));
+          const reasonCounts = allReasons.reduce((acc, r) => {
+            acc[r] = (acc[r] || 0) + 1;
+            return acc;
+          }, {});
+          const topReasons = Object.entries(reasonCounts).sort((a, b) => b[1] - a[1]).slice(0, 3);
+          
+          return (
+            <div className="mb-6 bg-white dark:bg-stone-800 rounded-2xl p-6 border border-stone-200 dark:border-stone-700">
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <h2 className="text-base font-medium text-stone-900 dark:text-stone-100">Passed deals</h2>
+                  <p className="text-sm text-stone-400 mt-0.5">
+                    {passedDeals.length} {passedDeals.length === 1 ? 'company' : 'companies'} you've passed on
+                  </p>
+                </div>
+                <div className="text-right">
+                  <div className="text-xl font-semibold text-stone-900 dark:text-stone-100">{passedDeals.length}</div>
+                  <p className="text-xs text-stone-400">total passes</p>
+                </div>
+              </div>
+
+              {/* Reason breakdown */}
+              {topReasons.length > 0 && (
+                <div className="pt-4 border-t border-stone-100 dark:border-stone-700">
+                  <p className="text-xs text-stone-400 uppercase tracking-wide mb-3">Common reasons</p>
+                  <div className="flex flex-wrap gap-2">
+                    {topReasons.map(([reason, count]) => (
+                      <span key={reason} className="px-3 py-1.5 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-lg text-sm flex items-center gap-2">
+                        {reason}
+                        <span className="text-red-400 dark:text-red-500 text-xs">({count})</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {/* Subtitle + Portfolio Monitor button */}
         <div className="flex items-center justify-between mb-4">
           <p className="text-sm text-stone-500 dark:text-stone-400">
             {activeTab === 'active' ? 'Companies you\'re evaluating' : 
              activeTab === 'deferred' ? '' : 
-             activeTab === 'portfolio' ? 'Companies' : ''}
+             activeTab === 'portfolio' ? 'Companies' :
+             activeTab === 'passed' ? 'Review your decisions and learn from patterns' : ''}
           </p>
           {activeTab === 'portfolio' && portfolioDeals.length > 0 && (
             <button
@@ -8054,6 +8439,9 @@ function ConvexApp({ userMenu, syncStatus }) {
                     ? { bg: 'rgba(239, 68, 68, 0.1)', color: '#dc2626', border: 'rgba(239, 68, 68, 0.3)', label: 'Needs Attention' }
                     : { bg: 'rgba(16, 185, 129, 0.1)', color: '#059669', border: 'rgba(16, 185, 129, 0.3)', label: 'Invested' };
                 }
+                if (deal.status === 'passed') {
+                  return { bg: 'rgba(120, 113, 108, 0.1)', color: '#78716c', border: 'rgba(120, 113, 108, 0.3)', label: 'Passed' };
+                }
                 return { bg: '#f5f5f4', color: '#78716c', border: '#e7e5e4', label: deal.status };
               };
 
@@ -8074,6 +8462,16 @@ function ConvexApp({ userMenu, syncStatus }) {
                     text: `${deal.portfolioMetrics.mrrChange} MRR`, 
                     color: isPositive ? '#059669' : '#dc2626',
                     suffix: `${deal.portfolioMetrics.monthsInvested}mo`
+                  };
+                }
+                if (activeTab === 'passed') {
+                  const passReason = deal.passed?.reasons?.[0] || deal.passReason || 'No reason';
+                  const passedAt = deal.passed?.passedAt || deal.statusEnteredAt;
+                  const daysAgoVal = passedAt ? Math.floor((Date.now() - new Date(passedAt).getTime()) / 86400000) : null;
+                  return { 
+                    text: passReason, 
+                    color: '#dc2626',
+                    suffix: daysAgoVal !== null ? `${daysAgoVal}d ago` : ''
                   };
                 }
                 return null;
@@ -8260,6 +8658,14 @@ function ConvexApp({ userMenu, syncStatus }) {
                           <p className="text-sm text-stone-600 dark:text-stone-300 line-clamp-2">"{deal.investment.whyYes}"</p>
                         </div>
                       )}
+                      
+                      {/* Passed: Show why you passed */}
+                      {activeTab === 'passed' && (deal.passed?.reasons?.[0] || deal.passReason) && (
+                        <div className="mt-3 p-3 bg-red-50 dark:bg-red-900/20 rounded-xl">
+                          <p className="text-xs text-red-400 dark:text-red-400 uppercase tracking-wide mb-1">Why you passed</p>
+                          <p className="text-sm text-red-600 dark:text-red-300 line-clamp-2">"{deal.passed?.reasons?.[0] || deal.passReason}"</p>
+                        </div>
+                      )}
                     </div>
                   
                     {/* Right side - Badge and Info */}
@@ -8284,6 +8690,17 @@ function ConvexApp({ userMenu, syncStatus }) {
                           {deal.investment?.date && (
                             <span className="text-xs text-stone-400 dark:text-stone-500">
                               {formatRelativeTime(deal.investment.date)}
+                            </span>
+                          )}
+                        </>
+                      ) : activeTab === 'passed' ? (
+                        <>
+                          <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400">
+                            Passed
+                          </span>
+                          {(deal.passed?.passedAt || deal.statusEnteredAt) && (
+                            <span className="text-xs text-stone-400 dark:text-stone-500">
+                              {formatRelativeTime(deal.passed?.passedAt || deal.statusEnteredAt)}
                             </span>
                           )}
                         </>
