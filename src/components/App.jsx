@@ -5056,6 +5056,44 @@ const ScreeningView = ({ deal, onUpdate, onTransition, setToast }) => {
 
         {/* Input area */}
         <div className="p-4 border-t border-stone-100 dark:border-stone-700">
+          {/* Recording waveform overlay */}
+          {isRecording && (
+            <div className="mb-3 bg-red-50 dark:bg-red-900/20 rounded-xl p-4 border border-red-200 dark:border-red-800">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse" />
+                  <span className="text-sm font-medium text-red-600 dark:text-red-400">Recording...</span>
+                </div>
+                {/* Waveform visualization */}
+                <div className="flex items-center gap-0.5 h-6">
+                  {[...Array(12)].map((_, i) => (
+                    <div 
+                      key={i}
+                      className="w-1 bg-red-400 dark:bg-red-500 rounded-full"
+                      style={{
+                        height: `${Math.random() * 100}%`,
+                        minHeight: '4px',
+                        animation: `waveform 0.5s ease-in-out ${i * 0.05}s infinite alternate`
+                      }}
+                    />
+                  ))}
+                </div>
+                <button
+                  onClick={toggleRecording}
+                  className="px-3 py-1.5 bg-red-500 text-white text-sm font-medium rounded-lg hover:bg-red-600 transition-colors"
+                >
+                  Stop
+                </button>
+              </div>
+              <style>{`
+                @keyframes waveform {
+                  0% { height: 20%; }
+                  100% { height: 80%; }
+                }
+              `}</style>
+            </div>
+          )}
+          
           <div className="flex gap-2">
             <div className="flex-1 relative">
               <textarea
@@ -5067,14 +5105,16 @@ const ScreeningView = ({ deal, onUpdate, onTransition, setToast }) => {
                     addNote();
                   }
                 }}
-                placeholder="Type a thought, question, or concern..."
-                className="w-full bg-stone-50 dark:bg-stone-700/50 rounded-xl px-4 py-3 pr-24 text-stone-800 dark:text-stone-200 placeholder-stone-400 text-sm focus:outline-none focus:ring-2 focus:ring-[#5B6DC4]/30 resize-none"
+                placeholder={isRecording ? "Recording voice note..." : "Type a thought, question, or concern..."}
+                disabled={isRecording}
+                className={`w-full bg-stone-50 dark:bg-stone-700/50 rounded-xl px-4 py-3 pr-24 text-stone-800 dark:text-stone-200 placeholder-stone-400 text-sm focus:outline-none focus:ring-2 focus:ring-[#5B6DC4]/30 resize-none ${isRecording ? 'opacity-50' : ''}`}
                 rows={2}
               />
               <div className="absolute right-2 bottom-2 flex items-center gap-1">
                 <button 
                   onClick={handleAttachment}
-                  className="p-2 text-stone-400 hover:text-stone-600 transition-colors"
+                  disabled={isRecording}
+                  className={`p-2 transition-colors ${isRecording ? 'text-stone-300 cursor-not-allowed' : 'text-stone-400 hover:text-stone-600'}`}
                   title="Attach file"
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -5084,7 +5124,7 @@ const ScreeningView = ({ deal, onUpdate, onTransition, setToast }) => {
                 <button 
                   onClick={toggleRecording}
                   className={`p-2 transition-colors ${isRecording ? 'text-red-500 animate-pulse' : 'text-stone-400 hover:text-stone-600'}`}
-                  title="Voice note"
+                  title={isRecording ? "Stop recording" : "Voice note"}
                 >
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
@@ -5094,7 +5134,7 @@ const ScreeningView = ({ deal, onUpdate, onTransition, setToast }) => {
             </div>
             <button
               onClick={addNote}
-              disabled={!newNote.trim()}
+              disabled={!newNote.trim() || isRecording}
               className="px-4 py-2 rounded-xl text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-all"
               style={{ backgroundColor: '#5B6DC4' }}
             >
@@ -6254,6 +6294,10 @@ const PassedView = ({ deal, onUpdate, onTransition }) => {
 const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) => {
   const [selectedFilter, setSelectedFilter] = useState(selectedDeal?.id || 'all');
   const [expandedTimeline, setExpandedTimeline] = useState({});
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState(null);
+  const [shareModalSignal, setShareModalSignal] = useState(null);
+  const [copiedLink, setCopiedLink] = useState(false);
   
   // Get only invested companies
   const portfolioDeals = deals.filter(d => d.status === 'invested').sort((a, b) => 
@@ -6535,9 +6579,31 @@ const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) 
               <div className="h-6 w-px bg-stone-200 dark:bg-stone-700"/>
               <h1 className="text-lg font-semibold text-stone-900 dark:text-white">Portfolio Context</h1>
             </div>
-            <span className="text-xs text-stone-400">{portfolioDeals.length} companies</span>
+            <div className="flex items-center gap-3">
+              <button 
+                onClick={() => {
+                  // Simulate refresh - in production this would fetch new signals
+                  setIsRefreshing(true);
+                  setTimeout(() => {
+                    setIsRefreshing(false);
+                    setLastRefreshed(new Date());
+                  }, 2000);
+                }}
+                disabled={isRefreshing}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors disabled:opacity-50"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={isRefreshing ? 'animate-spin' : ''}>
+                  <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                </svg>
+                {isRefreshing ? 'Checking...' : 'Pull Updates'}
+              </button>
+              <span className="text-xs text-stone-400">{portfolioDeals.length} companies</span>
+            </div>
           </div>
-          <p className="text-sm text-stone-500 mt-1">Signals and interpretation · not predictions</p>
+          <p className="text-sm text-stone-500 mt-1">
+            Signals and interpretation · not predictions
+            {lastRefreshed && <span className="ml-2 text-stone-400">· Last checked {formatRelativeDate(lastRefreshed)}</span>}
+          </p>
         </div>
       </header>
       
@@ -6729,9 +6795,7 @@ const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) 
               <div>
                 <h2 className="font-semibold text-stone-900 dark:text-white flex items-center gap-2">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2">
-                    <circle cx="12" cy="12" r="10"/>
-                    <line x1="12" y1="16" x2="12" y2="12"/>
-                    <line x1="12" y1="8" x2="12.01" y2="8"/>
+                    <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
                   </svg>
                   Observable Signals
                 </h2>
@@ -6812,21 +6876,36 @@ const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) 
                         {/* Description */}
                         <p className="text-sm text-stone-500 dark:text-stone-400 mb-2">{activity.description}</p>
                         
-                        {/* Source */}
-                        <a 
-                          href={activity.sourceUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 text-xs text-stone-400 hover:text-[#5B6DC4] transition-colors"
-                        >
-                          {getSourceIcon(activity.source)}
-                          {activity.source}
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                            <polyline points="15 3 21 3 21 9"/>
-                            <line x1="10" y1="14" x2="21" y2="3"/>
-                          </svg>
-                        </a>
+                        {/* Source + Share */}
+                        <div className="flex items-center justify-between">
+                          <a 
+                            href={activity.sourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1.5 text-xs text-stone-400 hover:text-[#5B6DC4] transition-colors"
+                          >
+                            {getSourceIcon(activity.source)}
+                            {activity.source}
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                              <polyline points="15 3 21 3 21 9"/>
+                              <line x1="10" y1="14" x2="21" y2="3"/>
+                            </svg>
+                          </a>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShareModalSignal(activity);
+                            }}
+                            className="flex items-center gap-1.5 text-xs text-stone-400 hover:text-[#5B6DC4] transition-colors px-2 py-1 rounded hover:bg-stone-100 dark:hover:bg-stone-700"
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+                            </svg>
+                            Share
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -6836,6 +6915,83 @@ const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) 
           </div>
         </div>
       </div>
+      
+      {/* Share Signal Modal */}
+      {shareModalSignal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShareModalSignal(null)}>
+          <div className="bg-white dark:bg-stone-800 rounded-2xl shadow-xl max-w-md w-full" onClick={e => e.stopPropagation()}>
+            <div className="p-6 border-b border-stone-200 dark:border-stone-700">
+              <h2 className="text-lg font-semibold text-stone-900 dark:text-white">Share Signal</h2>
+              <p className="text-sm text-stone-500 mt-1">Share this update with co-investors or advisors</p>
+            </div>
+            
+            <div className="p-6">
+              {/* Signal Preview */}
+              <div className="bg-stone-50 dark:bg-stone-700/50 rounded-xl p-4 mb-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-xs font-medium text-stone-600 dark:text-stone-300">{shareModalSignal.companyName}</span>
+                  <span className="text-xs text-stone-400">·</span>
+                  <span className="text-xs text-stone-400">{shareModalSignal.type}</span>
+                </div>
+                <p className="font-medium text-stone-900 dark:text-white text-sm">{shareModalSignal.title}</p>
+                <p className="text-xs text-stone-500 mt-1">{shareModalSignal.description}</p>
+              </div>
+              
+              {/* Share Options */}
+              <div className="space-y-3">
+                <button
+                  onClick={() => {
+                    const text = `${shareModalSignal.companyName} update: ${shareModalSignal.title}\n\n${shareModalSignal.description}\n\nSource: ${shareModalSignal.source}`;
+                    navigator.clipboard.writeText(text);
+                    setCopiedLink(true);
+                    setTimeout(() => setCopiedLink(false), 2000);
+                  }}
+                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors"
+                >
+                  <div className="w-10 h-10 rounded-full bg-stone-200 dark:bg-stone-600 flex items-center justify-center">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2">
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                    </svg>
+                  </div>
+                  <div className="flex-1 text-left">
+                    <p className="font-medium text-stone-900 dark:text-white text-sm">{copiedLink ? 'Copied!' : 'Copy to Clipboard'}</p>
+                    <p className="text-xs text-stone-500">Share via email, Slack, or text</p>
+                  </div>
+                </button>
+                
+                <button
+                  onClick={() => {
+                    const text = encodeURIComponent(`${shareModalSignal.companyName}: ${shareModalSignal.title}`);
+                    const url = encodeURIComponent(shareModalSignal.sourceUrl || '');
+                    window.open(`mailto:?subject=${text}&body=${encodeURIComponent(shareModalSignal.description)}%0A%0ASource: ${url}`, '_blank');
+                  }}
+                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors"
+                >
+                  <div className="w-10 h-10 rounded-full bg-stone-200 dark:bg-stone-600 flex items-center justify-center">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2">
+                      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                      <polyline points="22,6 12,13 2,6"/>
+                    </svg>
+                  </div>
+                  <div className="flex-1 text-left">
+                    <p className="font-medium text-stone-900 dark:text-white text-sm">Email</p>
+                    <p className="text-xs text-stone-500">Open in your email client</p>
+                  </div>
+                </button>
+              </div>
+            </div>
+            
+            <div className="p-4 border-t border-stone-200 dark:border-stone-700 flex justify-end">
+              <button
+                onClick={() => setShareModalSignal(null)}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-700 transition-colors"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -6849,7 +7005,8 @@ function ConvexApp({ userMenu, syncStatus }) {
   const [toast, setToast] = useState(null);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
-  const [sortBy, setSortBy] = useState('newest'); // 'newest' | 'oldest' | 'alphabetical'
+  const [sortBy, setSortBy] = useState('newest'); // 'newest' | 'oldest' | 'alphabetical' | 'loi' | 'industry' | 'stage' | 'source'
+  const [showSortDropdown, setShowSortDropdown] = useState(false);
   const [userPrefs, setUserPrefs] = useState(null);
   const [showAddPortfolio, setShowAddPortfolio] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -6939,6 +7096,24 @@ function ConvexApp({ userMenu, syncStatus }) {
       }
       if (sortBy === 'alphabetical') {
         return a.companyName.localeCompare(b.companyName);
+      }
+      if (sortBy === 'loi') {
+        // Sort by LOI deadline, soonest first, nulls at end
+        const aLoi = a.loiDue ? new Date(a.loiDue).getTime() : Infinity;
+        const bLoi = b.loiDue ? new Date(b.loiDue).getTime() : Infinity;
+        return aLoi - bLoi;
+      }
+      if (sortBy === 'industry') {
+        return (a.industry || 'zzz').localeCompare(b.industry || 'zzz');
+      }
+      if (sortBy === 'stage') {
+        const stageOrder = { 'pre-seed': 1, 'seed': 2, 'series-a': 3, 'series-b': 4, 'series-c': 5, 'growth': 6 };
+        return (stageOrder[a.stage] || 99) - (stageOrder[b.stage] || 99);
+      }
+      if (sortBy === 'source') {
+        const aSource = a.source?.channel || a.investment?.source || 'zzz';
+        const bSource = b.source?.channel || b.investment?.source || 'zzz';
+        return aSource.localeCompare(bSource);
       }
       return 0;
     });
@@ -7773,6 +7948,56 @@ function ConvexApp({ userMenu, syncStatus }) {
                 className="w-full bg-transparent py-2 pl-10 pr-4 text-sm text-stone-900 dark:text-stone-100 placeholder-stone-400 focus:outline-none" 
               />
             </div>
+            
+            {/* Sort dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setShowSortDropdown(!showSortDropdown)}
+                className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-700 transition-colors"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="16" y2="12"/><line x1="4" y1="18" x2="12" y2="18"/>
+                </svg>
+                Sort: {sortBy === 'newest' ? 'Newest' : sortBy === 'oldest' ? 'Oldest' : sortBy === 'alphabetical' ? 'A-Z' : sortBy === 'loi' ? 'LOI Due' : sortBy === 'industry' ? 'Industry' : sortBy === 'stage' ? 'Stage' : sortBy === 'source' ? 'Source' : 'Newest'}
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="6 9 12 15 18 9"/>
+                </svg>
+              </button>
+              
+              {showSortDropdown && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setShowSortDropdown(false)} />
+                  <div className="absolute right-0 top-full mt-1 bg-white dark:bg-stone-800 rounded-xl shadow-lg border border-stone-200 dark:border-stone-700 py-1 z-20 min-w-[160px]">
+                    {[
+                      { key: 'newest', label: 'Newest First', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> },
+                      { key: 'oldest', label: 'Oldest First', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 8 14"/></svg> },
+                      { key: 'alphabetical', label: 'Name (A-Z)', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"/></svg> },
+                      { key: 'loi', label: 'LOI Deadline', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
+                      { key: 'industry', label: 'Industry', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="5" r="3"/><line x1="12" y1="22" x2="12" y2="8"/><path d="M5 12H2a10 10 0 0 0 20 0h-3"/></svg> },
+                      { key: 'stage', label: 'Stage', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg> },
+                      { key: 'source', label: 'Source / Channel', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
+                    ].map(option => (
+                      <button
+                        key={option.key}
+                        onClick={() => { setSortBy(option.key); setShowSortDropdown(false); }}
+                        className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors ${
+                          sortBy === option.key 
+                            ? 'bg-stone-100 dark:bg-stone-700 text-stone-900 dark:text-white font-medium' 
+                            : 'text-stone-600 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-700/50'
+                        }`}
+                      >
+                        {option.icon}
+                        {option.label}
+                        {sortBy === option.key && (
+                          <svg className="ml-auto" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+            
             {/* Filter pills - inline with search */}
             <div className="flex gap-2">
               {tabFilters.map(f => (
@@ -7899,6 +8124,8 @@ function ConvexApp({ userMenu, syncStatus }) {
                 return reasons[deal.deferData.condition] || deal.deferData.condition;
               };
               
+              const isInactive = deal.engagement === 'inactive';
+              
               return (
                 <div 
                   key={deal.id} 
@@ -7918,11 +8145,23 @@ function ConvexApp({ userMenu, syncStatus }) {
                       : activeTab === 'deferred'
                         ? 'border-stone-150 dark:border-stone-700 hover:border-stone-200'
                         : 'border-stone-200 dark:border-stone-700 hover:border-stone-300 dark:hover:border-stone-600'
-                  }`}
+                  } ${isInactive ? 'opacity-50' : ''}`}
                   style={activeTab === 'deferred' ? { borderColor: '#E7E5E4' } : {}}
                 >
+                  {/* Inactive indicator banner */}
+                  {isInactive && (
+                    <div className="px-5 py-2 bg-stone-100 dark:bg-stone-700/50 border-b border-stone-200 dark:border-stone-600 rounded-t-2xl">
+                      <div className="flex items-center gap-2">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#a8a29e" strokeWidth="2">
+                          <circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
+                        </svg>
+                        <span className="text-xs text-stone-400">Inactive{deal.inactiveReason ? ` · ${deal.inactiveReason}` : ''}</span>
+                      </div>
+                    </div>
+                  )}
+                  
                   {/* Signal banner for Leads with new signals - Curiosity */}
-                  {hasSignal && activeTab === 'active' && deal.signalText && (
+                  {hasSignal && activeTab === 'active' && deal.signalText && !isInactive && (
                     <div className="px-5 py-2.5 bg-[#5B6DC4]/5 dark:bg-[#5B6DC4]/10 border-b border-[#5B6DC4]/10 rounded-t-2xl">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
@@ -7935,7 +8174,7 @@ function ConvexApp({ userMenu, syncStatus }) {
                   )}
                   
                   {/* Signal banner for Deferred - softer */}
-                  {hasSignal && activeTab === 'deferred' && deal.signalText && (
+                  {hasSignal && activeTab === 'deferred' && deal.signalText && !isInactive && (
                     <div className="px-5 py-2.5 bg-stone-50 dark:bg-stone-700/50 border-b border-stone-100 dark:border-stone-600 rounded-t-2xl">
                       <div className="flex items-center gap-2">
                         <svg className="text-[#5B6DC4]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
