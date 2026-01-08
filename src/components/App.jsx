@@ -1108,6 +1108,47 @@ const createDemoDeals = () => [
       { id: 'n2', type: 'ai', category: 'market', keyInsight: 'Ammonia is 2% of global energy use - decarbonizing it is a $100B+ opportunity', isGap: true, userConfirmed: false, timestamp: new Date(Date.now() - 8*86400000).toISOString() },
       { id: 'n3', type: 'user', content: 'Need to understand path from lab to pilot scale. Technical risk is real but team is strong.', timestamp: new Date(Date.now() - 5*86400000).toISOString() }
     ]
+  },
+  {
+    id: '7', companyName: 'Provocative', logoUrl: 'https://ui-avatars.com/api/?name=PV&background=7c3aed&color=fff&size=64&bold=true',
+    status: 'screening', engagement: 'active', industry: 'Frontier Tech', stage: 'pre-seed',
+    website: null,
+    source: { type: 'intro', name: 'Stealth referral' },
+    loiDue: new Date(Date.now() + 30*86400000).toISOString(),
+    lastAssessedAt: new Date(Date.now() - 2*86400000).toISOString(),
+    statusEnteredAt: new Date(Date.now() - 5*86400000).toISOString(),
+    lastActivity: new Date(Date.now() - 2*86400000).toISOString(),
+    createdAt: new Date(Date.now() - 5*86400000).toISOString(),
+    founders: [
+      { name: 'Undisclosed', role: 'CEO', background: 'Deep tech background, stealth mode', yearsExperience: null }
+    ],
+    terms: {
+      instrument: 'SAFE',
+      cap: 10000000,
+      discount: 20,
+      proRata: true,
+      mfn: true,
+      notes: 'Pre-seed, stealth'
+    },
+    dealTerms: {
+      raising: 2000000,
+      valuation: 10000000
+    },
+    attachments: [
+      { id: 'a1', name: 'Teaser Deck.pdf', type: 'deck', size: '1.2 MB', uploadedAt: new Date(Date.now() - 4*86400000).toISOString() }
+    ],
+    screening: { 
+      thesis: 'Frontier tech startup in stealth. Limited public information available - came through trusted referral. Need to dig deeper.', 
+      signals: ['Intro call scheduled'], 
+      stageFit: true, 
+      checkFit: true 
+    },
+    investment: { amount: 25000 },
+    workingNotes: [
+      { id: 'n1', type: 'user', content: 'Came through a trusted source but very little public info. No website, funding announcements, or founder profiles under this name yet.', timestamp: new Date(Date.now() - 4*86400000).toISOString() },
+      { id: 'n2', type: 'ai', category: 'team', keyInsight: 'Unable to verify founder backgrounds - stealth mode limits due diligence', isGap: true, userConfirmed: false, timestamp: new Date(Date.now() - 3*86400000).toISOString() },
+      { id: 'n3', type: 'user', content: 'Intro call next week. Will need to assess if the stealth approach is warranted or a red flag.', timestamp: new Date(Date.now() - 2*86400000).toISOString() }
+    ]
   }
 ];
 
