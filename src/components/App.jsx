@@ -848,80 +848,24 @@ const canPromote = (deal, targetStatus) => {
 
 // Demo Data
 const createDemoDeals = () => [
+  // PORTFOLIO - Invested companies
   {
-    id: '1', companyName: 'NeuralKit', logoUrl: 'https://ui-avatars.com/api/?name=NK&background=6366f1&color=fff&size=64&bold=true',
-    status: 'screening', engagement: 'active', industry: 'AI/ML', stage: 'seed',
-    website: 'https://neuralkit.ai',
-    source: { type: 'intro', name: 'Maya Chen' }, deferType: 'watching', portfolioMetrics: null, needsAttention: false,
-    loiDue: new Date(Date.now() + 5*86400000).toISOString(),
-    lastAssessedAt: new Date(Date.now() - 1*86400000).toISOString(),
-    statusEnteredAt: new Date(Date.now() - 5*86400000).toISOString(),
-    lastActivity: new Date(Date.now() - 1*86400000).toISOString(),
-    createdAt: new Date(Date.now() - 10*86400000).toISOString(),
-    founders: [
-      { name: 'Alex Rivera', role: 'CEO', linkedIn: 'https://linkedin.com/in/alexrivera', email: 'alex@neuralkit.ai', background: 'Ex-Google Brain, Stanford CS PhD', yearsExperience: 12 },
-      { name: 'Priya Sharma', role: 'CTO', linkedIn: 'https://linkedin.com/in/priyasharma', email: 'priya@neuralkit.ai', background: 'Ex-Meta AI Research, MIT', yearsExperience: 10 }
-    ],
-    terms: {
-      instrument: 'SAFE',
-      cap: 12000000,
-      discount: 20,
-      proRata: true,
-      mfn: true,
-      boardSeat: false,
-      notes: 'Standard YC SAFE template'
-    },
-    attachments: [
-      { id: 'a1', name: 'Pitch Deck Q4 2024.pdf', type: 'deck', size: '2.4 MB', uploadedAt: new Date(Date.now() - 8*86400000).toISOString() },
-      { id: 'a2', name: 'Financial Model.xlsx', type: 'financials', size: '156 KB', uploadedAt: new Date(Date.now() - 7*86400000).toISOString() },
-      { id: 'a3', name: 'Technical Architecture.pdf', type: 'other', size: '890 KB', uploadedAt: new Date(Date.now() - 5*86400000).toISOString() }
-    ],
-    screening: {
-      thesis: 'Best-in-class ML infrastructure for mid-market. Strong technical founders from Google Brain.',
-      signals: ['Founder call completed', 'Deck reviewed', 'Product demo watched'],
-      stageFit: true, checkFit: true
-    },
-    investment: { amount: 25000, vehicle: 'SAFE', date: null },
-    dueDiligence: {
-      checklist: [
-        { id: '1', category: 'team', text: 'Reference calls (3+)', completed: true },
-        { id: '2', category: 'team', text: 'Background verification', completed: true },
-        { id: '3', category: 'market', text: 'TAM/SAM analysis', completed: true },
-        { id: '4', category: 'market', text: 'Competitive landscape', completed: false },
-        { id: '5', category: 'product', text: 'Technical architecture review', completed: false },
-        { id: '6', category: 'traction', text: 'Customer interviews (5+)', completed: false },
-        { id: '7', category: 'risks', text: 'Legal review', completed: true },
-      ],
-      openQuestions: [
-        { id: '1', question: 'Path to $10M ARR?', status: 'open', blocking: true },
-        { id: '2', question: 'Why did previous CTO leave?', status: 'answered', answer: 'Personal reasons, amicable', blocking: false },
-        { id: '3', question: 'Enterprise vs PLG?', status: 'open', blocking: false },
-      ],
-      tasks: [
-        { id: '1', task: 'Customer call with Acme Corp', owner: 'Me', completed: false },
-        { id: '2', task: 'Review financial model', owner: 'Me', completed: true },
-      ],
-      enteredAt: new Date(Date.now() - 5*86400000).toISOString(),
-    }
-  },
-  {
-    id: '2', companyName: 'CloudBase', logoUrl: 'https://ui-avatars.com/api/?name=CB&background=10b981&color=fff&size=64&bold=true',
-    status: 'invested', engagement: 'active', industry: 'DevTools', stage: 'series-a',
-    website: 'https://cloudbase.dev',
-    source: { type: 'syndicate', name: 'Calm Fund' },
-    
+    id: '1', companyName: 'Moment Energy', logoUrl: 'https://ui-avatars.com/api/?name=ME&background=10b981&color=fff&size=64&bold=true',
+    status: 'invested', engagement: 'active', industry: 'Energy Storage', stage: 'series-a',
+    website: 'https://momentenergy.com',
+    source: { type: 'intro', name: 'Climate Fund Network' },
     lastAssessedAt: new Date(Date.now() - 5*86400000).toISOString(),
-    statusEnteredAt: new Date(Date.now() - 60*86400000).toISOString(),
+    statusEnteredAt: new Date(Date.now() - 180*86400000).toISOString(),
     lastActivity: new Date(Date.now() - 5*86400000).toISOString(),
-    lastUpdateReceived: new Date(Date.now() - 12*86400000).toISOString(),
-    createdAt: new Date(Date.now() - 120*86400000).toISOString(),
+    lastUpdateReceived: new Date(Date.now() - 14*86400000).toISOString(),
+    createdAt: new Date(Date.now() - 240*86400000).toISOString(),
     founders: [
-      { name: 'Marcus Johnson', role: 'CEO', linkedIn: 'https://linkedin.com/in/marcusj', email: 'marcus@cloudbase.dev', background: 'Ex-AWS, 2x founder (1 exit)', yearsExperience: 15 },
-      { name: 'Sarah Kim', role: 'CTO', linkedIn: 'https://linkedin.com/in/sarahkim', email: 'sarah@cloudbase.dev', background: 'Ex-Stripe Engineering Lead', yearsExperience: 11 }
+      { name: 'Sumreen Rattan', role: 'CEO', linkedIn: 'https://linkedin.com/in/sumreenrattan', email: 'sumreen@momentenergy.com', background: 'Ex-Tesla Energy, Stanford Engineering', yearsExperience: 12 },
+      { name: 'Edward Chiang', role: 'CTO', linkedIn: 'https://linkedin.com/in/edwardchiang', email: 'edward@momentenergy.com', background: 'Battery systems engineer, MIT PhD', yearsExperience: 10 }
     ],
     terms: {
       instrument: 'SAFE',
-      cap: 20000000,
+      cap: 25000000,
       discount: null,
       proRata: true,
       mfn: false,
@@ -929,195 +873,240 @@ const createDemoDeals = () => [
       notes: 'Post-money SAFE'
     },
     attachments: [
-      { id: 'a1', name: 'SAFE Agreement.pdf', type: 'legal', size: '245 KB', uploadedAt: new Date(Date.now() - 90*86400000).toISOString() },
-      { id: 'a2', name: 'Side Letter.pdf', type: 'legal', size: '89 KB', uploadedAt: new Date(Date.now() - 90*86400000).toISOString() },
-      { id: 'a3', name: 'Cap Table.xlsx', type: 'financials', size: '67 KB', uploadedAt: new Date(Date.now() - 85*86400000).toISOString() },
-      { id: 'a4', name: 'Monthly Update - Nov.pdf', type: 'update', size: '1.2 MB', uploadedAt: new Date(Date.now() - 15*86400000).toISOString() }
+      { id: 'a1', name: 'SAFE Agreement.pdf', type: 'legal', size: '245 KB', uploadedAt: new Date(Date.now() - 180*86400000).toISOString() },
+      { id: 'a2', name: 'Monthly Update - Dec.pdf', type: 'update', size: '1.2 MB', uploadedAt: new Date(Date.now() - 14*86400000).toISOString() }
     ],
-    screening: { thesis: 'Developer tools for serverless. Strong PMF signals.', signals: ['Founder call completed', 'Deck reviewed'], stageFit: true, checkFit: true },
+    screening: { thesis: 'Second-life EV batteries for grid storage. Circular economy play with strong unit economics.', signals: ['Founder call completed', 'Site visit'], stageFit: true, checkFit: true },
     investment: {
-      amount: 50000, vehicle: 'SAFE', date: new Date(Date.now() - 90*86400000).toISOString(),
-      ownershipPercent: 0.5, documents: ['SAFE Agreement', 'Side Letter'],
-      updateFrequency: 'monthly', metricsToWatch: ['MRR', 'Churn', 'NPS'],
-      nextUpdateExpected: new Date(Date.now() + 18*86400000).toISOString()
+      amount: 50000, vehicle: 'SAFE', date: new Date(Date.now() - 180*86400000).toISOString(),
+      ownershipPercent: 0.4, documents: ['SAFE Agreement'],
+      whyYes: 'Brilliant circular economy model - repurposing EV batteries that still have 70-80% capacity. Strong founder-market fit with Sumreen\'s Tesla background.',
+      updateFrequency: 'monthly', metricsToWatch: ['MWh deployed', 'Cost per kWh', 'Battery supply contracts'],
+      nextUpdateExpected: new Date(Date.now() + 16*86400000).toISOString()
     },
     monitoring: {
-      healthStatus: 'thriving', fundraisingStatus: 'closed', runwayMonths: 18,
+      healthStatus: 'thriving', fundraisingStatus: 'not-raising', runwayMonths: 18,
       wouldInvestAgain: true, wouldIntro: true,
-      followOns: [{ date: new Date(Date.now() - 30*86400000).toISOString(), amount: 25000 }]
+      followOns: []
     },
     milestones: [
-      { id: 'm1', type: 'fundraising', title: 'Closed Series A', description: '$8M led by Sequoia', date: new Date(Date.now() - 45*86400000).toISOString() },
-      { id: 'm2', type: 'hiring', title: 'Head of Sales hired', description: 'Jane Smith, ex-Datadog', date: new Date(Date.now() - 30*86400000).toISOString() },
-      { id: 'm3', type: 'growth', title: 'Hit $500K ARR', description: '3x growth in 6 months', date: new Date(Date.now() - 20*86400000).toISOString() },
-      { id: 'm4', type: 'product', title: 'V2.0 Launch', description: 'Major platform update with enterprise features', date: new Date(Date.now() - 10*86400000).toISOString() }
+      { id: 'm1', type: 'partnership', title: 'BMW Partnership', description: 'Exclusive battery supply agreement for North America', date: new Date(Date.now() - 90*86400000).toISOString() },
+      { id: 'm2', type: 'growth', title: '10 MWh Deployed', description: 'First commercial installations live', date: new Date(Date.now() - 60*86400000).toISOString() },
+      { id: 'm3', type: 'hiring', title: 'VP Operations hired', description: 'Ex-Fluence, scaling manufacturing', date: new Date(Date.now() - 30*86400000).toISOString() }
     ]
   },
   {
-    id: '3', companyName: 'HealthSync', logoUrl: 'https://ui-avatars.com/api/?name=HS&background=3b82f6&color=fff&size=64&bold=true',
-    status: 'deferred', engagement: 'active', industry: 'HealthTech', stage: 'pre-seed',
-    website: 'https://healthsync.io',
-    source: { type: 'event', name: 'Demo Day' },
-    
-    lastAssessedAt: new Date(Date.now() - 2*86400000).toISOString(),
-    statusEnteredAt: new Date(Date.now() - 14*86400000).toISOString(),
-    lastActivity: new Date(Date.now() - 2*86400000).toISOString(),
-    createdAt: new Date(Date.now() - 30*86400000).toISOString(),
+    id: '2', companyName: 'Excir', logoUrl: 'https://ui-avatars.com/api/?name=EX&background=059669&color=fff&size=64&bold=true',
+    status: 'invested', engagement: 'active', industry: 'Critical Minerals', stage: 'seed',
+    website: 'https://excir.com',
+    source: { type: 'syndicate', name: 'Congruent Ventures' },
+    lastAssessedAt: new Date(Date.now() - 8*86400000).toISOString(),
+    statusEnteredAt: new Date(Date.now() - 120*86400000).toISOString(),
+    lastActivity: new Date(Date.now() - 8*86400000).toISOString(),
+    lastUpdateReceived: new Date(Date.now() - 20*86400000).toISOString(),
+    createdAt: new Date(Date.now() - 150*86400000).toISOString(),
     founders: [
-      { name: 'Dr. Emily Watson', role: 'CEO', linkedIn: 'https://linkedin.com/in/emilywatson', email: 'emily@healthsync.io', background: 'MD Stanford, Ex-Oscar Health', yearsExperience: 8 }
-    ],
-    terms: {
-      instrument: 'SAFE',
-      cap: 8000000,
-      discount: 20,
-      proRata: true,
-      mfn: true,
-      notes: 'Seeking $1.5M pre-seed'
-    },
-    attachments: [
-      { id: 'a1', name: 'Deck - HealthSync.pdf', type: 'deck', size: '3.1 MB', uploadedAt: new Date(Date.now() - 28*86400000).toISOString() }
-    ],
-    screening: { thesis: 'Strong founder-market fit, but timing risk around enterprise adoption cycles. Worth watching through Q2.', signals: ['Deck reviewed'], stageFit: true, checkFit: true },
-    watching: {
-      reason: 'Traction',
-      trigger: 'When they close 5 enterprise pilots',
-      reminderDate: new Date(Date.now() + 30*86400000).toISOString()
-    }
-  },
-  {
-    id: '4', companyName: 'FinanceFlow', logoUrl: 'https://ui-avatars.com/api/?name=FF&background=8b5cf6&color=fff&size=64&bold=true',
-    status: 'screening', engagement: 'active', industry: 'Fintech', stage: 'seed',
-    website: 'https://financeflow.co',
-    source: { type: 'intro', name: 'Jason Park' },
-    loiDue: new Date(Date.now() + 2*86400000).toISOString(),
-    lastAssessedAt: new Date(Date.now() - 3600000).toISOString(),
-    statusEnteredAt: new Date(Date.now() - 2*86400000).toISOString(),
-    lastActivity: new Date(Date.now() - 3600000).toISOString(),
-    createdAt: new Date(Date.now() - 2*86400000).toISOString(),
-    founders: [
-      { name: 'Rachel Green', role: 'CEO', linkedIn: 'https://linkedin.com/in/rachelg', email: 'rachel@financeflow.co', background: 'Ex-Square, Wharton MBA', yearsExperience: 9 },
-      { name: 'Tom Martinez', role: 'CTO', linkedIn: 'https://linkedin.com/in/tomm', email: 'tom@financeflow.co', background: 'Ex-Plaid Senior Engineer', yearsExperience: 7 }
+      { name: 'Dr. Gisele Azimi', role: 'CEO', linkedIn: 'https://linkedin.com/in/giseleazimi', email: 'gisele@excir.com', background: 'University of Toronto professor, rare earth extraction pioneer', yearsExperience: 15 }
     ],
     terms: {
       instrument: 'SAFE',
       cap: 15000000,
       discount: 20,
-      proRata: true
-    },
-    attachments: [],
-    screening: { thesis: 'Interesting B2B payments angle. Need to understand differentiation from existing players.', signals: [], stageFit: true, checkFit: true },
-    investment: { amount: 35000 }
-  },
-  {
-    id: '5', companyName: 'DataVault', logoUrl: 'https://ui-avatars.com/api/?name=DV&background=059669&color=fff&size=64&bold=true',
-    status: 'invested', engagement: 'active', industry: 'Security', stage: 'seed',
-    website: 'https://datavault.io',
-    source: { type: 'syndicate', name: 'AngelList' },
-    
-    lastAssessedAt: new Date(Date.now() - 3*86400000).toISOString(),
-    statusEnteredAt: new Date(Date.now() - 3*86400000).toISOString(),
-    lastActivity: new Date(Date.now() - 3*86400000).toISOString(),
-    createdAt: new Date(Date.now() - 45*86400000).toISOString(),
-    founders: [
-      { name: 'Chris Anderson', role: 'CEO', linkedIn: 'https://linkedin.com/in/chrisa', email: 'chris@datavault.io', background: 'Ex-Cloudflare, Security researcher', yearsExperience: 14 }
-    ],
-    terms: {
-      instrument: 'SAFE',
-      cap: 10000000,
-      discount: 20,
       proRata: true,
       mfn: true
     },
     attachments: [
-      { id: 'a1', name: 'SAFE Agreement.pdf', type: 'legal', size: '234 KB', uploadedAt: new Date(Date.now() - 3*86400000).toISOString() }
+      { id: 'a1', name: 'SAFE Agreement.pdf', type: 'legal', size: '234 KB', uploadedAt: new Date(Date.now() - 120*86400000).toISOString() }
     ],
-    screening: { thesis: 'Data security for SMBs. Underserved market with strong tailwinds.', signals: ['Founder call completed', 'Deck reviewed'], stageFit: true, checkFit: true },
+    screening: { thesis: 'Novel extraction process for rare earth elements from e-waste. Critical for supply chain independence.', signals: ['Founder call completed', 'Lab tour'], stageFit: true, checkFit: true },
     investment: {
-      amount: 30000, vehicle: 'SAFE', date: new Date(Date.now() - 3*86400000).toISOString(),
+      amount: 35000, vehicle: 'SAFE', date: new Date(Date.now() - 120*86400000).toISOString(),
       ownershipPercent: 0.3, documents: ['SAFE Agreement'],
-      updateFrequency: '', metricsToWatch: []
-    }
+      whyYes: 'Gisele is a world expert in rare earth extraction. The geopolitical tailwinds are massive - we need domestic critical mineral supply chains.',
+      updateFrequency: 'quarterly', metricsToWatch: ['Extraction efficiency', 'Pilot plant progress', 'Strategic partnerships']
+    },
+    monitoring: {
+      healthStatus: 'stable', fundraisingStatus: 'exploring', runwayMonths: 14,
+      wouldInvestAgain: true, wouldIntro: true
+    },
+    milestones: [
+      { id: 'm1', type: 'product', title: 'Pilot Plant Operational', description: 'First full-scale extraction demonstrated', date: new Date(Date.now() - 45*86400000).toISOString() },
+      { id: 'm2', type: 'partnership', title: 'DOE Grant', description: '$2M Department of Energy research grant', date: new Date(Date.now() - 25*86400000).toISOString() }
+    ]
   },
   {
-    id: '6', companyName: 'RetailAI', logoUrl: 'https://ui-avatars.com/api/?name=RA&background=78716c&color=fff&size=64&bold=true',
-    status: 'passed', engagement: 'inactive', industry: 'Retail', stage: 'seed',
-    source: { type: 'inbound', name: 'Cold outreach' },
-    
-    lastAssessedAt: new Date(Date.now() - 20*86400000).toISOString(),
-    statusEnteredAt: new Date(Date.now() - 20*86400000).toISOString(),
-    lastActivity: new Date(Date.now() - 20*86400000).toISOString(),
-    createdAt: new Date(Date.now() - 30*86400000).toISOString(),
-    founders: [
-      { name: 'Mike Thompson', role: 'CEO', background: 'First-time founder', yearsExperience: 5 }
-    ],
-    terms: {
-      instrument: 'SAFE',
-      cap: 25000000,
-      notes: 'Valuation too high for traction'
-    },
-    attachments: [
-      { id: 'a1', name: 'Pitch Deck.pdf', type: 'deck', size: '4.2 MB', uploadedAt: new Date(Date.now() - 25*86400000).toISOString() }
-    ],
-    passed: {
-      reasons: ['Market too small', 'Valuation too high'],
-      passedAt: new Date(Date.now() - 20*86400000).toISOString(),
-      notes: 'Interesting tech but market is saturated.',
-    },
-    inactiveReason: 'No longer relevant'
-  },
-  {
-    id: '7', companyName: 'Acme Analytics', logoUrl: 'https://ui-avatars.com/api/?name=AA&background=f59e0b&color=fff&size=64&bold=true',
-    status: 'invested', engagement: 'active', industry: 'Analytics', stage: 'series-b',
-    website: 'https://acmeanalytics.com',
-    source: { type: 'syndicate', name: 'Existing Portfolio' },
-    
+    id: '3', companyName: 'Sanctuary AI', logoUrl: 'https://ui-avatars.com/api/?name=SA&background=6366f1&color=fff&size=64&bold=true',
+    status: 'invested', engagement: 'active', industry: 'Robotics / AI', stage: 'series-b',
+    website: 'https://sanctuary.ai',
+    source: { type: 'intro', name: 'Existing LP' },
     lastAssessedAt: new Date(Date.now() - 3*86400000).toISOString(),
     isLegacyPortfolio: true,
     statusEnteredAt: new Date(Date.now() - 400*86400000).toISOString(),
     lastActivity: new Date(Date.now() - 3*86400000).toISOString(),
-    lastUpdateReceived: new Date(Date.now() - 8*86400000).toISOString(),
-    createdAt: new Date(Date.now() - 730*86400000).toISOString(),
+    lastUpdateReceived: new Date(Date.now() - 10*86400000).toISOString(),
+    createdAt: new Date(Date.now() - 500*86400000).toISOString(),
     founders: [
-      { name: 'David Lee', role: 'CEO', linkedIn: 'https://linkedin.com/in/davidlee', email: 'david@acmeanalytics.com', background: 'Ex-Tableau VP Product, Stanford MBA', yearsExperience: 18 },
-      { name: 'Lisa Chen', role: 'CTO', linkedIn: 'https://linkedin.com/in/lisachen', email: 'lisa@acmeanalytics.com', background: 'Ex-Google Staff Engineer', yearsExperience: 16 },
-      { name: 'James Wilson', role: 'COO', linkedIn: 'https://linkedin.com/in/jameswilson', email: 'james@acmeanalytics.com', background: 'Ex-McKinsey Partner', yearsExperience: 20 }
+      { name: 'Geordie Rose', role: 'CEO', linkedIn: 'https://linkedin.com/in/geordierose', email: 'geordie@sanctuary.ai', background: 'Founder of D-Wave, quantum computing pioneer', yearsExperience: 25 },
+      { name: 'Suzanne Gildert', role: 'CTO', linkedIn: 'https://linkedin.com/in/suzannegildert', email: 'suzanne@sanctuary.ai', background: 'D-Wave founding team, AI researcher', yearsExperience: 18 }
     ],
     terms: {
       instrument: 'Equity',
-      valuation: 45000000,
+      valuation: 200000000,
       proRata: true,
       boardSeat: false,
-      notes: 'Series A equity investment'
+      notes: 'Series A participation, followed on in B'
     },
     attachments: [
-      { id: 'a1', name: 'Stock Purchase Agreement.pdf', type: 'legal', size: '1.8 MB', uploadedAt: new Date(Date.now() - 700*86400000).toISOString() },
-      { id: 'a2', name: 'Q3 Board Deck.pdf', type: 'update', size: '5.4 MB', uploadedAt: new Date(Date.now() - 45*86400000).toISOString() },
-      { id: 'a3', name: 'Q4 Board Deck.pdf', type: 'update', size: '6.1 MB', uploadedAt: new Date(Date.now() - 8*86400000).toISOString() }
+      { id: 'a1', name: 'Stock Purchase Agreement.pdf', type: 'legal', size: '1.8 MB', uploadedAt: new Date(Date.now() - 400*86400000).toISOString() },
+      { id: 'a2', name: 'Q4 Investor Update.pdf', type: 'update', size: '4.2 MB', uploadedAt: new Date(Date.now() - 10*86400000).toISOString() }
     ],
     investment: {
-      amount: 75000, vehicle: 'Equity', date: new Date(Date.now() - 700*86400000).toISOString(),
-      ownershipPercent: 0.25, documents: ['Stock Purchase Agreement', 'Investor Rights Agreement'],
-      updateFrequency: 'quarterly', metricsToWatch: ['ARR', 'Net Revenue Retention', 'Burn Multiple'],
+      amount: 75000, vehicle: 'Equity', date: new Date(Date.now() - 400*86400000).toISOString(),
+      ownershipPercent: 0.1, documents: ['Stock Purchase Agreement', 'Investor Rights Agreement'],
+      whyYes: 'Geordie built D-Wave. Now building general-purpose humanoid robots. This is the team that can actually pull off human-level AI embodiment.',
+      updateFrequency: 'quarterly', metricsToWatch: ['Robot deployments', 'Task completion rate', 'Manufacturing scale'],
       nextUpdateExpected: new Date(Date.now() + 60*86400000).toISOString()
     },
     monitoring: {
-      healthStatus: 'thriving', fundraisingStatus: 'not-raising', runwayMonths: 24,
+      healthStatus: 'thriving', fundraisingStatus: 'closed', runwayMonths: 30,
       wouldInvestAgain: true, wouldIntro: true,
       followOns: [
-        { date: new Date(Date.now() - 400*86400000).toISOString(), amount: 50000, notes: 'Series B pro-rata' }
+        { date: new Date(Date.now() - 200*86400000).toISOString(), amount: 50000, notes: 'Series B pro-rata' }
       ]
     },
     milestones: [
-      { id: 'm1', type: 'fundraising', title: 'Seed Round', description: '$2M from First Round', date: new Date(Date.now() - 730*86400000).toISOString() },
-      { id: 'm2', type: 'hiring', title: 'Team reached 10', description: 'Key engineering hires', date: new Date(Date.now() - 600*86400000).toISOString() },
-      { id: 'm3', type: 'growth', title: 'First $1M ARR', description: 'Crossed milestone ahead of plan', date: new Date(Date.now() - 500*86400000).toISOString() },
-      { id: 'm4', type: 'fundraising', title: 'Series A', description: '$12M led by a]16z', date: new Date(Date.now() - 450*86400000).toISOString() },
-      { id: 'm5', type: 'hiring', title: 'Team reached 35', description: 'Expanded sales team', date: new Date(Date.now() - 350*86400000).toISOString() },
-      { id: 'm6', type: 'fundraising', title: 'Series B', description: '$30M led by Insight Partners', date: new Date(Date.now() - 400*86400000).toISOString() },
-      { id: 'm7', type: 'growth', title: '$5M ARR', description: '5x growth YoY', date: new Date(Date.now() - 200*86400000).toISOString() },
-      { id: 'm8', type: 'partnership', title: 'Salesforce Partnership', description: 'Official AppExchange partner', date: new Date(Date.now() - 100*86400000).toISOString() },
-      { id: 'm9', type: 'hiring', title: 'Team reached 80', description: 'Opened EU office', date: new Date(Date.now() - 60*86400000).toISOString() },
-      { id: 'm10', type: 'growth', title: '$10M ARR', description: 'Enterprise segment growing 200%', date: new Date(Date.now() - 15*86400000).toISOString() }
+      { id: 'm1', type: 'product', title: 'Phoenix Robot Unveiled', description: 'First general-purpose humanoid robot demo', date: new Date(Date.now() - 300*86400000).toISOString() },
+      { id: 'm2', type: 'fundraising', title: 'Series B Close', description: '$140M led by Accel', date: new Date(Date.now() - 200*86400000).toISOString() },
+      { id: 'm3', type: 'partnership', title: 'Magna Partnership', description: 'Manufacturing partnership for robot production', date: new Date(Date.now() - 100*86400000).toISOString() },
+      { id: 'm4', type: 'hiring', title: 'Team reached 150', description: 'Major AI/ML hiring push', date: new Date(Date.now() - 45*86400000).toISOString() },
+      { id: 'm5', type: 'product', title: 'First Commercial Deployment', description: 'Pilot with major retailer', date: new Date(Date.now() - 15*86400000).toISOString() }
+    ]
+  },
+  // LEADS - Active screening
+  {
+    id: '4', companyName: 'Form Energy', logoUrl: 'https://ui-avatars.com/api/?name=FE&background=f59e0b&color=fff&size=64&bold=true',
+    status: 'screening', engagement: 'active', industry: 'Energy Storage', stage: 'series-e',
+    website: 'https://formenergy.com',
+    source: { type: 'research', name: 'Climate Tech Weekly' },
+    loiDue: new Date(Date.now() + 14*86400000).toISOString(),
+    lastAssessedAt: new Date(Date.now() - 3*86400000).toISOString(),
+    statusEnteredAt: new Date(Date.now() - 10*86400000).toISOString(),
+    lastActivity: new Date(Date.now() - 3*86400000).toISOString(),
+    createdAt: new Date(Date.now() - 10*86400000).toISOString(),
+    founders: [
+      { name: 'Mateo Jaramillo', role: 'CEO', linkedIn: 'https://linkedin.com/in/mateojaramillo', email: 'contact@formenergy.com', background: 'Ex-Tesla VP Energy, created Powerwall/Powerpack', yearsExperience: 20 },
+      { name: 'Yet-Ming Chiang', role: 'Chief Scientist', linkedIn: 'https://linkedin.com/in/yetmingchiang', background: 'MIT Professor, founded A123 Systems', yearsExperience: 35 }
+    ],
+    terms: {
+      instrument: 'Secondary',
+      notes: 'Exploring secondary market opportunities'
+    },
+    dealTerms: {
+      raising: 0,
+      valuation: 2000000000
+    },
+    attachments: [
+      { id: 'a1', name: 'Public Analysis.pdf', type: 'deck', size: '2.1 MB', uploadedAt: new Date(Date.now() - 8*86400000).toISOString() }
+    ],
+    screening: { 
+      thesis: 'Iron-air batteries for 100-hour storage. Could be transformational for grid-scale renewable integration.', 
+      signals: ['Public research', 'Industry contacts'], 
+      stageFit: false, 
+      checkFit: true 
+    },
+    investment: { amount: 100000 },
+    workingNotes: [
+      { id: 'n1', type: 'user', content: 'Mateo built Tesla Energy from scratch. Yet-Ming is the godfather of battery chemistry. Dream team for long-duration storage.', timestamp: new Date(Date.now() - 7*86400000).toISOString() },
+      { id: 'n2', type: 'ai', category: 'market', keyInsight: 'Long-duration storage market expected to reach $3B by 2030 - Form is the clear leader', isGap: false, userConfirmed: true, timestamp: new Date(Date.now() - 5*86400000).toISOString() },
+      { id: 'n3', type: 'user', content: 'Secondary shares becoming available - need to understand pricing and minimum check size.', timestamp: new Date(Date.now() - 3*86400000).toISOString() }
+    ],
+    hasNewSignal: true,
+    signalText: 'New manufacturing facility announced in West Virginia'
+  },
+  {
+    id: '5', companyName: 'Exowatt', logoUrl: 'https://ui-avatars.com/api/?name=EW&background=dc2626&color=fff&size=64&bold=true',
+    status: 'screening', engagement: 'active', industry: 'Clean Energy', stage: 'series-a',
+    website: 'https://exowatt.com',
+    source: { type: 'intro', name: 'Sam Altman (via network)' },
+    loiDue: new Date(Date.now() + 5*86400000).toISOString(),
+    lastAssessedAt: new Date(Date.now() - 1*86400000).toISOString(),
+    statusEnteredAt: new Date(Date.now() - 7*86400000).toISOString(),
+    lastActivity: new Date(Date.now() - 1*86400000).toISOString(),
+    createdAt: new Date(Date.now() - 7*86400000).toISOString(),
+    founders: [
+      { name: 'Hannan Parvizian', role: 'CEO', linkedIn: 'https://linkedin.com/in/hannanparvizian', email: 'hannan@exowatt.com', background: 'Ex-SpaceX propulsion engineer, Caltech PhD', yearsExperience: 12 },
+      { name: 'Jack Tait', role: 'CTO', linkedIn: 'https://linkedin.com/in/jacktait', background: 'Ex-Anduril, thermal systems expert', yearsExperience: 10 }
+    ],
+    terms: {
+      instrument: 'SAFE',
+      cap: 150000000,
+      discount: null,
+      proRata: true,
+      mfn: false,
+      notes: 'Post-money SAFE, hot round'
+    },
+    dealTerms: {
+      raising: 20000000,
+      valuation: 150000000
+    },
+    attachments: [
+      { id: 'a1', name: 'Pitch Deck.pdf', type: 'deck', size: '3.2 MB', uploadedAt: new Date(Date.now() - 6*86400000).toISOString() },
+      { id: 'a2', name: 'Technical Deep Dive.pdf', type: 'other', size: '1.8 MB', uploadedAt: new Date(Date.now() - 4*86400000).toISOString() }
+    ],
+    screening: { 
+      thesis: 'Thermal batteries + solar for 24/7 clean power to data centers. Perfect timing with AI energy demand explosion.', 
+      signals: ['Founder call completed', 'Deck reviewed', 'Reference calls in progress'], 
+      stageFit: true, 
+      checkFit: true 
+    },
+    investment: { amount: 50000 },
+    workingNotes: [
+      { id: 'n1', type: 'user', content: 'SpaceX pedigree is real - Hannan worked on Raptor engine thermal management. Exactly the hard engineering background needed.', timestamp: new Date(Date.now() - 5*86400000).toISOString() },
+      { id: 'n2', type: 'ai', category: 'market', keyInsight: 'Data center power demand growing 15% annually - hyperscalers desperate for clean baseload', isGap: false, userConfirmed: true, timestamp: new Date(Date.now() - 3*86400000).toISOString() },
+      { id: 'n3', type: 'user', content: 'Round is moving fast - Altman leading. Need to decide by EOW if we want allocation.', timestamp: new Date(Date.now() - 1*86400000).toISOString() }
+    ],
+    hasNewSignal: true,
+    signalText: 'Round closing soon - allocation available'
+  },
+  {
+    id: '6', companyName: 'Ammobia', logoUrl: 'https://ui-avatars.com/api/?name=AM&background=3b82f6&color=fff&size=64&bold=true',
+    status: 'screening', engagement: 'active', industry: 'Green Hydrogen', stage: 'seed',
+    website: 'https://ammobia.com',
+    source: { type: 'conference', name: 'Climate Tech Summit' },
+    loiDue: new Date(Date.now() + 21*86400000).toISOString(),
+    lastAssessedAt: new Date(Date.now() - 5*86400000).toISOString(),
+    statusEnteredAt: new Date(Date.now() - 14*86400000).toISOString(),
+    lastActivity: new Date(Date.now() - 5*86400000).toISOString(),
+    createdAt: new Date(Date.now() - 14*86400000).toISOString(),
+    founders: [
+      { name: 'Dr. Sarah Chen', role: 'CEO', linkedIn: 'https://linkedin.com/in/sarahchen', email: 'sarah@ammobia.com', background: 'Caltech Chemistry PhD, green ammonia researcher', yearsExperience: 12 }
+    ],
+    terms: {
+      instrument: 'SAFE',
+      cap: 12000000,
+      discount: 20,
+      proRata: true,
+      mfn: true,
+      notes: 'Seeking $3M seed'
+    },
+    dealTerms: {
+      raising: 3000000,
+      valuation: 12000000
+    },
+    attachments: [
+      { id: 'a1', name: 'Pitch Deck.pdf', type: 'deck', size: '3.4 MB', uploadedAt: new Date(Date.now() - 12*86400000).toISOString() }
+    ],
+    screening: { 
+      thesis: 'Novel catalyst for green ammonia production. Could dramatically reduce energy requirements for fertilizer production.', 
+      signals: ['Founder call', 'Deck reviewed'], 
+      stageFit: true, 
+      checkFit: true 
+    },
+    investment: { amount: 35000 },
+    workingNotes: [
+      { id: 'n1', type: 'user', content: 'Sarah\'s catalyst research is genuinely novel - 40% energy reduction vs Haber-Bosch. Published in Nature.', timestamp: new Date(Date.now() - 10*86400000).toISOString() },
+      { id: 'n2', type: 'ai', category: 'market', keyInsight: 'Ammonia is 2% of global energy use - decarbonizing it is a $100B+ opportunity', isGap: true, userConfirmed: false, timestamp: new Date(Date.now() - 8*86400000).toISOString() },
+      { id: 'n3', type: 'user', content: 'Need to understand path from lab to pilot scale. Technical risk is real but team is strong.', timestamp: new Date(Date.now() - 5*86400000).toISOString() }
     ]
   }
 ];
