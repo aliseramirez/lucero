@@ -813,341 +813,113 @@ const DEFAULT_SETTINGS = {
   appearance: 'light'
 };
 
-// Lifecycle: Screening → Decision (Invested / Deferred / Passed)
-// Tracking is an overlay, not a stage. Invested = always tracked. Deferred = tracked by default. Passed = untracked by default.
+// Portfolio statuses: Invested = active portfolio. Deferred = watching. Passed = archived.
 const STATUS_CONFIG = {
-  'screening': { label: 'Screening', color: 'bg-[#5B6DC4]', light: 'bg-[#5B6DC4]/10 text-[#5B6DC4] border border-[#5B6DC4]/30', question: 'Is this worth investing in?' },
   'invested': { label: 'Invested', color: 'bg-emerald-500', light: 'bg-emerald-50 text-emerald-600 border border-emerald-200', question: 'Capital deployed' },
-  'deferred': { label: 'Watching', color: 'bg-[#5B6DC4]', light: 'bg-[#5B6DC4]/10 text-[#5B6DC4] border border-[#5B6DC4]/30', question: 'What needs to change before I reconsider?' },
-  'passed': { label: 'Passed', color: 'bg-stone-400', light: 'bg-stone-100 text-stone-600 border border-stone-200', question: 'Why was this a no?' },
-  'learning': { label: 'Learning', color: 'bg-[#5B6DC4]', light: 'bg-[#5B6DC4]/10 text-[#5B6DC4] border border-[#5B6DC4]/30', question: 'What can I learn from this?' },
-  'needsAttention': { label: 'Needs Attention', color: 'bg-red-500', light: 'bg-red-50 text-red-600 border border-red-200', question: 'Requires action' },
-};
-
-const DILIGENCE_SIGNALS = ['Founder call completed', 'Deck reviewed', 'Product demo watched', 'Customer signal observed'];
-
-// Defer reasons and revisit conditions for decision closure workflow
-const DEFER_REASONS = ['Timing', 'Missing signal', 'Needs traction', 'Pricing unclear', 'Other'];
-const REVISIT_CONDITIONS = ['Date', 'Milestone', 'External signal'];
-const PASS_REASONS = ['Market too small', 'Valuation too high', 'Weak team', 'Poor timing', 'Competitive risk', 'Not my thesis', 'Other'];
-const INACTIVE_REASONS = ['Paused', 'No longer relevant', 'Company shut down', 'Monitoring stopped'];
-
-// Gate validation
-const canPromote = (deal, targetStatus) => {
-  const errors = [];
-  
-  if (targetStatus === 'invested') {
-    // Screening → Invested: requires investment decision
-    if (!deal.investment?.amount) errors.push('Investment amount required');
-    if (!deal.investment?.vehicle) errors.push('Vehicle required');
-    if (!deal.investment?.whyYes) errors.push('"Why I said yes" note required');
-  }
-  
-  return { valid: errors.length === 0, errors };
 };
 
 // Demo Data
 const createDemoDeals = () => [
   // PORTFOLIO - Invested companies
   {
-    id: '1', companyName: 'Moment Energy', logoUrl: 'https://ui-avatars.com/api/?name=ME&background=10b981&color=fff&size=64&bold=true',
-    status: 'invested', engagement: 'active', industry: 'Energy Storage', stage: 'series-a',
-    website: 'https://momentenergy.com',
-    source: { type: 'intro', name: 'Climate Fund Network' },
+    id: '1', companyName: 'Form Energy', logoUrl: 'https://ui-avatars.com/api/?name=FE&background=10b981&color=fff&size=64&bold=true',
+    status: 'invested', engagement: 'active', industry: 'Long-Duration Storage', stage: 'series-e',
+    website: 'https://formenergy.com',
+    source: { type: 'syndicate', name: 'CladoVC' },
     lastAssessedAt: new Date(Date.now() - 5*86400000).toISOString(),
-    statusEnteredAt: new Date(Date.now() - 180*86400000).toISOString(),
+    statusEnteredAt: new Date(Date.now() - 365*86400000).toISOString(),
     lastActivity: new Date(Date.now() - 5*86400000).toISOString(),
     lastUpdateReceived: new Date(Date.now() - 14*86400000).toISOString(),
-    createdAt: new Date(Date.now() - 240*86400000).toISOString(),
+    createdAt: new Date(Date.now() - 400*86400000).toISOString(),
+    overview: 'Iron-air battery technology enabling multi-day energy storage at 1/10th the cost of lithium-ion. Critical infrastructure for a fully renewable grid.',
     founders: [
-      { name: 'Sumreen Rattan', role: 'CEO', linkedIn: 'https://linkedin.com/in/sumreenrattan', email: 'sumreen@momentenergy.com', background: 'Ex-Tesla Energy, Stanford Engineering', yearsExperience: 12 },
-      { name: 'Edward Chiang', role: 'CTO', linkedIn: 'https://linkedin.com/in/edwardchiang', email: 'edward@momentenergy.com', background: 'Battery systems engineer, MIT PhD', yearsExperience: 10 }
+      { name: 'Mateo Jaramillo', role: 'CEO', background: 'Ex-Tesla VP of Energy Products, Tesla Powerwall & Megapack creator', yearsExperience: 20 },
+      { name: 'Yet-Ming Chiang', role: 'Co-Founder', background: 'MIT Materials Science professor, battery chemistry pioneer', yearsExperience: 30 }
     ],
-    terms: {
-      instrument: 'SAFE',
-      cap: 25000000,
-      discount: null,
-      proRata: true,
-      mfn: false,
-      boardSeat: false,
-      notes: 'Post-money SAFE'
-    },
-    attachments: [
-      { id: 'a1', name: 'SAFE Agreement.pdf', type: 'legal', size: '245 KB', uploadedAt: new Date(Date.now() - 180*86400000).toISOString() },
-      { id: 'a2', name: 'Monthly Update - Dec.pdf', type: 'update', size: '1.2 MB', uploadedAt: new Date(Date.now() - 14*86400000).toISOString() }
+    terms: { instrument: 'Equity', proRata: false, notes: 'Series E participation' },
+    documents: [
+      { id: 'd1', label: 'Stock Purchase Agreement', url: 'https://drive.google.com', type: 'equity', addedAt: new Date(Date.now() - 365*86400000).toISOString() },
+      { id: 'd2', label: 'K-1 2023', url: 'https://drive.google.com', type: 'tax', addedAt: new Date(Date.now() - 90*86400000).toISOString() },
     ],
-    screening: { thesis: 'Second-life EV batteries for grid storage. Circular economy play with strong unit economics.', signals: ['Founder call completed', 'Site visit'], stageFit: true, checkFit: true },
+    attachments: [],
     investment: {
-      amount: 50000, vehicle: 'SAFE', date: new Date(Date.now() - 180*86400000).toISOString(),
-      ownershipPercent: 0.4, documents: ['SAFE Agreement'],
-      whyYes: 'Brilliant circular economy model - repurposing EV batteries that still have 70-80% capacity. Strong founder-market fit with Sumreen\'s Tesla background.',
-      updateFrequency: 'monthly', metricsToWatch: ['MWh deployed', 'Cost per kWh', 'Battery supply contracts'],
-      nextUpdateExpected: new Date(Date.now() + 16*86400000).toISOString()
+      amount: 25000, vehicle: 'Equity', date: new Date(Date.now() - 365*86400000).toISOString(),
+      ownershipPercent: 0.01,
+      whyYes: 'Multi-day storage is the missing piece of the renewable grid puzzle. Iron-air chemistry is the only credible path to sub-$20/kWh at scale. Mateo built Powerwall — he knows how to ship hardware.',
+      updateFrequency: 'quarterly', metricsToWatch: ['GWh capacity installed', 'Cost per kWh', 'Utility offtake contracts'],
+      nextUpdateExpected: new Date(Date.now() + 20*86400000).toISOString()
     },
-    monitoring: {
-      healthStatus: 'thriving', fundraisingStatus: 'not-raising', runwayMonths: 18,
-      wouldInvestAgain: true, wouldIntro: true,
-      followOns: []
-    },
+    monitoring: { healthStatus: 'thriving', fundraisingStatus: 'not-raising', runwayMonths: 24, wouldInvestAgain: true, wouldIntro: true, followOns: [] },
     milestones: [
-      { id: 'm1', type: 'partnership', title: 'BMW Partnership', description: 'Exclusive battery supply agreement for North America', date: new Date(Date.now() - 90*86400000).toISOString() },
-      { id: 'm2', type: 'growth', title: '10 MWh Deployed', description: 'First commercial installations live', date: new Date(Date.now() - 60*86400000).toISOString() },
-      { id: 'm3', type: 'hiring', title: 'VP Operations hired', description: 'Ex-Fluence, scaling manufacturing', date: new Date(Date.now() - 30*86400000).toISOString() }
+      { id: 'm1', type: 'fundraising', title: 'Series E — $450M', description: 'Led by ArcelorMittal and GIC. Total raised over $1B.', date: new Date(Date.now() - 300*86400000).toISOString() },
+      { id: 'm2', type: 'partnership', title: 'Georgia Power offtake', description: 'First utility-scale deployment agreement for multi-day storage', date: new Date(Date.now() - 180*86400000).toISOString() },
+      { id: 'm3', type: 'product', title: 'Weirton factory groundbreaking', description: 'Manufacturing facility in West Virginia, 750 jobs', date: new Date(Date.now() - 90*86400000).toISOString() },
+      { id: 'm4', type: 'update', title: 'Founder update', description: 'First battery systems rolling off the line. On track for utility delivery Q3.', date: new Date(Date.now() - 14*86400000).toISOString() }
     ]
   },
   {
-    id: '2', companyName: 'Excir', logoUrl: 'https://ui-avatars.com/api/?name=EX&background=059669&color=fff&size=64&bold=true',
-    status: 'invested', engagement: 'active', industry: 'Critical Minerals', stage: 'seed',
-    website: 'https://excir.com',
-    source: { type: 'syndicate', name: 'Congruent Ventures' },
-    lastAssessedAt: new Date(Date.now() - 8*86400000).toISOString(),
-    statusEnteredAt: new Date(Date.now() - 120*86400000).toISOString(),
-    lastActivity: new Date(Date.now() - 8*86400000).toISOString(),
-    lastUpdateReceived: new Date(Date.now() - 20*86400000).toISOString(),
-    createdAt: new Date(Date.now() - 150*86400000).toISOString(),
-    founders: [
-      { name: 'Dr. Gisele Azimi', role: 'CEO', linkedIn: 'https://linkedin.com/in/giseleazimi', email: 'gisele@excir.com', background: 'University of Toronto professor, rare earth extraction pioneer', yearsExperience: 15 }
-    ],
-    terms: {
-      instrument: 'SAFE',
-      cap: 15000000,
-      discount: 20,
-      proRata: true,
-      mfn: true
-    },
-    attachments: [
-      { id: 'a1', name: 'SAFE Agreement.pdf', type: 'legal', size: '234 KB', uploadedAt: new Date(Date.now() - 120*86400000).toISOString() }
-    ],
-    screening: { thesis: 'Novel extraction process for rare earth elements from e-waste. Critical for supply chain independence.', signals: ['Founder call completed', 'Lab tour'], stageFit: true, checkFit: true },
-    investment: {
-      amount: 35000, vehicle: 'SAFE', date: new Date(Date.now() - 120*86400000).toISOString(),
-      ownershipPercent: 0.3, documents: ['SAFE Agreement'],
-      whyYes: 'Gisele is a world expert in rare earth extraction. The geopolitical tailwinds are massive - we need domestic critical mineral supply chains.',
-      updateFrequency: 'quarterly', metricsToWatch: ['Extraction efficiency', 'Pilot plant progress', 'Strategic partnerships']
-    },
-    monitoring: {
-      healthStatus: 'stable', fundraisingStatus: 'exploring', runwayMonths: 14,
-      wouldInvestAgain: true, wouldIntro: true
-    },
-    milestones: [
-      { id: 'm1', type: 'product', title: 'Pilot Plant Operational', description: 'First full-scale extraction demonstrated', date: new Date(Date.now() - 45*86400000).toISOString() },
-      { id: 'm2', type: 'partnership', title: 'DOE Grant', description: '$2M Department of Energy research grant', date: new Date(Date.now() - 25*86400000).toISOString() }
-    ]
-  },
-  {
-    id: '3', companyName: 'Sanctuary AI', logoUrl: 'https://ui-avatars.com/api/?name=SA&background=6366f1&color=fff&size=64&bold=true',
-    status: 'invested', engagement: 'active', industry: 'Robotics / AI', stage: 'series-b',
-    website: 'https://sanctuary.ai',
-    source: { type: 'intro', name: 'Existing LP' },
-    lastAssessedAt: new Date(Date.now() - 3*86400000).toISOString(),
-    isLegacyPortfolio: true,
-    statusEnteredAt: new Date(Date.now() - 400*86400000).toISOString(),
-    lastActivity: new Date(Date.now() - 3*86400000).toISOString(),
-    lastUpdateReceived: new Date(Date.now() - 10*86400000).toISOString(),
-    createdAt: new Date(Date.now() - 500*86400000).toISOString(),
-    founders: [
-      { name: 'Geordie Rose', role: 'CEO', linkedIn: 'https://linkedin.com/in/geordierose', email: 'geordie@sanctuary.ai', background: 'Founder of D-Wave, quantum computing pioneer', yearsExperience: 25 },
-      { name: 'Suzanne Gildert', role: 'CTO', linkedIn: 'https://linkedin.com/in/suzannegildert', email: 'suzanne@sanctuary.ai', background: 'D-Wave founding team, AI researcher', yearsExperience: 18 }
-    ],
-    terms: {
-      instrument: 'Equity',
-      valuation: 200000000,
-      proRata: true,
-      boardSeat: false,
-      notes: 'Series A participation, followed on in B'
-    },
-    attachments: [
-      { id: 'a1', name: 'Stock Purchase Agreement.pdf', type: 'legal', size: '1.8 MB', uploadedAt: new Date(Date.now() - 400*86400000).toISOString() },
-      { id: 'a2', name: 'Q4 Investor Update.pdf', type: 'update', size: '4.2 MB', uploadedAt: new Date(Date.now() - 10*86400000).toISOString() }
-    ],
-    investment: {
-      amount: 75000, vehicle: 'Equity', date: new Date(Date.now() - 400*86400000).toISOString(),
-      ownershipPercent: 0.1, documents: ['Stock Purchase Agreement', 'Investor Rights Agreement'],
-      whyYes: 'Geordie built D-Wave. Now building general-purpose humanoid robots. This is the team that can actually pull off human-level AI embodiment.',
-      updateFrequency: 'quarterly', metricsToWatch: ['Robot deployments', 'Task completion rate', 'Manufacturing scale'],
-      nextUpdateExpected: new Date(Date.now() + 60*86400000).toISOString()
-    },
-    monitoring: {
-      healthStatus: 'thriving', fundraisingStatus: 'closed', runwayMonths: 30,
-      wouldInvestAgain: true, wouldIntro: true,
-      followOns: [
-        { date: new Date(Date.now() - 200*86400000).toISOString(), amount: 50000, notes: 'Series B pro-rata' }
-      ]
-    },
-    milestones: [
-      { id: 'm1', type: 'product', title: 'Phoenix Robot Unveiled', description: 'First general-purpose humanoid robot demo', date: new Date(Date.now() - 300*86400000).toISOString() },
-      { id: 'm2', type: 'fundraising', title: 'Series B Close', description: '$140M led by Accel', date: new Date(Date.now() - 200*86400000).toISOString() },
-      { id: 'm3', type: 'partnership', title: 'Magna Partnership', description: 'Manufacturing partnership for robot production', date: new Date(Date.now() - 100*86400000).toISOString() },
-      { id: 'm4', type: 'hiring', title: 'Team reached 150', description: 'Major AI/ML hiring push', date: new Date(Date.now() - 45*86400000).toISOString() },
-      { id: 'm5', type: 'product', title: 'First Commercial Deployment', description: 'Pilot with major retailer', date: new Date(Date.now() - 15*86400000).toISOString() }
-    ]
-  },
-  // LEADS - Active screening
-  {
-    id: '4', companyName: 'Form Energy', logoUrl: 'https://ui-avatars.com/api/?name=FE&background=f59e0b&color=fff&size=64&bold=true',
-    status: 'screening', engagement: 'active', industry: 'Energy Storage', stage: 'series-e',
-    website: 'https://formenergy.com',
-    source: { type: 'research', name: 'Climate Tech Weekly' },
-    loiDue: new Date(Date.now() + 14*86400000).toISOString(),
-    lastAssessedAt: new Date(Date.now() - 3*86400000).toISOString(),
-    statusEnteredAt: new Date(Date.now() - 10*86400000).toISOString(),
-    lastActivity: new Date(Date.now() - 3*86400000).toISOString(),
-    createdAt: new Date(Date.now() - 10*86400000).toISOString(),
-    founders: [
-      { name: 'Mateo Jaramillo', role: 'CEO', linkedIn: 'https://linkedin.com/in/mateojaramillo', email: 'contact@formenergy.com', background: 'Ex-Tesla VP Energy, created Powerwall/Powerpack', yearsExperience: 20 },
-      { name: 'Yet-Ming Chiang', role: 'Chief Scientist', linkedIn: 'https://linkedin.com/in/yetmingchiang', background: 'MIT Professor, founded A123 Systems', yearsExperience: 35 }
-    ],
-    terms: {
-      instrument: 'Secondary',
-      notes: 'Exploring secondary market opportunities'
-    },
-    dealTerms: {
-      raising: 0,
-      valuation: 2000000000
-    },
-    attachments: [
-      { id: 'a1', name: 'Public Analysis.pdf', type: 'deck', size: '2.1 MB', uploadedAt: new Date(Date.now() - 8*86400000).toISOString() }
-    ],
-    screening: { 
-      thesis: 'Iron-air batteries for 100-hour storage. Could be transformational for grid-scale renewable integration.', 
-      signals: ['Public research', 'Industry contacts'], 
-      stageFit: false, 
-      checkFit: true 
-    },
-    investment: { amount: 100000 },
-    workingNotes: [
-      { id: 'n1', type: 'user', content: 'Mateo built Tesla Energy from scratch. Yet-Ming is the godfather of battery chemistry. Dream team for long-duration storage.', timestamp: new Date(Date.now() - 7*86400000).toISOString() },
-      { id: 'n2', type: 'ai', category: 'market', keyInsight: 'Long-duration storage market expected to reach $3B by 2030 - Form is the clear leader', isGap: false, userConfirmed: true, timestamp: new Date(Date.now() - 5*86400000).toISOString() },
-      { id: 'n3', type: 'user', content: 'Secondary shares becoming available - need to understand pricing and minimum check size.', timestamp: new Date(Date.now() - 3*86400000).toISOString() }
-    ],
-    hasNewSignal: true,
-    signalText: 'New manufacturing facility announced in West Virginia'
-  },
-  {
-    id: '5', companyName: 'Exowatt', logoUrl: 'https://ui-avatars.com/api/?name=EW&background=dc2626&color=fff&size=64&bold=true',
-    status: 'screening', engagement: 'active', industry: 'Clean Energy', stage: 'series-a',
+    id: '2', companyName: 'Exowatt', logoUrl: 'https://ui-avatars.com/api/?name=EW&background=f59e0b&color=fff&size=64&bold=true',
+    status: 'invested', engagement: 'active', industry: 'AI Energy Infrastructure', stage: 'seed',
     website: 'https://exowatt.com',
-    source: { type: 'intro', name: 'Sam Altman (via network)' },
-    loiDue: new Date(Date.now() + 5*86400000).toISOString(),
-    lastAssessedAt: new Date(Date.now() - 1*86400000).toISOString(),
-    statusEnteredAt: new Date(Date.now() - 7*86400000).toISOString(),
-    lastActivity: new Date(Date.now() - 1*86400000).toISOString(),
-    createdAt: new Date(Date.now() - 7*86400000).toISOString(),
+    source: { type: 'syndicate', name: 'CladoVC' },
+    lastAssessedAt: new Date(Date.now() - 3*86400000).toISOString(),
+    statusEnteredAt: new Date(Date.now() - 200*86400000).toISOString(),
+    lastActivity: new Date(Date.now() - 3*86400000).toISOString(),
+    lastUpdateReceived: new Date(Date.now() - 45*86400000).toISOString(),
+    createdAt: new Date(Date.now() - 220*86400000).toISOString(),
+    overview: 'Modular solar thermal energy storage systems purpose-built for AI data centers. Delivers firm, low-cost power without grid dependency.',
     founders: [
-      { name: 'Hannan Parvizian', role: 'CEO', linkedIn: 'https://linkedin.com/in/hannanparvizian', email: 'hannan@exowatt.com', background: 'Ex-SpaceX propulsion engineer, Caltech PhD', yearsExperience: 12 },
-      { name: 'Jack Tait', role: 'CTO', linkedIn: 'https://linkedin.com/in/jacktait', background: 'Ex-Anduril, thermal systems expert', yearsExperience: 10 }
+      { name: 'Joey Kline', role: 'CEO', background: 'Ex-SpaceX, energy infrastructure focus', yearsExperience: 10 },
     ],
-    terms: {
-      instrument: 'SAFE',
-      cap: 150000000,
-      discount: null,
-      proRata: true,
-      mfn: false,
-      notes: 'Post-money SAFE, hot round'
-    },
-    dealTerms: {
-      raising: 20000000,
-      valuation: 150000000
-    },
-    attachments: [
-      { id: 'a1', name: 'Pitch Deck.pdf', type: 'deck', size: '3.2 MB', uploadedAt: new Date(Date.now() - 6*86400000).toISOString() },
-      { id: 'a2', name: 'Technical Deep Dive.pdf', type: 'other', size: '1.8 MB', uploadedAt: new Date(Date.now() - 4*86400000).toISOString() }
+    terms: { instrument: 'SAFE', cap: 85000000, proRata: true, mfn: false },
+    documents: [
+      { id: 'd1', label: 'SAFE Agreement', url: 'https://drive.google.com', type: 'safe', addedAt: new Date(Date.now() - 200*86400000).toISOString() },
     ],
-    screening: { 
-      thesis: 'Thermal batteries + solar for 24/7 clean power to data centers. Perfect timing with AI energy demand explosion.', 
-      signals: ['Founder call completed', 'Deck reviewed', 'Reference calls in progress'], 
-      stageFit: true, 
-      checkFit: true 
+    attachments: [],
+    investment: {
+      amount: 10000, vehicle: 'SAFE', date: new Date(Date.now() - 200*86400000).toISOString(),
+      ownershipPercent: 0.02,
+      whyYes: 'AI data centers are the fastest-growing power load on the planet and the grid cannot keep up. Exowatt\'s modular solar thermal sidesteps interconnection queues entirely. SpaceX-trained hardware team gives real credibility on delivery.',
+      updateFrequency: 'quarterly', metricsToWatch: ['MW contracted', 'Data center pilots', 'Cost per MWh firm'],
+      nextUpdateExpected: new Date(Date.now() - 10*86400000).toISOString() // overdue - shows nudge
     },
-    investment: { amount: 50000 },
-    workingNotes: [
-      { id: 'n1', type: 'user', content: 'SpaceX pedigree is real - Hannan worked on Raptor engine thermal management. Exactly the hard engineering background needed.', timestamp: new Date(Date.now() - 5*86400000).toISOString() },
-      { id: 'n2', type: 'ai', category: 'market', keyInsight: 'Data center power demand growing 15% annually - hyperscalers desperate for clean baseload', isGap: false, userConfirmed: true, timestamp: new Date(Date.now() - 3*86400000).toISOString() },
-      { id: 'n3', type: 'user', content: 'Round is moving fast - Altman leading. Need to decide by EOW if we want allocation.', timestamp: new Date(Date.now() - 1*86400000).toISOString() }
-    ],
-    hasNewSignal: true,
-    signalText: 'Round closing soon - allocation available'
-  },
-  {
-    id: '6', companyName: 'Ammobia', logoUrl: 'https://ui-avatars.com/api/?name=AM&background=3b82f6&color=fff&size=64&bold=true',
-    status: 'screening', engagement: 'active', industry: 'Green Hydrogen', stage: 'seed',
-    website: 'https://ammobia.com',
-    source: { type: 'conference', name: 'Climate Tech Summit' },
-    loiDue: new Date(Date.now() + 21*86400000).toISOString(),
-    lastAssessedAt: new Date(Date.now() - 5*86400000).toISOString(),
-    statusEnteredAt: new Date(Date.now() - 14*86400000).toISOString(),
-    lastActivity: new Date(Date.now() - 5*86400000).toISOString(),
-    createdAt: new Date(Date.now() - 14*86400000).toISOString(),
-    founders: [
-      { name: 'Dr. Sarah Chen', role: 'CEO', linkedIn: 'https://linkedin.com/in/sarahchen', email: 'sarah@ammobia.com', background: 'Caltech Chemistry PhD, green ammonia researcher', yearsExperience: 12 }
-    ],
-    terms: {
-      instrument: 'SAFE',
-      cap: 12000000,
-      discount: 20,
-      proRata: true,
-      mfn: true,
-      notes: 'Seeking $3M seed'
-    },
-    dealTerms: {
-      raising: 3000000,
-      valuation: 12000000
-    },
-    attachments: [
-      { id: 'a1', name: 'Pitch Deck.pdf', type: 'deck', size: '3.4 MB', uploadedAt: new Date(Date.now() - 12*86400000).toISOString() }
-    ],
-    screening: { 
-      thesis: 'Novel catalyst for green ammonia production. Could dramatically reduce energy requirements for fertilizer production.', 
-      signals: ['Founder call', 'Deck reviewed'], 
-      stageFit: true, 
-      checkFit: true 
-    },
-    investment: { amount: 35000 },
-    workingNotes: [
-      { id: 'n1', type: 'user', content: 'Sarah\'s catalyst research is genuinely novel - 40% energy reduction vs Haber-Bosch. Published in Nature.', timestamp: new Date(Date.now() - 10*86400000).toISOString() },
-      { id: 'n2', type: 'ai', category: 'market', keyInsight: 'Ammonia is 2% of global energy use - decarbonizing it is a $100B+ opportunity', isGap: true, userConfirmed: false, timestamp: new Date(Date.now() - 8*86400000).toISOString() },
-      { id: 'n3', type: 'user', content: 'Need to understand path from lab to pilot scale. Technical risk is real but team is strong.', timestamp: new Date(Date.now() - 5*86400000).toISOString() }
+    monitoring: { healthStatus: 'stable', fundraisingStatus: 'exploring', runwayMonths: 18, wouldInvestAgain: true, wouldIntro: true, followOns: [] },
+    milestones: [
+      { id: 'm1', type: 'fundraising', title: 'Seed — $20M', description: 'Led by a16z with participation from Sam Altman', date: new Date(Date.now() - 190*86400000).toISOString() },
+      { id: 'm2', type: 'partnership', title: 'Meta pilot announced', description: 'First hyperscaler agreement for off-grid AI compute power', date: new Date(Date.now() - 100*86400000).toISOString() },
     ]
   },
   {
-    id: '7', companyName: 'Provocative', logoUrl: 'https://ui-avatars.com/api/?name=PV&background=7c3aed&color=fff&size=64&bold=true',
-    status: 'screening', engagement: 'active', industry: 'Frontier Tech', stage: 'pre-seed',
-    website: null,
-    source: { type: 'intro', name: 'Stealth referral' },
-    loiDue: new Date(Date.now() + 30*86400000).toISOString(),
-    lastAssessedAt: new Date(Date.now() - 2*86400000).toISOString(),
-    statusEnteredAt: new Date(Date.now() - 5*86400000).toISOString(),
-    lastActivity: new Date(Date.now() - 2*86400000).toISOString(),
-    createdAt: new Date(Date.now() - 5*86400000).toISOString(),
+    id: '3', companyName: 'Ammobia', logoUrl: 'https://ui-avatars.com/api/?name=AM&background=6366f1&color=fff&size=64&bold=true',
+    status: 'invested', engagement: 'active', industry: 'Green Ammonia', stage: 'seed',
+    website: 'https://ammobia.com',
+    source: { type: 'syndicate', name: 'CladoVC' },
+    lastAssessedAt: new Date(Date.now() - 10*86400000).toISOString(),
+    statusEnteredAt: new Date(Date.now() - 150*86400000).toISOString(),
+    lastActivity: new Date(Date.now() - 10*86400000).toISOString(),
+    lastUpdateReceived: new Date(Date.now() - 30*86400000).toISOString(),
+    createdAt: new Date(Date.now() - 170*86400000).toISOString(),
+    overview: 'Electrochemical green ammonia production at the point of use. Eliminates Haber-Bosch entirely — no pipeline, no shipping, fertilizer made on-farm from air, water, and renewable electricity.',
     founders: [
-      { name: 'Undisclosed', role: 'CEO', background: 'Deep tech background, stealth mode', yearsExperience: null }
+      { name: 'Travis Sherck', role: 'CEO', background: 'Chemical engineering, electrosynthesis R&D', yearsExperience: 12 },
     ],
-    terms: {
-      instrument: 'SAFE',
-      cap: 10000000,
-      discount: 20,
-      proRata: true,
-      mfn: true,
-      notes: 'Pre-seed, stealth'
-    },
-    dealTerms: {
-      raising: 2000000,
-      valuation: 10000000
-    },
-    attachments: [
-      { id: 'a1', name: 'Teaser Deck.pdf', type: 'deck', size: '1.2 MB', uploadedAt: new Date(Date.now() - 4*86400000).toISOString() }
+    terms: { instrument: 'SAFE', cap: 20000000, proRata: true, mfn: true },
+    documents: [
+      { id: 'd1', label: 'SAFE Agreement', url: 'https://drive.google.com', type: 'safe', addedAt: new Date(Date.now() - 150*86400000).toISOString() },
     ],
-    screening: { 
-      thesis: 'Frontier tech startup in stealth. Limited public information available - came through trusted referral. Need to dig deeper.', 
-      signals: ['Intro call scheduled'], 
-      stageFit: true, 
-      checkFit: true 
+    attachments: [],
+    investment: {
+      amount: 10000, vehicle: 'SAFE', date: new Date(Date.now() - 150*86400000).toISOString(),
+      ownershipPercent: 0.05,
+      whyYes: 'Ammonia is the world\'s second most-produced chemical and agriculture\'s largest emissions source. Distributed electrochemical production breaks the Haber-Bosch stranglehold. Massive TAM, hard science moat, and early traction with co-ops.',
+      updateFrequency: 'quarterly', metricsToWatch: ['kg NH3 per kWh', 'Pilot farm deployments', 'Cost vs. conventional'],
+      nextUpdateExpected: new Date(Date.now() + 45*86400000).toISOString()
     },
-    investment: { amount: 25000 },
-    workingNotes: [
-      { id: 'n1', type: 'user', content: 'Came through a trusted source but very little public info. No website, funding announcements, or founder profiles under this name yet.', timestamp: new Date(Date.now() - 4*86400000).toISOString() },
-      { id: 'n2', type: 'ai', category: 'team', keyInsight: 'Unable to verify founder backgrounds - stealth mode limits due diligence', isGap: true, userConfirmed: false, timestamp: new Date(Date.now() - 3*86400000).toISOString() },
-      { id: 'n3', type: 'user', content: 'Intro call next week. Will need to assess if the stealth approach is warranted or a red flag.', timestamp: new Date(Date.now() - 2*86400000).toISOString() }
+    monitoring: { healthStatus: 'stable', fundraisingStatus: 'not-raising', runwayMonths: 20, wouldInvestAgain: true, wouldIntro: true, followOns: [] },
+    milestones: [
+      { id: 'm1', type: 'product', title: 'Bench-scale demo', description: 'Achieved target energy efficiency at lab scale — 8.5 MWh/tonne NH3', date: new Date(Date.now() - 120*86400000).toISOString() },
+      { id: 'm2', type: 'partnership', title: 'Iowa co-op pilot', description: 'First on-farm deployment with 300-acre corn operation', date: new Date(Date.now() - 45*86400000).toISOString() },
+      { id: 'm3', type: 'update', title: 'Founder update', description: 'Pilot running well. Yield 12% above projection. Starting conversations with two more co-ops.', date: new Date(Date.now() - 30*86400000).toISOString() }
     ]
   }
 ];
@@ -1282,223 +1054,6 @@ const SignalIcon = ({ type, active }) => {
   );
 };
 
-// Defer Modal - for moving deals to Deferred/Watching
-const DeferModal = ({ deal, onConfirm, onClose }) => {
-  const [reason, setReason] = useState('');
-  const [condition, setCondition] = useState('');
-  const [conditionDetail, setConditionDetail] = useState('');
-  
-  const canConfirm = reason && condition && conditionDetail.trim();
-  
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-      <div className="bg-white dark:bg-stone-800 rounded-2xl w-full max-w-md p-6 shadow-xl">
-        <h2 className="text-lg font-bold text-stone-900 dark:text-stone-100 mb-1">Defer Decision</h2>
-        <p className="text-sm text-stone-500 dark:text-stone-400 mb-6">{deal.companyName} will move to Deferred</p>
-        
-        <div className="space-y-4">
-          <div>
-            <label className="text-xs font-semibold text-stone-700 dark:text-stone-300 uppercase tracking-wide">Defer reason</label>
-            <div className="flex flex-wrap gap-2 mt-2">
-              {DEFER_REASONS.map(r => (
-                <button
-                  key={r}
-                  onClick={() => setReason(r)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all border ${reason === r ? 'bg-[#5B6DC4] text-white border-stone-900 dark:border-stone-100' : 'bg-white dark:bg-stone-700 text-stone-600 dark:text-stone-300 border-stone-300 dark:border-stone-600 hover:border-stone-400'}`}
-                >
-                  {r}
-                </button>
-              ))}
-            </div>
-          </div>
-          
-          <div>
-            <label className="text-xs font-semibold text-stone-700 dark:text-stone-300 uppercase tracking-wide">Revisit when</label>
-            <div className="flex flex-wrap gap-2 mt-2">
-              {REVISIT_CONDITIONS.map(c => (
-                <button
-                  key={c}
-                  onClick={() => setCondition(c)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all border ${condition === c ? 'bg-[#5B6DC4] text-white border-stone-900 dark:border-stone-100' : 'bg-white dark:bg-stone-700 text-stone-600 dark:text-stone-300 border-stone-300 dark:border-stone-600 hover:border-stone-400'}`}
-                >
-                  {c}
-                </button>
-              ))}
-            </div>
-          </div>
-          
-          <div>
-            <label className="text-xs font-semibold text-stone-700 dark:text-stone-300 uppercase tracking-wide">
-              {condition === 'Date' ? 'Revisit date' : condition === 'Milestone' ? 'What milestone?' : 'What signal?'}
-            </label>
-            {condition === 'Date' ? (
-              <input 
-                type="date" 
-                value={conditionDetail}
-                onChange={e => setConditionDetail(e.target.value)}
-                className="w-full mt-2 p-3 bg-white dark:bg-stone-700 border border-stone-300 dark:border-stone-600 rounded-xl text-sm text-stone-900 dark:text-stone-100"
-              />
-            ) : (
-              <input 
-                type="text"
-                value={conditionDetail}
-                onChange={e => setConditionDetail(e.target.value)}
-                placeholder={condition === 'Milestone' ? 'e.g., Closes Series A' : 'e.g., Market shift'}
-                className="w-full mt-2 p-3 bg-white dark:bg-stone-700 border border-stone-300 dark:border-stone-600 rounded-xl text-sm text-stone-900 dark:text-stone-100 placeholder-stone-400"
-              />
-            )}
-          </div>
-        </div>
-        
-        <div className="flex gap-3 mt-6">
-          <button onClick={onClose} className="flex-1 py-3 text-sm font-medium text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-700 rounded-xl transition-colors">
-            Cancel
-          </button>
-          <button 
-            onClick={() => canConfirm && onConfirm({ reason, condition, conditionDetail })}
-            disabled={!canConfirm}
-            className={`flex-1 py-3 text-sm font-bold rounded-xl transition-colors ${canConfirm ? 'bg-[#5B6DC4] text-white hover:bg-stone-800' : 'bg-stone-200 dark:bg-stone-700 text-stone-400 cursor-not-allowed'}`}
-          >
-            Defer
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Invest Modal - for confirming investment with "Why did I say yes?"
-const InvestModal = ({ deal, onConfirm, onClose }) => {
-  const [whyYes, setWhyYes] = useState('');
-  const [amount, setAmount] = useState(deal.investment?.amount || '');
-  const [vehicle, setVehicle] = useState(deal.investment?.vehicle || 'SAFE');
-  
-  const canConfirm = whyYes.trim().length >= 10 && amount;
-  
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-      <div className="bg-white dark:bg-stone-800 rounded-2xl w-full max-w-md p-6 shadow-xl">
-        <h2 className="text-lg font-bold text-stone-900 dark:text-stone-100 mb-1">Confirm Investment</h2>
-        <p className="text-sm text-stone-500 dark:text-stone-400 mb-6">{deal.companyName} will move to Portfolio</p>
-        
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs font-semibold text-stone-700 dark:text-stone-300 uppercase tracking-wide">Amount</label>
-              <input 
-                type="number"
-                value={amount}
-                onChange={e => setAmount(e.target.value)}
-                placeholder="25000"
-                className="w-full mt-2 p-3 bg-white dark:bg-stone-700 border border-stone-300 dark:border-stone-600 rounded-xl text-sm text-stone-900 dark:text-stone-100 placeholder-stone-400"
-              />
-            </div>
-            <div className="relative">
-              <label className="text-xs font-semibold text-stone-700 dark:text-stone-300 uppercase tracking-wide">Vehicle</label>
-              <select 
-                value={vehicle}
-                onChange={e => setVehicle(e.target.value)}
-                className="w-full mt-2 p-3 pr-10 bg-white dark:bg-stone-700 border border-stone-300 dark:border-stone-600 rounded-xl text-sm text-stone-900 dark:text-stone-100 appearance-none cursor-pointer"
-              >
-                <option value="SAFE">SAFE</option>
-                <option value="Convertible Note">Convertible Note</option>
-                <option value="Equity">Equity</option>
-                <option value="Other">Other</option>
-              </select>
-              <svg className="absolute right-3 top-[38px] pointer-events-none text-stone-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
-            </div>
-          </div>
-          
-          <div>
-            <label className="text-xs font-semibold text-stone-700 dark:text-stone-300 uppercase tracking-wide">Why did I say yes?</label>
-            <p className="text-xs text-stone-400 dark:text-stone-500 mt-1 mb-2">This note is immutable and helps you learn from outcomes.</p>
-            <textarea 
-              value={whyYes}
-              onChange={e => setWhyYes(e.target.value)}
-              placeholder="One sentence capturing why you decided to invest..."
-              rows={2}
-              className="w-full p-3 bg-white dark:bg-stone-700 border border-stone-300 dark:border-stone-600 rounded-xl text-sm text-stone-900 dark:text-stone-100 placeholder-stone-400 resize-none"
-            />
-          </div>
-        </div>
-        
-        <div className="flex gap-3 mt-6">
-          <button onClick={onClose} className="flex-1 py-3 text-sm font-medium text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-700 rounded-xl transition-colors">
-            Cancel
-          </button>
-          <button 
-            onClick={() => canConfirm && onConfirm({ whyYes, amount: Number(amount), vehicle })}
-            disabled={!canConfirm}
-            className={`flex-1 py-3 text-sm font-bold rounded-xl transition-colors ${canConfirm ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-stone-200 dark:bg-stone-700 text-stone-400 cursor-not-allowed'}`}
-          >
-            Invest
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Pass Modal - for passing on a deal with "Why pass?"
-const PassModal = ({ deal, onConfirm, onClose }) => {
-  const [reason, setReason] = useState('');
-  const [whyPass, setWhyPass] = useState('');
-  
-  const canConfirm = reason && whyPass.trim().length >= 10;
-  
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-      <div className="bg-white dark:bg-stone-800 rounded-2xl w-full max-w-md p-6 shadow-xl">
-        <h2 className="text-lg font-bold text-stone-900 dark:text-stone-100 mb-1">Pass on Deal</h2>
-        <p className="text-sm text-stone-500 dark:text-stone-400 mb-6">{deal.companyName} will be archived</p>
-        
-        <div className="space-y-4">
-          <div>
-            <label className="text-xs font-semibold text-stone-700 dark:text-stone-300 uppercase tracking-wide">Primary reason</label>
-            <div className="flex flex-wrap gap-2 mt-2">
-              {PASS_REASONS.map(r => (
-                <button
-                  key={r}
-                  onClick={() => setReason(r)}
-                  className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all border ${reason === r ? 'bg-[#5B6DC4] text-white border-stone-900 dark:border-stone-100' : 'bg-white dark:bg-stone-700 text-stone-600 dark:text-stone-300 border-stone-300 dark:border-stone-600 hover:border-stone-400'}`}
-                >
-                  {r}
-                </button>
-              ))}
-            </div>
-          </div>
-          
-          <div>
-            <label className="text-xs font-semibold text-stone-700 dark:text-stone-300 uppercase tracking-wide">Why pass?</label>
-            <p className="text-xs text-stone-400 dark:text-stone-500 mt-1 mb-2">This note is immutable and helps you learn from outcomes.</p>
-            <textarea 
-              value={whyPass}
-              onChange={e => setWhyPass(e.target.value)}
-              placeholder="One sentence capturing why you passed..."
-              rows={2}
-              className="w-full p-3 bg-white dark:bg-stone-700 border border-stone-300 dark:border-stone-600 rounded-xl text-sm text-stone-900 dark:text-stone-100 placeholder-stone-400 resize-none"
-            />
-          </div>
-        </div>
-        
-        <div className="flex gap-3 mt-6">
-          <button onClick={onClose} className="flex-1 py-3 text-sm font-medium text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-700 rounded-xl transition-colors">
-            Cancel
-          </button>
-          <button 
-            onClick={() => canConfirm && onConfirm({ reason, whyPass })}
-            disabled={!canConfirm}
-            className={`flex-1 py-3 text-sm font-bold rounded-xl transition-colors ${canConfirm ? 'bg-stone-500 text-white hover:bg-stone-600' : 'bg-stone-200 dark:bg-stone-700 text-stone-400 cursor-not-allowed'}`}
-          >
-            Pass
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Settings Page Component
 const SettingsPage = ({ settings, onUpdate, onClose }) => {
   const [localSettings, setLocalSettings] = useState(settings);
   const [activeSection, setActiveSection] = useState('profile');
@@ -1849,977 +1404,6 @@ const SettingsPage = ({ settings, onUpdate, onClose }) => {
   );
 };
 
-// Dashboard Page Component
-const DashboardPage = ({ deals, onClose }) => {
-  const [viewBy, setViewBy] = useState('industry'); // 'industry' | 'stage' | 'source' | 'check'
-  const [showDiscipline, setShowDiscipline] = useState(false);
-  const [showBeliefs, setShowBeliefs] = useState(false);
-  const [showTimeView, setShowTimeView] = useState(false);
-  
-  // Calculate all deal categories
-  const portfolioDeals = deals.filter(d => d.status === 'invested');
-  const deferredDeals = deals.filter(d => d.status === 'deferred');
-  const passedDeals = deals.filter(d => d.status === 'passed');
-  
-  // Total capital deployed
-  const totalCapital = portfolioDeals.reduce((sum, deal) => {
-    const amount = deal.investment?.amount || 0;
-    return sum + (typeof amount === 'string' ? parseFloat(amount) || 0 : amount);
-  }, 0);
-  
-  // Average check size
-  const avgCheckSize = portfolioDeals.length > 0 ? totalCapital / portfolioDeals.length : 0;
-  
-  // Format currency
-  const fmtCurrency = (amount) => {
-    if (amount >= 1000000) return `$${(amount / 1000000).toFixed(1)}M`;
-    if (amount >= 1000) return `$${(amount / 1000).toFixed(0)}K`;
-    return `$${amount.toLocaleString()}`;
-  };
-  
-  // Colors
-  const industryColors = {
-    'AI/ML': '#8B5CF6', 'Fintech': '#10B981', 'HealthTech': '#F59E0B',
-    'DevTools': '#3B82F6', 'Security': '#EF4444', 'Analytics': '#EC4899',
-    'SaaS': '#06B6D4', 'Other': '#78716C'
-  };
-  
-  const stageColors = {
-    'pre-seed': '#F59E0B', 'seed': '#10B981', 'series-a': '#3B82F6',
-    'series-b': '#8B5CF6', 'growth': '#EC4899', 'Unknown': '#78716C'
-  };
-  
-  const sourceColors = {
-    'Warm intro': '#10B981', 'Cold inbound': '#3B82F6', 'Syndicate': '#8B5CF6',
-    'Event': '#F59E0B', 'Other': '#78716C'
-  };
-  
-  const checkColors = {
-    '<$25K': '#78716C', '$25-50K': '#5B6DC4', '$50-100K': '#10B981', '$100K+': '#8B5CF6'
-  };
-  
-  const stageLabels = {
-    'pre-seed': 'Pre-seed', 'seed': 'Seed', 'series-a': 'Series A',
-    'series-b': 'Series B', 'growth': 'Growth'
-  };
-  
-  // === BREAKDOWNS ===
-  
-  const industryBreakdown = portfolioDeals.reduce((acc, deal) => {
-    const key = deal.industry || 'Other';
-    if (!acc[key]) acc[key] = { count: 0, amount: 0, target: null };
-    acc[key].count += 1;
-    acc[key].amount += deal.investment?.amount || 0;
-    // Simulated targets
-    if (key === 'DevTools') acc[key].target = 40;
-    if (key === 'Analytics') acc[key].target = 30;
-    return acc;
-  }, {});
-  
-  const stageBreakdown = portfolioDeals.reduce((acc, deal) => {
-    const key = deal.stage || 'Unknown';
-    if (!acc[key]) acc[key] = { count: 0, amount: 0, target: null };
-    acc[key].count += 1;
-    acc[key].amount += deal.investment?.amount || 0;
-    // Simulated targets
-    if (key === 'seed') acc[key].target = 50;
-    return acc;
-  }, {});
-  
-  const sourceBreakdown = portfolioDeals.reduce((acc, deal) => {
-    const key = deal.source || deal.investment?.source || 'Other';
-    if (!acc[key]) acc[key] = { count: 0, amount: 0 };
-    acc[key].count += 1;
-    acc[key].amount += deal.investment?.amount || 0;
-    return acc;
-  }, {});
-  
-  const checkBreakdown = portfolioDeals.reduce((acc, deal) => {
-    const amount = deal.investment?.amount || 0;
-    let band = '<$25K';
-    if (amount >= 100000) band = '$100K+';
-    else if (amount >= 50000) band = '$50-100K';
-    else if (amount >= 25000) band = '$25-50K';
-    if (!acc[band]) acc[band] = { count: 0, amount: 0 };
-    acc[band].count += 1;
-    acc[band].amount += amount;
-    return acc;
-  }, {});
-  
-  // Get current breakdown
-  const getBreakdown = () => {
-    if (viewBy === 'stage') return { data: stageBreakdown, colors: stageColors, labels: stageLabels };
-    if (viewBy === 'source') return { data: sourceBreakdown, colors: sourceColors, labels: {} };
-    if (viewBy === 'check') return { data: checkBreakdown, colors: checkColors, labels: {} };
-    return { data: industryBreakdown, colors: industryColors, labels: {} };
-  };
-  
-  const breakdown = getBreakdown();
-  
-  // === TIME-BASED BREAKDOWN (for stacked bar over time) ===
-  const getTimeBreakdown = () => {
-    // Group investments by half-year periods
-    const periods = {};
-    const colors = breakdown.colors;
-    const labels = breakdown.labels;
-    
-    portfolioDeals.forEach(deal => {
-      const date = new Date(deal.investment?.date || deal.statusEnteredAt || deal.createdAt);
-      const year = date.getFullYear();
-      const half = date.getMonth() < 6 ? 'H1' : 'H2';
-      const periodKey = `${half} ${year}`;
-      
-      if (!periods[periodKey]) {
-        periods[periodKey] = { total: 0, breakdown: {}, timestamp: date.getTime() };
-      }
-      
-      // Get the category based on current view
-      let category;
-      if (viewBy === 'stage') category = deal.stage || 'unknown';
-      else if (viewBy === 'source') category = deal.source || deal.investment?.source || 'Other';
-      else if (viewBy === 'check') {
-        const amount = deal.investment?.amount || 0;
-        if (amount >= 100000) category = '$100K+';
-        else if (amount >= 50000) category = '$50-100K';
-        else if (amount >= 25000) category = '$25-50K';
-        else category = '<$25K';
-      }
-      else category = deal.industry || 'Other';
-      
-      const amount = deal.investment?.amount || 0;
-      periods[periodKey].total += amount;
-      periods[periodKey].breakdown[category] = (periods[periodKey].breakdown[category] || 0) + amount;
-    });
-    
-    // Sort by time and convert to percentages
-    return Object.entries(periods)
-      .sort((a, b) => a[1].timestamp - b[1].timestamp)
-      .slice(-4) // Last 4 periods max
-      .map(([period, data]) => ({
-        period,
-        total: data.total,
-        segments: Object.entries(data.breakdown).map(([cat, amount]) => ({
-          category: labels[cat] || cat,
-          percentage: data.total > 0 ? Math.round((amount / data.total) * 100) : 0,
-          color: colors[cat] || '#78716C'
-        })).sort((a, b) => b.percentage - a.percentage)
-      }));
-  };
-  
-  const timeBreakdown = getTimeBreakdown();
-  
-  // === ALIGNMENT & TENSION (only show exceptions, soft framing) ===
-  
-  const getTensions = () => {
-    const tensions = [];
-    
-    // Check for overweight allocations
-    Object.entries(industryBreakdown).forEach(([industry, data]) => {
-      if (data.target && totalCapital > 0) {
-        const pct = Math.round((data.amount / totalCapital) * 100);
-        const diff = pct - data.target;
-        if (diff > 15) {
-          tensions.push({
-            text: `${industry} exposure is trending above target (+${diff}%)`,
-            type: 'overweight'
-          });
-        }
-      }
-    });
-    
-    // Check for underweight stages
-    Object.entries(stageBreakdown).forEach(([stage, data]) => {
-      if (data.target && totalCapital > 0) {
-        const pct = Math.round((data.amount / totalCapital) * 100);
-        if (pct < data.target - 20) {
-          tensions.push({
-            text: `${stageLabels[stage] || stage} investments haven't materialized yet`,
-            type: 'underweight'
-          });
-        }
-      }
-    });
-    
-    // Check for concentration
-    const topIndustry = Object.entries(industryBreakdown).sort((a, b) => b[1].amount - a[1].amount)[0];
-    if (topIndustry && totalCapital > 0) {
-      const pct = Math.round((topIndustry[1].amount / totalCapital) * 100);
-      if (pct > 60) {
-        tensions.push({
-          text: `${topIndustry[0]} now represents ${pct}% of deployed capital`,
-          type: 'concentration'
-        });
-      }
-    }
-    
-    return tensions.slice(0, 3); // Max 3
-  };
-  
-  const tensions = getTensions();
-  
-  // === MISSED SIGNALS (gentle framing) ===
-  
-  const getMissedSignals = () => {
-    const signals = [];
-    
-    // Deferred that showed activity
-    deferredDeals.forEach(deal => {
-      const deferralTime = new Date(deal.statusEnteredAt || Date.now()).getTime();
-      const hasNewSignals = deal.milestones?.some(m => 
-        new Date(m.date).getTime() > deferralTime && 
-        (m.type === 'fundraising' || m.type === 'growth')
-      );
-      if (hasNewSignals) {
-        signals.push({
-          company: deal.companyName,
-          context: 'Showed fundraising activity since you deferred',
-          type: 'deferred'
-        });
-      }
-    });
-    
-    // Passed that raised (would come from tracking)
-    passedDeals.forEach(deal => {
-      if (deal.laterRaised) {
-        signals.push({
-          company: deal.companyName,
-          context: 'Raised funding after you passed',
-          type: 'passed'
-        });
-      }
-    });
-    
-    return signals.slice(0, 2); // Max 2
-  };
-  
-  const missedSignals = getMissedSignals();
-  
-  // === BELIEFS UNDER STRESS ===
-  
-  const getBeliefs = () => {
-    const beliefs = [];
-    const passReasons = {};
-    
-    passedDeals.forEach(d => {
-      const reasons = d.passed?.reasons || [];
-      reasons.forEach(r => {
-        if (!passReasons[r]) passReasons[r] = { count: 0, deals: [] };
-        passReasons[r].count += 1;
-        passReasons[r].deals.push(d.companyName);
-      });
-    });
-    
-    Object.entries(passReasons)
-      .filter(([_, data]) => data.count >= 2)
-      .slice(0, 3)
-      .forEach(([reason, data]) => {
-        beliefs.push({
-          belief: reason,
-          frequency: `Used ${data.count}x`,
-          outcome: 'Tracking outcomes...'
-        });
-      });
-    
-    return beliefs;
-  };
-  
-  const beliefs = getBeliefs();
-  
-  // === CONTINUITY SIGNALS (what's changed, not what to do) ===
-  
-  const getContinuitySignals = () => {
-    const signals = [];
-    
-    // For deferred deals: check for new activity since deferral
-    deferredDeals.forEach(deal => {
-      const deferralTime = new Date(deal.statusEnteredAt || Date.now()).getTime();
-      const newMilestones = deal.milestones?.filter(m => 
-        new Date(m.date).getTime() > deferralTime
-      ) || [];
-      
-      if (newMilestones.length > 0) {
-        const deferReason = deal.deferData?.reason || deal.watching?.trigger || 'timing';
-        signals.push({
-          type: 'deferred',
-          company: deal.companyName,
-          headline: `${deal.companyName} has shown activity since you deferred`,
-          context: `You deferred citing "${deferReason}." New: ${newMilestones.map(m => m.description || m.type).slice(0, 2).join(', ')}.`,
-          signalCount: newMilestones.length,
-          deal
-        });
-      }
-    });
-    
-    // For invested companies: check for follow-on signals
-    portfolioDeals.forEach(deal => {
-      const investTime = new Date(deal.investment?.date || deal.statusEnteredAt || Date.now()).getTime();
-      const followOnSignals = deal.milestones?.filter(m => 
-        new Date(m.date).getTime() > investTime && 
-        (m.type === 'fundraising' || m.type === 'growth' || m.type === 'partnership')
-      ) || [];
-      
-      // Also check monitoring data
-      const followOns = deal.monitoring?.followOns || [];
-      const totalSignals = followOnSignals.length + followOns.length;
-      
-      if (totalSignals > 0) {
-        const signalDescriptions = [
-          ...followOnSignals.map(m => m.description || m.type),
-          ...followOns.map(f => f.round || f.description || 'follow-on activity')
-        ].slice(0, 2);
-        
-        signals.push({
-          type: 'invested',
-          company: deal.companyName,
-          headline: `${deal.companyName} showing follow-on activity`,
-          context: `Since your investment: ${signalDescriptions.join(', ')}.`,
-          signalCount: totalSignals,
-          deal
-        });
-      }
-    });
-    
-    // For passed deals: check if they later raised (would come from tracking)
-    passedDeals.forEach(deal => {
-      if (deal.laterRaised || deal.milestones?.some(m => m.type === 'fundraising')) {
-        const passReason = deal.passed?.reasons?.[0] || deal.passed?.whyPass?.slice(0, 50) || 'not a fit';
-        const passDate = deal.statusEnteredAt || deal.passed?.passedAt;
-        const monthsAgo = passDate ? Math.round((Date.now() - new Date(passDate).getTime()) / (30 * 86400000)) : null;
-        const fundingSignals = deal.milestones?.filter(m => m.type === 'fundraising').length || 1;
-        
-        signals.push({
-          type: 'passed',
-          company: deal.companyName,
-          headline: `${deal.companyName} raised funding${monthsAgo ? ` ${monthsAgo}mo` : ''} after you passed`,
-          context: `Your pass reason: "${passReason}."`,
-          signalCount: fundingSignals,
-          deal
-        });
-      }
-    });
-    
-    // For screening deals: check for time-based signals
-    const screeningDeals = deals.filter(d => d.status === 'screening');
-    screeningDeals.forEach(deal => {
-      const createdTime = new Date(deal.createdAt || Date.now()).getTime();
-      const daysInScreening = Math.round((Date.now() - createdTime) / 86400000);
-      
-      if (daysInScreening > 30) {
-        signals.push({
-          type: 'screening',
-          company: deal.companyName,
-          headline: `${deal.companyName} in screening for ${daysInScreening} days`,
-          context: 'Longer evaluation periods can signal uncertainty worth resolving.',
-          signalCount: 1,
-          deal
-        });
-      }
-    });
-    
-    return signals.slice(0, 5); // Max 5 signals
-  };
-  
-  const continuitySignals = getContinuitySignals();
-  
-  // === REASONING PATTERNS (adapts to current view) ===
-  
-  const getReasoningPatterns = () => {
-    const patterns = [];
-    
-    // === INDUSTRY-SPECIFIC PATTERNS (when viewing by industry) ===
-    if (viewBy === 'industry') {
-      // Find best/worst performing industries by follow-on signals
-      const industryPerformance = {};
-      portfolioDeals.forEach(d => {
-        const ind = d.industry || 'Other';
-        if (!industryPerformance[ind]) industryPerformance[ind] = { total: 0, withSignals: 0 };
-        industryPerformance[ind].total++;
-        if (d.milestones?.some(m => m.type === 'fundraising' || m.type === 'growth') || d.monitoring?.followOns?.length > 0) {
-          industryPerformance[ind].withSignals++;
-        }
-      });
-      
-      const industries = Object.entries(industryPerformance).filter(([_, v]) => v.total >= 1);
-      const withSignals = industries.filter(([_, v]) => v.withSignals > 0);
-      if (withSignals.length > 0) {
-        const best = withSignals.sort((a, b) => (b[1].withSignals / b[1].total) - (a[1].withSignals / a[1].total))[0];
-        patterns.push({
-          text: `${best[0]} investments showing strongest early signals (${best[1].withSignals} of ${best[1].total} with follow-on activity)`,
-          type: 'positive'
-        });
-      }
-      
-      // Industry concentration observation
-      const topIndustry = Object.entries(industryBreakdown).sort((a, b) => b[1].amount - a[1].amount)[0];
-      if (topIndustry && totalCapital > 0) {
-        const pct = Math.round((topIndustry[1].amount / totalCapital) * 100);
-        if (pct > 50) {
-          patterns.push({
-            text: `${pct}% concentration in ${topIndustry[0]} — your thesis appears focused here`,
-            type: 'insight'
-          });
-        }
-      }
-      
-      // Passed by industry
-      const passedByIndustry = {};
-      passedDeals.forEach(d => {
-        const ind = d.industry || 'Other';
-        passedByIndustry[ind] = (passedByIndustry[ind] || 0) + 1;
-      });
-      const mostPassedIndustry = Object.entries(passedByIndustry).sort((a, b) => b[1] - a[1])[0];
-      if (mostPassedIndustry && mostPassedIndustry[1] >= 2) {
-        patterns.push({
-          text: `Most passes in ${mostPassedIndustry[0]} (${mostPassedIndustry[1]}) — consistent filter or missed category?`,
-          type: 'learning'
-        });
-      }
-    }
-    
-    // === STAGE-SPECIFIC PATTERNS (when viewing by stage) ===
-    if (viewBy === 'stage') {
-      // Stage performance comparison
-      const stagePerformance = {};
-      portfolioDeals.forEach(d => {
-        const stage = d.stage || 'unknown';
-        if (!stagePerformance[stage]) stagePerformance[stage] = { total: 0, withSignals: 0, avgHoldTime: 0 };
-        stagePerformance[stage].total++;
-        if (d.milestones?.some(m => m.type === 'fundraising' || m.type === 'growth') || d.monitoring?.followOns?.length > 0) {
-          stagePerformance[stage].withSignals++;
-        }
-      });
-      
-      const stages = Object.entries(stagePerformance).filter(([_, v]) => v.total >= 1);
-      if (stages.length >= 2) {
-        const sorted = stages.sort((a, b) => (b[1].withSignals / b[1].total) - (a[1].withSignals / a[1].total));
-        const best = sorted[0];
-        if (best[1].withSignals > 0) {
-          patterns.push({
-            text: `${stageLabels[best[0]] || best[0]} investments showing most follow-on activity (${best[1].withSignals} of ${best[1].total})`,
-            type: 'positive'
-          });
-        }
-      }
-      
-      // Early stage vs later stage pass rate
-      const earlyStages = ['pre-seed', 'seed'];
-      const laterStages = ['series-a', 'series-b', 'growth'];
-      const earlyPassed = passedDeals.filter(d => earlyStages.includes(d.stage)).length;
-      const laterPassed = passedDeals.filter(d => laterStages.includes(d.stage)).length;
-      if (earlyPassed > 0 && laterPassed > 0) {
-        if (earlyPassed > laterPassed * 2) {
-          patterns.push({
-            text: `Passing more often on early-stage (${earlyPassed}) than later-stage (${laterPassed}) deals`,
-            type: 'neutral'
-          });
-        }
-      }
-      
-      // Deferred by stage
-      const deferredByStage = {};
-      deferredDeals.forEach(d => {
-        const stage = d.stage || 'unknown';
-        deferredByStage[stage] = (deferredByStage[stage] || 0) + 1;
-      });
-      const mostDeferredStage = Object.entries(deferredByStage).sort((a, b) => b[1] - a[1])[0];
-      if (mostDeferredStage && mostDeferredStage[1] >= 2) {
-        patterns.push({
-          text: `Most deferrals at ${stageLabels[mostDeferredStage[0]] || mostDeferredStage[0]} (${mostDeferredStage[1]}) — timing uncertainty at this stage?`,
-          type: 'learning'
-        });
-      }
-    }
-    
-    // === SOURCE-SPECIFIC PATTERNS (when viewing by source) ===
-    if (viewBy === 'source') {
-      // Source performance
-      const sourcePerformance = {};
-      portfolioDeals.forEach(d => {
-        const src = d.source || d.investment?.source || 'Other';
-        if (!sourcePerformance[src]) sourcePerformance[src] = { total: 0, withSignals: 0 };
-        sourcePerformance[src].total++;
-        if (d.milestones?.some(m => m.type === 'fundraising' || m.type === 'growth') || d.monitoring?.followOns?.length > 0) {
-          sourcePerformance[src].withSignals++;
-        }
-      });
-      
-      const sources = Object.entries(sourcePerformance).filter(([_, v]) => v.total >= 1);
-      if (sources.length >= 1) {
-        const withSignals = sources.filter(([_, v]) => v.withSignals > 0);
-        if (withSignals.length > 0) {
-          const best = withSignals.sort((a, b) => (b[1].withSignals / b[1].total) - (a[1].withSignals / a[1].total))[0];
-          patterns.push({
-            text: `${best[0]} deals showing strongest early traction (${best[1].withSignals} of ${best[1].total})`,
-            type: 'positive'
-          });
-        }
-      }
-      
-      // Source concentration
-      const topSource = Object.entries(sourceBreakdown).sort((a, b) => b[1].count - a[1].count)[0];
-      if (topSource && portfolioDeals.length > 0) {
-        const pct = Math.round((topSource[1].count / portfolioDeals.length) * 100);
-        if (pct > 60) {
-          patterns.push({
-            text: `${pct}% of deals from ${topSource[0]} — consider if pipeline is diversified enough`,
-            type: 'insight'
-          });
-        }
-      }
-      
-      // Cold vs warm comparison
-      const warmDeals = portfolioDeals.filter(d => (d.source || d.investment?.source) === 'Warm intro');
-      const coldDeals = portfolioDeals.filter(d => (d.source || d.investment?.source) === 'Cold inbound');
-      if (warmDeals.length > 0 && coldDeals.length > 0) {
-        patterns.push({
-          text: `${warmDeals.length} warm intro investments vs ${coldDeals.length} cold inbound — tracking relative performance`,
-          type: 'neutral'
-        });
-      }
-    }
-    
-    // === CHECK SIZE PATTERNS (when viewing by check) ===
-    if (viewBy === 'check') {
-      // Check size vs signals
-      const checkPerformance = {};
-      portfolioDeals.forEach(d => {
-        const amount = d.investment?.amount || 0;
-        let band = '<$25K';
-        if (amount >= 100000) band = '$100K+';
-        else if (amount >= 50000) band = '$50-100K';
-        else if (amount >= 25000) band = '$25-50K';
-        if (!checkPerformance[band]) checkPerformance[band] = { total: 0, withSignals: 0 };
-        checkPerformance[band].total++;
-        if (d.milestones?.some(m => m.type === 'fundraising' || m.type === 'growth') || d.monitoring?.followOns?.length > 0) {
-          checkPerformance[band].withSignals++;
-        }
-      });
-      
-      const checks = Object.entries(checkPerformance).filter(([_, v]) => v.total >= 1);
-      const withSignals = checks.filter(([_, v]) => v.withSignals > 0);
-      if (withSignals.length > 0) {
-        const best = withSignals.sort((a, b) => (b[1].withSignals / b[1].total) - (a[1].withSignals / a[1].total))[0];
-        patterns.push({
-          text: `${best[0]} checks showing most follow-on signals (${best[1].withSignals} of ${best[1].total})`,
-          type: 'positive'
-        });
-      }
-      
-      // Check size variance
-      const amounts = portfolioDeals.map(d => d.investment?.amount || 0).filter(a => a > 0);
-      if (amounts.length >= 2) {
-        const min = Math.min(...amounts);
-        const max = Math.max(...amounts);
-        if (max > min * 3) {
-          patterns.push({
-            text: `Check sizes range from ${fmtCurrency(min)} to ${fmtCurrency(max)} — signals conviction variation or deliberate sizing`,
-            type: 'insight'
-          });
-        }
-      }
-    }
-    
-    // === FALLBACK PATTERNS (always available) ===
-    if (patterns.length === 0) {
-      // Generic patterns when no view-specific patterns found
-      const documentedInvestments = portfolioDeals.filter(d => d.investment?.whyYes?.length > 5);
-      if (documentedInvestments.length > 0) {
-        patterns.push({
-          text: `${documentedInvestments.length} investment${documentedInvestments.length > 1 ? 's have' : ' has'} documented reasoning — patterns will emerge as outcomes unfold`,
-          type: 'neutral'
-        });
-      }
-      
-      if (deferredDeals.length > 0) {
-        const deferredWithCriteria = deferredDeals.filter(d => d.watching?.trigger?.length > 5);
-        if (deferredWithCriteria.length > 0) {
-          patterns.push({
-            text: `${deferredWithCriteria.length} deferred deal${deferredWithCriteria.length > 1 ? 's have' : ' has'} clear revisit criteria`,
-            type: 'insight'
-          });
-        }
-      }
-    }
-    
-    return patterns.slice(0, 3);
-  };
-  
-  const reasoningPatterns = getReasoningPatterns();
-
-  return (
-    <div className="min-h-screen bg-stone-50 dark:bg-stone-900">
-      {/* Header */}
-      <header className="sticky top-0 z-30 bg-stone-50/90 dark:bg-stone-900/90 backdrop-blur-lg border-b border-stone-200 dark:border-stone-700">
-        <div className="flex items-center justify-between px-6 py-4">
-          <button onClick={onClose} className="flex items-center gap-1 text-stone-500 dark:text-stone-400">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
-            <span className="text-sm">Back</span>
-          </button>
-          <h1 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Capital & Signals</h1>
-          <div className="w-12"/>
-        </div>
-      </header>
-
-      <div className="p-6 space-y-6 max-w-2xl mx-auto">
-        
-        {/* === SECTION 1: CAPITAL REALITY === */}
-        <div className="bg-white dark:bg-stone-800 rounded-2xl p-6 border border-stone-200 dark:border-stone-700">
-          {/* Hero number */}
-          <div className="text-center mb-6">
-            <p className="text-xs text-stone-400 uppercase tracking-wide mb-1">Capital Deployed</p>
-            <p className="text-4xl font-bold text-stone-900 dark:text-white">{fmtCurrency(totalCapital)}</p>
-            <p className="text-sm text-stone-500 mt-1">
-              {portfolioDeals.length} investments · avg {fmtCurrency(avgCheckSize)}
-            </p>
-          </div>
-          
-          {/* View toggle */}
-          <div className="flex items-center justify-center gap-1 mb-5 p-1 bg-stone-100 dark:bg-stone-700 rounded-lg">
-            {[
-              { key: 'industry', label: 'Industry' },
-              { key: 'stage', label: 'Stage' },
-              { key: 'source', label: 'Source' },
-              { key: 'check', label: 'Check Size' }
-            ].map(v => (
-              <button
-                key={v.key}
-                onClick={() => setViewBy(v.key)}
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                  viewBy === v.key
-                    ? 'bg-white dark:bg-stone-600 text-stone-900 dark:text-white shadow-sm'
-                    : 'text-stone-500 dark:text-stone-400'
-                }`}
-              >
-                {v.label}
-              </button>
-            ))}
-          </div>
-          
-          {/* Single chart */}
-          {Object.keys(breakdown.data).length === 0 ? (
-            <p className="text-sm text-stone-400 text-center py-8">No investments yet</p>
-          ) : (
-            <div className="space-y-3">
-              {Object.entries(breakdown.data)
-                .sort((a, b) => b[1].amount - a[1].amount)
-                .map(([key, data]) => {
-                  const pct = totalCapital > 0 ? Math.round((data.amount / totalCapital) * 100) : 0;
-                  const label = breakdown.labels[key] || key;
-                  const color = breakdown.colors[key] || '#78716C';
-                  
-                  return (
-                    <div key={key}>
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-2">
-                          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }}/>
-                          <span className="text-sm text-stone-700 dark:text-stone-300">{label}</span>
-                          <span className="text-xs text-stone-400">({data.count})</span>
-                        </div>
-                        <span className="text-sm font-medium text-stone-900 dark:text-white">{pct}%</span>
-                      </div>
-                      <div className="relative w-full h-2 bg-stone-100 dark:bg-stone-700 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full rounded-full transition-all duration-500"
-                          style={{ width: `${pct}%`, backgroundColor: color }}
-                        />
-                        {/* Target marker if exists */}
-                        {data.target && (
-                          <div 
-                            className="absolute top-0 h-full w-0.5 bg-stone-400 dark:bg-stone-500"
-                            style={{ left: `${data.target}%` }}
-                          />
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-            </div>
-          )}
-          
-          {/* Time view toggle (collapsed by default) */}
-          {timeBreakdown.length >= 2 && (
-            <div className="mt-5 pt-4 border-t border-stone-100 dark:border-stone-700">
-              <button
-                onClick={() => setShowTimeView(!showTimeView)}
-                className="flex items-center gap-2 text-xs text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 transition-colors"
-              >
-                <svg 
-                  width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                  className={`transition-transform ${showTimeView ? 'rotate-180' : ''}`}
-                >
-                  <polyline points="6 9 12 15 18 9"/>
-                </svg>
-                <span>View over time</span>
-              </button>
-              
-              {showTimeView && (
-                <div className="mt-4 space-y-3">
-                  <p className="text-[10px] text-stone-400 uppercase tracking-wide">Allocation by period</p>
-                  {timeBreakdown.map((period, idx) => (
-                    <div key={idx}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs text-stone-500">{period.period}</span>
-                        <span className="text-[10px] text-stone-400">{fmtCurrency(period.total)}</span>
-                      </div>
-                      {/* Stacked bar */}
-                      <div className="w-full h-3 bg-stone-100 dark:bg-stone-700 rounded-full overflow-hidden flex">
-                        {period.segments.map((seg, sIdx) => (
-                          <div
-                            key={sIdx}
-                            className="h-full transition-all duration-500"
-                            style={{ 
-                              width: `${seg.percentage}%`, 
-                              backgroundColor: seg.color,
-                              marginLeft: sIdx > 0 ? '1px' : '0'
-                            }}
-                            title={`${seg.category}: ${seg.percentage}%`}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                  <p className="text-[10px] text-stone-400 italic mt-2">Shows drift as motion, not judgment</p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* === SECTION 2: ALIGNMENT & TENSION === */}
-        {tensions.length > 0 && (
-          <div className="bg-white dark:bg-stone-800 rounded-2xl p-5 border border-stone-200 dark:border-stone-700">
-            <p className="text-xs text-stone-400 uppercase tracking-wide mb-3">Where you're drifting from intent</p>
-            <div className="space-y-2">
-              {tensions.map((t, idx) => (
-                <p key={idx} className="text-sm text-stone-600 dark:text-stone-300">
-                  • {t.text}
-                </p>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* === SECTION 3: LEARNING SIGNALS === */}
-        {(missedSignals.length > 0 || beliefs.length > 0) && (
-          <div className="space-y-4">
-            {/* Missed signals */}
-            {missedSignals.length > 0 && (
-              <div className="bg-amber-50 dark:bg-amber-900/20 rounded-2xl p-5 border border-amber-200 dark:border-amber-800">
-                <p className="text-xs text-amber-600 dark:text-amber-400 uppercase tracking-wide mb-3">Deals worth revisiting</p>
-                <div className="space-y-3">
-                  {missedSignals.map((s, idx) => (
-                    <div key={idx}>
-                      <p className="text-sm font-medium text-amber-800 dark:text-amber-300">{s.company}</p>
-                      <p className="text-xs text-amber-600/70 dark:text-amber-400/60">{s.context}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            {/* Beliefs under stress - collapsed by default */}
-            {beliefs.length > 0 && (
-              <div className="bg-white dark:bg-stone-800 rounded-2xl border border-stone-200 dark:border-stone-700 overflow-hidden">
-                <button
-                  onClick={() => setShowBeliefs(!showBeliefs)}
-                  className="w-full flex items-center justify-between p-5 text-left"
-                >
-                  <div>
-                    <p className="text-xs text-stone-400 uppercase tracking-wide">Beliefs under stress</p>
-                    <p className="text-xs text-stone-500 mt-0.5">{beliefs.length} patterns being tracked</p>
-                  </div>
-                  <svg 
-                    width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                    className={`text-stone-400 transition-transform ${showBeliefs ? 'rotate-180' : ''}`}
-                  >
-                    <polyline points="6 9 12 15 18 9"/>
-                  </svg>
-                </button>
-                {showBeliefs && (
-                  <div className="px-5 pb-5 space-y-3">
-                    {beliefs.map((b, idx) => (
-                      <div key={idx} className="p-3 bg-stone-50 dark:bg-stone-700/50 rounded-xl">
-                        <p className="text-sm text-stone-700 dark:text-stone-300">"{b.belief}"</p>
-                        <p className="text-xs text-stone-400 mt-1">{b.frequency} · {b.outcome}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* === SECTION 4: WHAT'S CHANGED (Continuity Signals) === */}
-        {continuitySignals.length > 0 && (
-          <div className="bg-white dark:bg-stone-800 rounded-2xl p-5 border border-stone-200 dark:border-stone-700">
-            <p className="text-xs text-stone-400 uppercase tracking-wide">What's changed</p>
-            <p className="text-[11px] text-stone-400 mt-0.5 mb-4">Signal activity detected since your decisions</p>
-            <div className="space-y-4">
-              {continuitySignals.map((signal, idx) => (
-                <div key={idx} className="relative">
-                  <div className="flex items-start gap-3">
-                    <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${
-                      signal.type === 'invested' ? 'bg-emerald-500' :
-                      signal.type === 'deferred' ? 'bg-amber-500' :
-                      signal.type === 'passed' ? 'bg-stone-400' :
-                      'bg-blue-500'
-                    }`}/>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm text-stone-800 dark:text-stone-200">{signal.headline}</p>
-                        {/* Signal density indicator */}
-                        <div className="flex items-center gap-0.5 flex-shrink-0">
-                          {[...Array(Math.min(signal.signalCount || 1, 7))].map((_, i) => (
-                            <div 
-                              key={i} 
-                              className={`w-1.5 h-1.5 rounded-full ${
-                                signal.type === 'invested' ? 'bg-emerald-400' :
-                                signal.type === 'deferred' ? 'bg-amber-400' :
-                                signal.type === 'passed' ? 'bg-stone-300' :
-                                'bg-blue-400'
-                              }`}
-                            />
-                          ))}
-                          {(signal.signalCount || 1) > 7 && (
-                            <span className="text-[10px] text-stone-400 ml-1">+{signal.signalCount - 7}</span>
-                          )}
-                        </div>
-                      </div>
-                      <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">{signal.context}</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Empty state when no signals */}
-        {continuitySignals.length === 0 && portfolioDeals.length > 0 && (
-          <div className="bg-white dark:bg-stone-800 rounded-2xl p-5 border border-stone-200 dark:border-stone-700">
-            <p className="text-xs text-stone-400 uppercase tracking-wide mb-2">What's changed</p>
-            <p className="text-sm text-stone-500">No new activity detected since your last review.</p>
-          </div>
-        )}
-
-        {/* === HOW YOUR REASONING HAS AGED (collapsed, pattern reflection) === */}
-        {(portfolioDeals.length > 0 || passedDeals.length > 0 || deferredDeals.length > 0) && (
-          <div className="bg-white dark:bg-stone-800 rounded-2xl border border-stone-200 dark:border-stone-700 overflow-hidden">
-            <button
-              onClick={() => setShowDiscipline(!showDiscipline)}
-              className="w-full flex items-center justify-between p-5 text-left"
-            >
-              <div>
-                <p className="text-xs text-stone-400 uppercase tracking-wide">
-                  {viewBy === 'industry' ? 'Industry patterns' :
-                   viewBy === 'stage' ? 'Stage patterns' :
-                   viewBy === 'source' ? 'Source patterns' :
-                   viewBy === 'check' ? 'Check size patterns' :
-                   'How your reasoning has aged'}
-                </p>
-                <p className="text-xs text-stone-500 mt-0.5">
-                  {viewBy === 'industry' ? 'How your industry bets are tracking' :
-                   viewBy === 'stage' ? 'Performance signals by investment stage' :
-                   viewBy === 'source' ? 'Which deal sources are performing' :
-                   viewBy === 'check' ? 'How allocation size relates to outcomes' :
-                   'Patterns from your documented decisions'}
-                </p>
-              </div>
-              <svg 
-                width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-                className={`text-stone-400 transition-transform ${showDiscipline ? 'rotate-180' : ''}`}
-              >
-                <polyline points="6 9 12 15 18 9"/>
-              </svg>
-            </button>
-            {showDiscipline && (
-              <div className="px-5 pb-5 space-y-4">
-                {/* Text patterns */}
-                {reasoningPatterns.length > 0 ? (
-                  <div className="space-y-3">
-                    {reasoningPatterns.map((pattern, idx) => (
-                      <div key={idx} className="flex items-start gap-3 p-3 bg-stone-50 dark:bg-stone-700/50 rounded-xl">
-                        <div className={`w-1.5 h-1.5 rounded-full mt-2 flex-shrink-0 ${
-                          pattern.type === 'positive' ? 'bg-emerald-500' :
-                          pattern.type === 'learning' ? 'bg-amber-500' :
-                          pattern.type === 'insight' ? 'bg-blue-500' :
-                          'bg-stone-400'
-                        }`}/>
-                        <p className="text-sm text-stone-600 dark:text-stone-300">{pattern.text}</p>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-stone-500 p-3">
-                    Document your reasoning on decisions to see patterns emerge over time.
-                  </p>
-                )}
-                
-                {/* Activity Heatmap (only for industry view with enough data) */}
-                {viewBy === 'industry' && portfolioDeals.length >= 2 && (
-                  <div className="pt-3 border-t border-stone-100 dark:border-stone-700">
-                    <p className="text-[10px] text-stone-400 uppercase tracking-wide mb-3">Signal activity by category</p>
-                    <div className="space-y-2">
-                      {Object.entries(industryBreakdown)
-                        .sort((a, b) => b[1].count - a[1].count)
-                        .slice(0, 5)
-                        .map(([industry, data]) => {
-                          // Count different signal types for this industry
-                          const industryDeals = portfolioDeals.filter(d => (d.industry || 'Other') === industry);
-                          const signals = {
-                            funding: industryDeals.filter(d => d.milestones?.some(m => m.type === 'fundraising') || d.monitoring?.followOns?.length > 0).length,
-                            growth: industryDeals.filter(d => d.milestones?.some(m => m.type === 'growth')).length,
-                            hires: industryDeals.filter(d => d.milestones?.some(m => m.type === 'hire' || m.type === 'team')).length,
-                            press: industryDeals.filter(d => d.milestones?.some(m => m.type === 'press' || m.type === 'announcement')).length
-                          };
-                          
-                          return (
-                            <div key={industry} className="flex items-center gap-3">
-                              <span className="text-xs text-stone-500 w-20 truncate">{industry}</span>
-                              <div className="flex gap-1">
-                                {['funding', 'growth', 'hires', 'press'].map(type => (
-                                  <div
-                                    key={type}
-                                    className={`w-4 h-4 rounded-sm ${
-                                      signals[type] > 0 
-                                        ? type === 'funding' ? 'bg-emerald-400' :
-                                          type === 'growth' ? 'bg-blue-400' :
-                                          type === 'hires' ? 'bg-violet-400' :
-                                          'bg-amber-400'
-                                        : 'bg-stone-100 dark:bg-stone-700'
-                                    }`}
-                                    title={`${type}: ${signals[type]}`}
-                                  />
-                                ))}
-                              </div>
-                              <span className="text-[10px] text-stone-400">({data.count})</span>
-                            </div>
-                          );
-                        })}
-                    </div>
-                    <div className="flex items-center gap-3 mt-3 text-[9px] text-stone-400">
-                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-emerald-400"/> Funding</span>
-                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-blue-400"/> Growth</span>
-                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-violet-400"/> Hires</span>
-                      <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-amber-400"/> Press</span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* === FOOTER === */}
-        <p className="text-center text-xs text-stone-400 py-2">
-          Context, not advice · Continuity, not judgment
-        </p>
-      </div>
-    </div>
-  );
-};
-
 // Attachments Component
 const AttachmentsSection = ({ attachments = [], onAdd }) => {
   const typeIcons = { deck: '📊', financials: '📈', legal: '📄', update: '📬', other: '📎' };
@@ -3103,16 +1687,12 @@ const AddPortfolioModal = ({ onClose, onAdd }) => {
     companyName: '',
     industry: '',
     stage: 'seed',
-    companyStatus: 'screening', // 'screening' | 'invested' | 'deferred' | 'passed'
+    companyStatus: 'invested',
     engagement: 'active',
-    // Investment fields (for invested)
+    // Investment fields
     investmentAmount: '',
     investmentDate: '',
     vehicle: 'SAFE',
-    // Defer fields
-    deferReason: '',
-    // Pass fields
-    passReason: '',
     // Common fields
     founderName: '',
     founderRole: 'CEO',
@@ -3121,10 +1701,7 @@ const AddPortfolioModal = ({ onClose, onAdd }) => {
   });
 
   const statusOptions = [
-    { value: 'screening', label: 'Lead (Screening)', description: 'New opportunity to evaluate', color: '#5B6DC4' },
-    { value: 'invested', label: 'Invested', description: 'Portfolio company', color: '#10b981' },
-    { value: 'deferred', label: 'Deferred / Watching', description: 'Waiting for right timing', color: '#8b5cf6' },
-    { value: 'passed', label: 'Passed', description: 'Decided not to invest', color: '#ef4444' }
+    { value: 'invested', label: 'Invested', description: 'Portfolio company', color: '#10b981' }
   ];
 
   const handleSubmit = () => {
@@ -3155,7 +1732,7 @@ const AddPortfolioModal = ({ onClose, onAdd }) => {
 
     let newDeal = { ...baseFields };
 
-    // Add status-specific fields
+    // Add investment fields
     if (form.companyStatus === 'invested') {
       newDeal = {
         ...newDeal,
@@ -3174,24 +1751,6 @@ const AddPortfolioModal = ({ onClose, onAdd }) => {
           followOns: []
         },
         milestones: []
-      };
-    } else if (form.companyStatus === 'deferred') {
-      newDeal = {
-        ...newDeal,
-        deferData: {
-          reason: form.deferReason || 'Imported from previous tool',
-          condition: 'Date',
-          conditionDetail: 'Review later'
-        },
-        deferType: 'watching'
-      };
-    } else if (form.companyStatus === 'passed') {
-      newDeal = {
-        ...newDeal,
-        passed: {
-          reason: form.passReason || 'Imported from previous tool',
-          date: now
-        }
       };
     }
     
@@ -3371,34 +1930,6 @@ const AddPortfolioModal = ({ onClose, onAdd }) => {
             </div>
           )}
 
-          {/* Conditional Defer Fields */}
-          {form.companyStatus === 'deferred' && (
-            <div className="border-t border-stone-200 dark:border-stone-700 pt-4">
-              <p className="text-xs font-medium text-stone-600 dark:text-stone-400 uppercase tracking-wide mb-3">Why Deferred?</p>
-              <textarea
-                value={form.deferReason}
-                onChange={e => setForm({...form, deferReason: e.target.value})}
-                placeholder="Timing not right, waiting for product-market fit, etc."
-                className="w-full p-3 border border-stone-200 dark:border-stone-700 rounded-xl text-sm text-stone-900 dark:text-stone-100 bg-white dark:bg-stone-900 placeholder-stone-400 resize-none"
-                rows={2}
-              />
-            </div>
-          )}
-
-          {/* Conditional Pass Fields */}
-          {form.companyStatus === 'passed' && (
-            <div className="border-t border-stone-200 dark:border-stone-700 pt-4">
-              <p className="text-xs font-medium text-stone-600 dark:text-stone-400 uppercase tracking-wide mb-3">Why Passed?</p>
-              <textarea
-                value={form.passReason}
-                onChange={e => setForm({...form, passReason: e.target.value})}
-                placeholder="Market too small, team concerns, valuation, etc."
-                className="w-full p-3 border border-stone-200 dark:border-stone-700 rounded-xl text-sm text-stone-900 dark:text-stone-100 bg-white dark:bg-stone-900 placeholder-stone-400 resize-none"
-                rows={2}
-              />
-            </div>
-          )}
-
           {/* Founder Section */}
           <div className="border-t border-stone-200 dark:border-stone-700 pt-4">
             <p className="text-xs font-medium text-stone-600 dark:text-stone-400 uppercase tracking-wide mb-3">Founder (optional)</p>
@@ -3506,2698 +2037,135 @@ const TimeStamp = ({ label, date, warning }) => (
   </div>
 );
 
-// Screening View - Working Notes with Integrated AI Research
-const ScreeningView = ({ deal, onUpdate, onTransition, setToast }) => {
-  const [entries, setEntries] = useState(deal.workingNotes || []);
-  const [newNote, setNewNote] = useState('');
-  const [isRecording, setIsRecording] = useState(false);
-  const [isAIThinking, setIsAIThinking] = useState(false);
-  const [showNeedMoreOptions, setShowNeedMoreOptions] = useState(null);
-  
-  // Decision modal state
-  const [showInvestModal, setShowInvestModal] = useState(false);
-  const [showWatchModal, setShowWatchModal] = useState(false);
-  const [showPassModal, setShowPassModal] = useState(false);
-  const [showMemoModal, setShowMemoModal] = useState(false);
-  const [showConfetti, setShowConfetti] = useState(false);
-  const [investReasoning, setInvestReasoning] = useState('');
-  const [notificationPref, setNotificationPref] = useState('monthly');
-  const [watchReason, setWatchReason] = useState('');
-  const [watchCondition, setWatchCondition] = useState('');
-  const [passReason, setPassReason] = useState('');
+// Document Links Section
+const DOC_TYPES = [
+  { value: 'safe', label: 'SAFE', icon: '📄', color: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
+  { value: 'equity', label: 'Equity Doc', icon: '📋', color: 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
+  { value: 'tax', label: 'Tax Form', icon: '🧾', color: 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
+  { value: 'cap-table', label: 'Cap Table', icon: '📊', color: 'bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' },
+  { value: 'update', label: 'Investor Update', icon: '📬', color: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' },
+  { value: 'other', label: 'Other', icon: '🔗', color: 'bg-stone-100 text-stone-600 dark:bg-stone-700 dark:text-stone-400' },
+];
 
-  // Confetti celebration component
-  const ConfettiCelebration = () => {
-    const confettiPieces = Array.from({ length: 50 }, (_, i) => ({
-      id: i,
-      left: Math.random() * 100,
-      delay: Math.random() * 0.5,
-      duration: 2 + Math.random() * 2,
-      color: ['#10b981', '#34d399', '#6ee7b7', '#fbbf24', '#f59e0b', '#5B6DC4', '#818cf8'][Math.floor(Math.random() * 7)],
-      size: 8 + Math.random() * 8,
-      rotation: Math.random() * 360
-    }));
+const DocumentLinksSection = ({ docs = [], onUpdate }) => {
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({ label: '', url: '', type: 'safe' });
+  const [error, setError] = useState('');
 
-    return (
-      <div className="fixed inset-0 pointer-events-none z-[100] overflow-hidden">
-        {confettiPieces.map(piece => (
-          <div
-            key={piece.id}
-            className="absolute animate-bounce"
-            style={{
-              left: `${piece.left}%`,
-              top: '-20px',
-              width: piece.size,
-              height: piece.size,
-              backgroundColor: piece.color,
-              borderRadius: Math.random() > 0.5 ? '50%' : '2px',
-              transform: `rotate(${piece.rotation}deg)`,
-              animation: `confetti-fall ${piece.duration}s ease-out ${piece.delay}s forwards`
-            }}
-          />
-        ))}
-        <style>{`
-          @keyframes confetti-fall {
-            0% {
-              transform: translateY(0) rotate(0deg);
-              opacity: 1;
-            }
-            100% {
-              transform: translateY(100vh) rotate(720deg);
-              opacity: 0;
-            }
-          }
-        `}</style>
-      </div>
-    );
+  const handleAdd = () => {
+    if (!form.label.trim()) { setError('Name is required'); return; }
+    if (!form.url.trim()) { setError('URL is required'); return; }
+    const url = form.url.trim().startsWith('http') ? form.url.trim() : `https://${form.url.trim()}`;
+    const newDoc = { id: Date.now().toString(), label: form.label.trim(), url, type: form.type, addedAt: new Date().toISOString() };
+    onUpdate([...docs, newDoc]);
+    setForm({ label: '', url: '', type: 'safe' });
+    setError('');
+    setShowAdd(false);
   };
 
-  // Handle invest confirmation with celebration
-  const handleInvestConfirm = () => {
-    setShowConfetti(true);
-    setTimeout(() => {
-      onUpdate({ 
-        ...deal, 
-        investReasoning, 
-        notificationPref,
-        workingNotes: entries 
-      });
-      onTransition('invested');
-      setShowInvestModal(false);
-      setShowConfetti(false);
-    }, 1500);
-  };
-  // Format timestamp for memo
-  const formatTimestamp = (dateStr) => {
-    const date = new Date(dateStr);
-    return date.toLocaleString('en-US', { 
-      month: 'short', 
-      day: 'numeric', 
-      year: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true 
-    });
-  };
-
-  // Generate investment memo content
-  const generateMemo = () => {
-    const now = new Date();
-    const memoDate = formatTimestamp(now.toISOString());
-    
-    // Get user notes (not AI responses)
-    const userNotes = entries.filter(e => e.type === 'user' || e.type === 'voice');
-    const aiInsights = entries.filter(e => e.type === 'ai');
-    
-    // Group by lens
-    const byLens = {};
-    entries.forEach(e => {
-      if (e.lens) {
-        if (!byLens[e.lens]) byLens[e.lens] = [];
-        byLens[e.lens].push(e);
-      }
-    });
-
-    return {
-      generatedAt: memoDate,
-      deal: {
-        name: deal.companyName,
-        stage: deal.stage,
-        industry: deal.industry,
-        location: deal.location || 'San Francisco, CA',
-        overview: deal.overview || 'B2B payments platform simplifying cross-border transactions for SMBs.',
-        founders: deal.founders || [],
-        terms: deal.terms || {}
-      },
-      progress: {
-        areasExplored: Object.values(lensProgress).filter(l => l.confident).length,
-        totalAreas: 5,
-        gaps: entries.filter(e => e.type === 'ai' && e.isGap && !e.userConfirmed).length
-      },
-      entries: entries.map(e => ({
-        ...e,
-        formattedTime: formatTimestamp(e.timestamp)
-      })),
-      byLens,
-      userNotes,
-      aiInsights
-    };
-  };
-  
-  // Lens progress tracking (derived from entries)
-  const lensProgress = React.useMemo(() => {
-    const lenses = {
-      market: { name: 'Market size & timing', touched: false, confident: false, count: 0, entries: [] },
-      team: { name: 'Founding team', touched: false, confident: false, count: 0, entries: [] },
-      traction: { name: 'Traction & metrics', touched: false, confident: false, count: 0, entries: [] },
-      edge: { name: 'Unique edge / moat', touched: false, confident: false, count: 0, entries: [] },
-      product: { name: 'Product quality', touched: false, confident: false, count: 0, entries: [] },
-    };
-    
-    entries.forEach(entry => {
-      if (entry.lens && lenses[entry.lens]) {
-        lenses[entry.lens].touched = true;
-        lenses[entry.lens].count++;
-        lenses[entry.lens].entries.push(entry);
-        if (entry.userConfirmed) lenses[entry.lens].confident = true;
-      }
-    });
-    
-    return lenses;
-  }, [entries]);
-
-  const exploredCount = Object.values(lensProgress).filter(l => l.confident).length;
-  const confidentCount = Object.values(lensProgress).filter(l => l.confident).length;
-
-  // Get suggested next lenses based on what's not explored
-  const suggestedNextLenses = React.useMemo(() => {
-    return Object.entries(lensProgress)
-      .filter(([key, lens]) => !lens.touched)
-      .slice(0, 2)
-      .map(([key]) => key);
-  }, [lensProgress]);
-
-  const updateDeal = (updates) => {
-    onUpdate({ ...deal, ...updates });
-  };
-
-  // ============================================================================
-  // CONTEXTUAL AI QUESTION GENERATION
-  // Questions emerge from deal context + user notes, not fixed categories
-  // ============================================================================
-
-  // Extract key context from deal
-  const dealContext = React.useMemo(() => ({
-    industry: deal.industry || '',
-    stage: deal.stage || '',
-    companyName: deal.companyName || '',
-    founders: deal.founders || [],
-    overview: deal.overview || '',
-    terms: deal.terms || {},
-    source: deal.source || {},
-  }), [deal]);
-
-  // Analyze all user notes to understand what's been discussed
-  const notesAnalysis = React.useMemo(() => {
-    const userNotes = entries.filter(e => e.type === 'user' || e.type === 'voice');
-    const allText = userNotes.map(n => n.content).join(' ').toLowerCase();
-    
-    // Track what topics have been mentioned
-    const mentioned = {
-      founders: allText.match(/founder|ceo|cto|team|experience|background|hire|who/),
-      market: allText.match(/market|tam|opportunity|size|grow|segment|timing/),
-      traction: allText.match(/revenue|mrr|arr|growth|customer|metric|user|sales/),
-      competition: allText.match(/compet|moat|unique|different|edge|advantage|vs|versus/),
-      product: allText.match(/product|tech|platform|feature|ux|demo|build/),
-      risk: allText.match(/risk|concern|worry|fail|problem|issue|red flag/),
-      valuation: allText.match(/valuation|price|cap|raise|round|terms|dilution/),
-      regulatory: allText.match(/regulat|compliance|legal|license|permit/),
-      unitEconomics: allText.match(/unit economics|ltv|cac|margin|burn|runway/),
-      distribution: allText.match(/distribution|channel|sales|gtm|go to market|acquire/),
-    };
-    
-    // Extract specific concerns or questions user has raised
-    const concerns = userNotes
-      .filter(n => n.content.match(/\?|concern|worry|unclear|don't know|not sure|wonder/i))
-      .map(n => n.content);
-    
-    // Extract positive signals user has noted
-    const positives = userNotes
-      .filter(n => n.content.match(/like|strong|good|impressive|interesting|excited/i))
-      .map(n => n.content);
-    
-    return { mentioned, concerns, positives, allText, noteCount: userNotes.length };
-  }, [entries]);
-
-  // Generate contextual questions based on deal + notes
-  const generateContextualQuestions = React.useCallback(() => {
-    const questions = [];
-    const { industry, stage, founders, overview } = dealContext;
-    const { mentioned, concerns, noteCount } = notesAnalysis;
-    const industryLower = industry.toLowerCase();
-    
-    // INDUSTRY-SPECIFIC QUESTIONS
-    if (industryLower.includes('fintech') || industryLower.includes('finance')) {
-      if (!mentioned.regulatory) {
-        questions.push({
-          id: 'reg-fintech',
-          question: 'What regulatory requirements apply here?',
-          context: `${industry} companies typically need licenses or compliance frameworks`,
-          category: 'regulatory',
-          priority: 'high'
-        });
-      }
-      if (!mentioned.unitEconomics) {
-        questions.push({
-          id: 'unit-fintech',
-          question: 'What are the unit economics on each transaction?',
-          context: 'Payment and fintech margins vary dramatically by model',
-          category: 'economics',
-          priority: 'medium'
-        });
-      }
-    }
-    
-    if (industryLower.includes('health') || industryLower.includes('med') || industryLower.includes('bio')) {
-      if (!mentioned.regulatory) {
-        questions.push({
-          id: 'reg-health',
-          question: 'What\'s the regulatory pathway (FDA, HIPAA, etc)?',
-          context: 'Healthcare products often require regulatory approval',
-          category: 'regulatory',
-          priority: 'high'
-        });
-      }
-      questions.push({
-        id: 'clinical-health',
-        question: 'Is clinical validation required? What\'s the timeline?',
-        context: 'Clinical trials can take years and significant capital',
-        category: 'validation',
-        priority: 'high'
-      });
-    }
-    
-    if (industryLower.includes('ai') || industryLower.includes('ml')) {
-      if (!mentioned.product) {
-        questions.push({
-          id: 'moat-ai',
-          question: 'What\'s the defensible moat beyond the model?',
-          context: 'AI capabilities are increasingly commoditized',
-          category: 'edge',
-          priority: 'high'
-        });
-      }
-      questions.push({
-        id: 'data-ai',
-        question: 'What proprietary data or training advantage do they have?',
-        context: 'Data moats are often stronger than model moats in AI',
-        category: 'edge',
-        priority: 'medium'
-      });
-    }
-    
-    if (industryLower.includes('saas') || industryLower.includes('software')) {
-      if (!mentioned.traction) {
-        questions.push({
-          id: 'metrics-saas',
-          question: 'What are the core SaaS metrics (MRR, churn, NRR)?',
-          context: 'SaaS businesses live and die by retention metrics',
-          category: 'traction',
-          priority: 'high'
-        });
-      }
-    }
-    
-    if (industryLower.includes('marketplace') || industryLower.includes('platform')) {
-      questions.push({
-        id: 'chicken-egg',
-        question: 'How are they solving the chicken-and-egg problem?',
-        context: 'Marketplaces need both supply and demand to work',
-        category: 'strategy',
-        priority: 'high'
-      });
-    }
-    
-    if (industryLower.includes('hardware') || industryLower.includes('device')) {
-      questions.push({
-        id: 'manufacturing',
-        question: 'What\'s the manufacturing and supply chain strategy?',
-        context: 'Hardware scaling requires significant capital and expertise',
-        category: 'operations',
-        priority: 'high'
-      });
-    }
-
-    // STAGE-SPECIFIC QUESTIONS
-    if (stage === 'pre-seed' || stage === 'Pre-seed') {
-      if (!mentioned.founders) {
-        questions.push({
-          id: 'founder-preseed',
-          question: 'Why are these founders the right people for this problem?',
-          context: 'At pre-seed, the bet is almost entirely on the team',
-          category: 'team',
-          priority: 'high'
-        });
-      }
-      if (!mentioned.market) {
-        questions.push({
-          id: 'insight-preseed',
-          question: 'What unique insight do they have that others don\'t?',
-          context: 'Pre-seed companies need a contrarian but correct view',
-          category: 'thesis',
-          priority: 'high'
-        });
-      }
-    }
-    
-    if (stage === 'seed' || stage === 'Seed') {
-      if (!mentioned.traction) {
-        questions.push({
-          id: 'signal-seed',
-          question: 'What early traction signals exist?',
-          context: 'Seed stage should show some evidence of demand',
-          category: 'traction',
-          priority: 'high'
-        });
-      }
-      if (!mentioned.distribution) {
-        questions.push({
-          id: 'gtm-seed',
-          question: 'What\'s the go-to-market strategy?',
-          context: 'Seed companies need a clear path to first customers',
-          category: 'strategy',
-          priority: 'medium'
-        });
-      }
-    }
-    
-    if (stage === 'series-a' || stage === 'Series A') {
-      if (!mentioned.traction) {
-        questions.push({
-          id: 'pmf-seriesa',
-          question: 'Is there clear product-market fit? What\'s the evidence?',
-          context: 'Series A should demonstrate repeatable demand',
-          category: 'traction',
-          priority: 'high'
-        });
-      }
-      questions.push({
-        id: 'scale-seriesa',
-        question: 'Can this scale? What needs to be true?',
-        context: 'Series A is about proving the model can scale',
-        category: 'strategy',
-        priority: 'high'
-      });
-    }
-
-    // FOUNDER-CONTEXT QUESTIONS
-    if (founders.length > 0) {
-      const founderNames = founders.map(f => f.name).join(', ');
-      if (!mentioned.founders) {
-        questions.push({
-          id: 'founder-context',
-          question: `What's ${founders.length > 1 ? 'the founders\'' : founders[0]?.name + '\'s'} relevant background?`,
-          context: `Current team: ${founderNames}`,
-          category: 'team',
-          priority: 'high'
-        });
-      }
-    }
-
-    // NOTE-REACTIVE QUESTIONS (based on what user has written)
-    if (concerns.length > 0) {
-      // User has expressed concerns - dig deeper
-      const lastConcern = concerns[concerns.length - 1];
-      if (lastConcern.match(/founder|team|experience/i) && !mentioned.founders) {
-        questions.push({
-          id: 'concern-team',
-          question: 'What would make you confident in this team despite the concern?',
-          context: `You noted: "${lastConcern.slice(0, 50)}..."`,
-          category: 'team',
-          priority: 'high',
-          triggeredBy: 'your note'
-        });
-      }
-      if (lastConcern.match(/market|competition|crowded/i)) {
-        questions.push({
-          id: 'concern-market',
-          question: 'What would need to be true for them to win despite competition?',
-          context: `You noted: "${lastConcern.slice(0, 50)}..."`,
-          category: 'edge',
-          priority: 'high',
-          triggeredBy: 'your note'
-        });
-      }
-    }
-
-    // UNIVERSAL QUESTIONS (if not much has been explored)
-    if (noteCount < 3) {
-      if (!mentioned.risk) {
-        questions.push({
-          id: 'risk-universal',
-          question: 'What would make this investment fail?',
-          context: 'Pre-mortem thinking helps surface blind spots',
-          category: 'risk',
-          priority: 'medium'
-        });
-      }
-      if (!mentioned.valuation) {
-        questions.push({
-          id: 'terms-universal',
-          question: 'Do the terms make sense for the stage and traction?',
-          context: 'Valuation should reflect risk and progress',
-          category: 'terms',
-          priority: 'medium'
-        });
-      }
-    }
-
-    // Sort by priority and return top questions
-    const priorityOrder = { high: 0, medium: 1, low: 2 };
-    return questions
-      .sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority])
-      .slice(0, 5);
-  }, [dealContext, notesAnalysis]);
-
-  // Get current contextual questions
-  const contextualQuestions = generateContextualQuestions();
-
-  // Detect what topic a note is about (more flexible than fixed lenses)
-  const detectTopic = (text) => {
-    const lower = text.toLowerCase();
-    if (lower.match(/market|tam|timing|opportunity|growing|size|segment/)) return 'market';
-    if (lower.match(/founder|team|ceo|cto|experience|background|hire/)) return 'team';
-    if (lower.match(/revenue|mrr|arr|growth|customer|traction|metric|user/)) return 'traction';
-    if (lower.match(/compet|moat|unique|different|edge|defensi|advantage/)) return 'edge';
-    if (lower.match(/product|tech|platform|feature|ux|quality|build/)) return 'product';
-    if (lower.match(/risk|concern|fail|worry|red flag/)) return 'risk';
-    if (lower.match(/valuation|price|terms|cap|raise/)) return 'terms';
-    if (lower.match(/regulat|compliance|legal|license/)) return 'regulatory';
-    return null;
-  };
-
-  // Legacy alias for compatibility
-  const detectLens = detectTopic;
-
-  // Get the user's original question that triggered an AI response
-  const getOriginalQuestion = (entry) => {
-    if (!entry.triggeredBy) return null;
-    const original = entries.find(e => e.id === entry.triggeredBy);
-    return original?.content || null;
-  };
-
-  // Generate a summary for "Add to notes"
-  const generateNoteSummary = (entry) => {
-    const summaries = {
-      market: `Market appears large (${entry.detail?.includes('$150T') ? '$150T+ B2B cross-border' : 'significant opportunity'}). ${entry.keyInsight}`,
-      team: `Team assessment: ${entry.keyInsight}`,
-      traction: `Traction status: ${entry.keyInsight}`,
-      edge: `Competitive position: ${entry.keyInsight}`,
-      product: `Product evaluation: ${entry.keyInsight}`
-    };
-    return summaries[entry.lens] || entry.keyInsight;
-  };
-
-  // Handle "Add to my notes" action - adds summary without marking as explored
-  const handleAddToNotes = (entry) => {
-    const summary = generateNoteSummary(entry);
-    const noteEntry = {
-      id: Date.now(),
-      type: 'user',
-      content: summary,
-      timestamp: new Date().toISOString(),
-      lens: entry.lens,
-      isFromAI: true, // Flag that this originated from AI
-      sourceEntryId: entry.id
-    };
-    
-    const updated = [...entries, noteEntry];
-    // Mark the AI entry as having been added to notes
-    const updatedWithMark = updated.map(e => 
-      e.id === entry.id ? { ...e, addedToNotes: true } : e
-    );
-    setEntries(updatedWithMark);
-    updateDeal({ workingNotes: updatedWithMark });
-    
-    // Don't mark as confirmed - user can still engage with the AI response
-    setToast({ message: 'Added to your notes', type: 'success' });
-  };
-
-  // Need more follow-up options by lens
-  const needMoreOptions = {
-    market: [
-      { label: 'Break down by SMB segment', query: 'Break down the market by SMB segment' },
-      { label: 'What assumptions does this depend on?', query: 'What assumptions does this market size depend on?' },
-      { label: 'Where could this be overstated?', query: 'Where could this market opportunity be overstated?' }
-    ],
-    team: [
-      { label: 'Compare to successful founders', query: 'Compare to successful founders without domain experience' },
-      { label: 'What are the key risks here?', query: 'What are the key team-related risks?' },
-      { label: 'What should I ask them?', query: 'What questions should I ask the founders about their backgrounds?' }
-    ],
-    traction: [
-      { label: 'What benchmarks should I expect?', query: 'What traction benchmarks should I expect at this stage?' },
-      { label: 'What data should I request?', query: 'What specific traction data should I request from the founders?' },
-      { label: 'How do I verify their claims?', query: 'How can I verify their traction claims?' }
-    ],
-    edge: [
-      { label: 'How defensible is this really?', query: 'How defensible is their competitive advantage really?' },
-      { label: 'Who are the biggest threats?', query: 'Who are the biggest competitive threats?' },
-      { label: 'What could erode this moat?', query: 'What could erode their competitive moat over time?' }
-    ],
-    product: [
-      { label: 'How do I evaluate without a demo?', query: 'How can I evaluate product quality without a demo?' },
-      { label: 'What technical risks exist?', query: 'What technical risks should I be aware of?' },
-      { label: 'What do customers say?', query: 'What do customers typically say about products like this?' }
-    ]
-  };
-
-  // Generate AI research response based on user note
-  const generateAIResponse = (userEntry) => {
-    const lens = userEntry.lens;
-    const content = userEntry.content.toLowerCase();
-    
-    // Contextual responses based on what user wrote + detected lens
-    const responses = {
-      market: [
-        {
-          condition: () => content.match(/tam|market size|how big/),
-          response: {
-            summary: "Market looks big, but framing matters",
-            detail: "Global B2B cross-border payments volume exceeds $150 trillion annually. SMBs are roughly 40% of volume but underserved by banks. Whether that's actually addressable by a startup is a different question.",
-            sources: [
-              { name: "McKinsey Global Payments Report 2023", quality: "high", url: "https://www.mckinsey.com/industries/financial-services/our-insights/global-payments-report" },
-              { name: "Juniper Research", quality: "medium", url: "https://www.juniperresearch.com/research/fintech-payments" }
-            ],
-            confidence: "High",
-            followUp: "Want me to dig into the specific SMB segment they're targeting?",
-            keyInsight: "Initial read: big market, but their slice is unclear"
-          }
-        },
-        {
-          condition: () => content.match(/timing|why now|moment/),
-          response: {
-            summary: "Timing might favor new entrants — maybe",
-            detail: "Three things converging: (1) Real-time payment rails launching globally (FedNow, PIX, UPI), (2) SMB digitization accelerated post-COVID, (3) Legacy banks slow to modernize. Whether this creates a real window is debatable.",
-            sources: [
-              { name: "Federal Reserve", quality: "high", url: "https://www.federalreserve.gov/paymentsystems/fednow_about.htm" },
-              { name: "Industry analysis", quality: "medium", url: "#" }
-            ],
-            confidence: "Medium",
-            followUp: "Should I compare to when Wise/TransferWise entered the market?",
-            keyInsight: "Rough sense: tailwinds exist, but not slam dunk"
-          }
-        },
-        {
-          condition: () => true, // default for market
-          response: {
-            summary: "Pain point seems real, numbers less clear",
-            detail: "SMBs currently pay 3-5% in fees and wait 3-5 days for cross-border settlement. FinanceFlow's instant settlement claim, if achievable, would matter. The $50B+ fee pool they cite is worth questioning.",
-            sources: [
-              { name: "Company pitch materials", quality: "low" },
-              { name: "World Bank Remittance Prices", quality: "high" }
-            ],
-            confidence: "medium",
-            followUp: "The $50B TAM claim needs validation - want me to sanity check it?",
-            keyInsight: "So far: pain seems real, TAM worth questioning"
-          }
-        }
-      ],
-      team: [
-        {
-          condition: () => content.match(/experience|background|before/),
-          response: {
-            summary: "Couldn't find much on founder backgrounds",
-            detail: "Rachel Green (CEO) and Tom Martinez (CTO) - limited public info. Not unusual for early stage, but worth asking about directly.",
-            sources: [
-              { name: "LinkedIn", quality: "low", url: "https://linkedin.com" },
-              { name: "Company website", quality: "low", url: "#" }
-            ],
-            confidence: "Low",
-            followUp: "Key questions for founder call: prior roles, why this problem, relevant domain expertise?",
-            keyInsight: "Early signal: backgrounds unclear, worth a call",
-            isGap: true
-          }
-        },
-        {
-          condition: () => content.match(/concern|worry|risk|inexperienc/),
-          response: {
-            summary: "Your instinct here might be worth exploring",
-            detail: "Founder-market fit matters, but isn't deterministic. Stripe founders had no payments experience. What often matters more: learning velocity, customer obsession, ability to recruit domain experts. Could go either way.",
-            sources: [
-              { name: "Startup patterns research", quality: "medium", url: "https://www.nfx.com/post/70-percent-of-value-founder-market-fit" }
-            ],
-            confidence: "Medium",
-            followUp: "Want me to find examples of successful fintech founders without direct domain experience?",
-            keyInsight: "Reasonable concern — unclear if dealbreaker"
-          }
-        },
-        {
-          condition: () => true,
-          response: {
-            summary: "Hard to assess team from afar",
-            detail: "CEO/CTO combination suggests technical capability. Key questions that might matter: payments domain expertise, GTM experience, regulatory navigation skills.",
-            sources: [
-              { name: "Company profile", quality: "low", url: "#" }
-            ],
-            confidence: "Low",
-            followUp: "What specific team qualities are most important for your investment thesis?",
-            keyInsight: "Rough read: need a call to form real opinion",
-            isGap: true
-          }
-        }
-      ],
-      traction: [
-        {
-          condition: () => content.match(/revenue|mrr|arr|number/),
-          response: {
-            summary: "No traction data in public materials",
-            detail: "Revenue metrics not disclosed. At Seed stage this isn't unusual, but you'll probably want to ask about: current MRR, customer count, growth rate, retention.",
-            sources: [
-              { name: "Company materials", quality: "low" }
-            ],
-            confidence: "low",
-            followUp: "Key data request: MRR, # of customers, MoM growth, churn rate",
-            keyInsight: "Gap: no traction visibility yet",
-            isGap: true
-          }
-        },
-        {
-          condition: () => content.match(/customer|user|pilot|beta/),
-          response: {
-            summary: "Customer validation is fuzzy",
-            detail: "No information on pilot customers or beta users. For B2B payments, even 5-10 active SMB customers with real volume would be meaningful. Unclear if they have this.",
-            sources: [
-              { name: "Company materials", quality: "low" }
-            ],
-            confidence: "low",
-            followUp: "Ask founders: Who are your first 10 customers? How did you acquire them?",
-            keyInsight: "Open question: any real customers?",
-            isGap: true
-          }
-        },
-        {
-          condition: () => true,
-          response: {
-            summary: "Early stage caveat applies",
-            detail: "Seed stage means limited traction is expected, but some signal matters. Could look for: LOIs, pilot commitments, waitlist size, engaged beta users.",
-            sources: [
-              { name: "Stage-appropriate expectations", quality: "medium" }
-            ],
-            confidence: "medium",
-            followUp: "What's the minimum traction signal you'd need to get comfortable?",
-            keyInsight: "Stage-appropriate, but signal still unclear"
-          }
-        }
-      ],
-      edge: [
-        {
-          condition: () => content.match(/instant|settlement|fast|speed/),
-          response: {
-            summary: "Instant settlement would be notable if real",
-            detail: "Current best-in-class (Wise) takes hours to days. Instant settlement usually requires: pre-funded accounts, specific banking partnerships, or novel treasury management. Each has tradeoffs. Worth understanding how they claim to do it.",
-            sources: [
-              { name: "Competitive analysis", quality: "medium" },
-              { name: "Wise public filings", quality: "high" }
-            ],
-            confidence: "medium",
-            followUp: "Technical diligence question: How do they achieve instant settlement? What's the capital requirement?",
-            keyInsight: "Intriguing if true — needs digging"
-          }
-        },
-        {
-          condition: () => content.match(/compet|wise|stripe|paypal/),
-          response: {
-            summary: "Competitive field looks crowded but fragmented",
-            detail: "Major players (Wise, PayPal, traditional banks) tend to focus on larger transactions. SMB cross-border seems underserved. Key risk to watch: Stripe expanding into this segment.",
-            sources: [
-              { name: "Public company filings", quality: "high" },
-              { name: "Industry reports", quality: "medium" }
-            ],
-            confidence: "high",
-            followUp: "Should I map out the competitive positioning in detail?",
-            keyInsight: "Initial read: wedge exists, durability unclear"
-          }
-        },
-        {
-          condition: () => true,
-          response: {
-            summary: "Differentiation story depends on execution",
-            detail: "The value prop (instant, cheap, SMB-focused) seems clear. Defensibility is the open question: technical moat, network effects, speed to scale before incumbents react. Hard to know from here.",
-            sources: [
-              { name: "Strategic analysis", quality: "medium" }
-            ],
-            confidence: "medium",
-            followUp: "What would make you confident in their ability to build a moat?",
-            keyInsight: "Rough sense: wedge clear, moat TBD"
-          }
-        }
-      ],
-      product: [
-        {
-          condition: () => content.match(/demo|see|try|product/),
-          response: {
-            summary: "Can't assess product without seeing it",
-            detail: "No way to evaluate product quality from available materials. Open questions: Is there a working product? Demo available? Any customer feedback on UX?",
-            sources: [
-              { name: "No product access", quality: "low" }
-            ],
-            confidence: "low",
-            followUp: "Might be worth requesting a product demo",
-            keyInsight: "Gap: no product visibility",
-            isGap: true
-          }
-        },
-        {
-          condition: () => content.match(/tech|architecture|build|engineer/),
-          response: {
-            summary: "Technical depth is a key unknown",
-            detail: "For instant cross-border payments, the technical challenges are real: banking integrations, compliance, fraud prevention, treasury management. CTO background becomes relevant here.",
-            sources: [
-              { name: "Industry knowledge", quality: "medium" }
-            ],
-            confidence: "medium",
-            followUp: "Technical diligence: What's the tech stack? How do they handle compliance?",
-            keyInsight: "Open question: is the tech real?"
-          }
-        },
-        {
-          condition: () => true,
-          response: {
-            summary: "Product claims are just claims so far",
-            detail: "The promise of simplifying cross-border payments sounds good. Without demo access or customer testimonials, product quality is unknown.",
-            sources: [
-              { name: "Company claims", quality: "low" }
-            ],
-            confidence: "low",
-            followUp: "Add to diligence list: product demo, customer references, NPS if available",
-            keyInsight: "Gap: product is still a black box",
-            isGap: true
-          }
-        }
-      ]
-    };
-
-    // Find matching response
-    const lensResponses = responses[lens] || [];
-    for (const item of lensResponses) {
-      if (item.condition()) {
-        return item.response;
-      }
-    }
-    return null;
-  };
-
-  // Add a new note and trigger AI research
-  const addNote = () => {
-    if (!newNote.trim()) return;
-    
-    const detectedLens = detectLens(newNote);
-    
-    const userEntry = {
-      id: Date.now(),
-      type: 'user',
-      content: newNote,
-      timestamp: new Date().toISOString(),
-      lens: detectedLens
-    };
-    
-    const newEntries = [...entries, userEntry];
-    setEntries(newEntries);
-    setNewNote('');
-    
-    // If we detected a lens, generate AI response
-    if (detectedLens) {
-      setIsAIThinking(true);
-      
-      setTimeout(() => {
-        const aiResponse = generateAIResponse(userEntry);
-        
-        if (aiResponse) {
-          const aiEntry = {
-            id: Date.now() + 1,
-            type: 'ai',
-            lens: detectedLens,
-            triggeredBy: userEntry.id,
-            ...aiResponse,
-            timestamp: new Date().toISOString(),
-            userConfirmed: null, // null = pending, true = confirmed, false = needs more
-            userNote: null
-          };
-          
-          setEntries(prev => [...prev, aiEntry]);
-          updateDeal({ workingNotes: [...newEntries, aiEntry] });
-        }
-        
-        setIsAIThinking(false);
-      }, 1200);
-    } else {
-      updateDeal({ workingNotes: newEntries });
-    }
-  };
-
-  // Auto-submit a quick prompt and trigger AI research immediately
-  const autoSubmitPrompt = (prompt) => {
-    const detectedLens = detectLens(prompt);
-    
-    const userEntry = {
-      id: Date.now(),
-      type: 'user',
-      content: prompt,
-      timestamp: new Date().toISOString(),
-      lens: detectedLens
-    };
-    
-    const newEntries = [...entries, userEntry];
-    setEntries(newEntries);
-    
-    // Always trigger AI research for quick prompts
-    setIsAIThinking(true);
-    
-    setTimeout(() => {
-      const aiResponse = generateAIResponse(userEntry);
-      
-      if (aiResponse) {
-        const aiEntry = {
-          id: Date.now() + 1,
-          type: 'ai',
-          lens: detectedLens,
-          triggeredBy: userEntry.id,
-          ...aiResponse,
-          timestamp: new Date().toISOString(),
-          userConfirmed: null,
-          userNote: null
-        };
-        
-        setEntries(prev => [...prev, aiEntry]);
-        updateDeal({ workingNotes: [...newEntries, aiEntry] });
-      }
-      
-      setIsAIThinking(false);
-    }, 1200);
-  };
-
-  // Handle user confirmation of AI insight
-  const handleConfirmation = (entryId, confirmed, note = '') => {
-    const entry = entries.find(e => e.id === entryId);
-    const updated = entries.map(e => {
-      if (e.id === entryId) {
-        return { ...e, userConfirmed: confirmed, userNote: note || null };
-      }
-      return e;
-    });
-    setEntries(updated);
-    updateDeal({ workingNotes: updated });
-    
-    if (confirmed) {
-      setToast({ message: `${lensNames[entry?.lens] || 'Area'} explored`, type: 'success' });
-    } else if (entry) {
-      // Show scoped follow-up options instead of auto-generating
-      setShowNeedMoreOptions(entryId);
-    }
-  };
-
-  // Handle selecting a "Need more" option
-  const handleNeedMoreOption = (entry, option) => {
-    setShowNeedMoreOptions(null);
-    
-    // Create user entry for the follow-up
-    const userEntry = {
-      id: Date.now(),
-      type: 'user',
-      content: option.query,
-      timestamp: new Date().toISOString(),
-      lens: entry.lens,
-      isFollowUp: true
-    };
-    
-    const newEntries = [...entries, userEntry];
-    setEntries(newEntries);
-    setIsAIThinking(true);
-    
-    // Generate response
-    setTimeout(() => {
-      const deeperInsights = {
-        market: {
-          'Break down by SMB segment': {
-            summary: "SMB market breakdown by segment",
-            detail: "The $20T SMB cross-border market segments as: (1) E-commerce sellers: ~$8T, fastest growing at 25% YoY. (2) Professional services: ~$5T, stable but fragmented. (3) Manufacturing/trade: ~$4T, larger ticket sizes. (4) Other SMBs: ~$3T. E-commerce is the most attractive entry point - high volume, digital-native customers.",
-            keyInsight: "E-commerce SMBs ($8T, 25% growth) are the ideal beachhead"
-          },
-          'What assumptions does this depend on?': {
-            summary: "Key assumptions behind the market opportunity",
-            detail: "The $50B+ opportunity assumes: (1) SMBs continue shifting to digital cross-border payments (likely). (2) Incumbent banks remain slow to adapt (historically true). (3) Regulatory environment stays favorable (uncertain). (4) No major platform captures this segment first (risk). Biggest assumption risk: Stripe or similar expanding downmarket.",
-            keyInsight: "Platform risk (Stripe expanding) is the key assumption to stress-test"
-          },
-          'Where could this be overstated?': {
-            summary: "Where the opportunity might be overstated",
-            detail: "Potential overstatement areas: (1) TAM includes transactions that will never leave traditional banking. (2) SMB willingness to switch from existing solutions may be lower than assumed. (3) Customer acquisition costs in fragmented SMB market are often underestimated. (4) Regulatory barriers in key corridors may limit serviceable market.",
-            keyInsight: "Realistic SAM is likely 20-30% of stated TAM"
-          }
-        },
-        team: {
-          'Compare to successful founders': {
-            summary: "Comparison to successful non-domain founders",
-            detail: "Successful fintech founders without direct experience: Stripe (Collisons - software), Robinhood (Tenev - physics), Plaid (Perret - finance but not banking infra). Common traits: exceptional technical ability, obsessive customer focus, recruited domain experts early. Key question: What domain experts have they hired or advised by?",
-            keyInsight: "Track record of recruiting domain experts is more predictive than founder background"
-          },
-          'What are the key risks here?': {
-            summary: "Key team-related risks",
-            detail: "Primary team risks: (1) Payments is heavily regulated - inexperience could mean compliance missteps. (2) Banking relationships are relationship-driven - may lack network. (3) SMB sales is different from enterprise - need scrappy GTM DNA. (4) Two-person founding team may need to scale quickly.",
-            keyInsight: "Regulatory navigation and banking relationships are the critical gaps"
-          },
-          'What should I ask them?': {
-            summary: "Questions for founder assessment",
-            detail: "High-signal questions: (1) 'Walk me through a recent regulatory or compliance challenge.' (2) 'Who are your key advisors with payments experience?' (3) 'How did you acquire your first 5 customers?' (4) 'What's been your biggest mistake so far and what did you learn?' Listen for specificity and self-awareness.",
-            keyInsight: "Listen for specificity - vague answers are yellow flags"
-          }
-        },
-        traction: {
-          'What benchmarks should I expect?': {
-            summary: "Seed-stage fintech traction benchmarks",
-            detail: "Strong Seed traction for B2B fintech: (1) $10-50K MRR, (2) 5-20 paying customers, (3) 15-30% MoM growth, (4) <3 month payback on CAC, (5) Net revenue retention >100%. For pre-revenue: 3-5 signed LOIs, active pilots with real volume, or 100+ qualified waitlist with clear intent signals.",
-            keyInsight: "At Seed: 5-20 customers + 15%+ MoM growth is strong"
-          },
-          'What data should I request?': {
-            summary: "Specific data request for traction",
-            detail: "Request these specific data points: (1) Monthly transaction volume and growth rate, (2) Number of active customers and cohort retention, (3) Unit economics: CAC, LTV, payback period, (4) Pipeline: qualified leads, conversion rate, sales cycle, (5) If pre-revenue: LOIs, pilot details, waitlist quality.",
-            keyInsight: "Transaction volume growth is the most important metric at this stage"
-          },
-          'How do I verify their claims?': {
-            summary: "Traction verification methods",
-            detail: "Verification approaches: (1) Customer references - ask to speak with 2-3 current users, (2) Bank statements showing transaction volume, (3) Dashboard access or screen share of real metrics, (4) Third-party data if available (app store rankings, web traffic), (5) Ask about specific customer stories - vagueness is a red flag.",
-            keyInsight: "Customer references are the gold standard - reluctance to provide them is a red flag"
-          }
-        },
-        edge: {
-          'How defensible is this really?': {
-            summary: "Defensibility assessment",
-            detail: "Defensibility factors: (1) Technical moat: Instant settlement is hard but replicable with enough capital. (2) Network effects: Moderate - more SMBs = more corridors = better rates. (3) Switching costs: Low-medium for SMBs. (4) Regulatory moat: Licenses take time but aren't permanent barriers. Overall: Defensibility is moderate - execution speed matters more than moat.",
-            keyInsight: "Speed to scale matters more than technical moat"
-          },
-          'Who are the biggest threats?': {
-            summary: "Competitive threat assessment",
-            detail: "Key competitive threats: (1) Stripe expanding into SMB cross-border (highest risk), (2) Wise launching SMB-specific products (medium risk), (3) Regional players with local banking relationships, (4) Vertical-specific solutions (e.g., for e-commerce). Stripe is the elephant - their entry would compress the opportunity significantly.",
-            keyInsight: "Stripe expansion is the primary competitive risk to monitor"
-          },
-          'What could erode this moat?': {
-            summary: "Moat erosion risks",
-            detail: "Moat erosion scenarios: (1) Real-time payment rails become ubiquitous, reducing speed advantage. (2) Banks finally modernize cross-border offerings. (3) Crypto/stablecoin solutions mature and reduce friction. (4) Larger player acquires the technology. Timeline: Most risks are 3-5 years out, giving runway to build scale.",
-            keyInsight: "3-5 year window before infrastructure commoditizes"
-          }
-        },
-        product: {
-          'How do I evaluate without a demo?': {
-            summary: "Product evaluation without demo access",
-            detail: "Alternative evaluation methods: (1) Request recorded product walkthrough, (2) Ask for customer case studies with specific metrics, (3) Search for user reviews on G2, Capterra, or industry forums, (4) LinkedIn search for beta users and reach out directly, (5) Ask founders to show their NPS or CSAT scores. If they resist all transparency, that's a signal.",
-            keyInsight: "Resistance to showing any product evidence is a red flag"
-          },
-          'What technical risks exist?': {
-            summary: "Technical risk assessment",
-            detail: "Key technical risks in cross-border payments: (1) Banking integration reliability and uptime, (2) FX rate management and exposure, (3) Compliance/KYC at scale across jurisdictions, (4) Fraud detection in real-time settlement, (5) Data security given financial data sensitivity. Ask: 'What's your uptime been? Have you had any security incidents?'",
-            keyInsight: "Uptime and security track record are essential diligence items"
-          },
-          'What do customers say?': {
-            summary: "Typical customer feedback patterns",
-            detail: "For cross-border payment products, customers typically value: (1) Speed - this is usually #1, (2) Cost transparency - hidden fees are a major pain point, (3) Reliability - failed transfers are very damaging, (4) Support - when things go wrong, responsiveness matters. Ask for verbatim customer quotes - specific praise is more credible than general satisfaction.",
-            keyInsight: "Request verbatim customer quotes - specificity indicates real feedback"
-          }
-        }
-      };
-      
-      const lensInsights = deeperInsights[entry.lens] || {};
-      const insight = lensInsights[option.label] || {
-        summary: "Additional research",
-        detail: "I've looked into this further. The best next step would be to discuss directly with the founders to get primary source information.",
-        keyInsight: "Recommend direct founder discussion"
-      };
-      
-      const aiEntry = {
-        id: Date.now() + 1,
-        type: 'ai',
-        lens: entry.lens,
-        triggeredBy: userEntry.id,
-        summary: insight.summary,
-        detail: insight.detail,
-        keyInsight: insight.keyInsight,
-        sources: [{ name: "Analysis", quality: "medium" }],
-        confidence: "medium",
-        followUp: null,
-        timestamp: new Date().toISOString(),
-        userConfirmed: null
-      };
-      
-      setEntries(prev => [...prev, aiEntry]);
-      updateDeal({ workingNotes: [...newEntries, aiEntry] });
-      setIsAIThinking(false);
-    }, 1200);
-  };
-
-  // Handle follow-up question - auto-submit
-  const handleFollowUp = (entry) => {
-    const followUpText = entry.followUp;
-    
-    // Create user entry for the follow-up
-    const userEntry = {
-      id: Date.now(),
-      type: 'user',
-      content: followUpText,
-      timestamp: new Date().toISOString(),
-      lens: entry.lens,
-      isFollowUp: true
-    };
-    
-    const newEntries = [...entries, userEntry];
-    setEntries(newEntries);
-    setIsAIThinking(true);
-    
-    // Generate response to the follow-up
-    setTimeout(() => {
-      const followUpResponses = {
-        market: {
-          "sanity-check": {
-            summary: "Rough TAM sanity check",
-            detail: "The $50B claim probably refers to annual fee revenue from SMB cross-border payments, not transaction volume. Back-of-envelope: $20T SMB volume × 0.25% average take rate = $50B. Plausible math, but aggressive — assumes they capture the entire fee pool. Realistic serviceable market might be $5-10B in their target corridors.",
-            sources: [{ name: "Independent calculation", quality: "medium" }, { name: "Industry fee benchmarks", quality: "high" }],
-            confidence: "high",
-            followUp: null,
-            keyInsight: "Early math: TAM plausible, SAM probably smaller"
-          },
-          "default": {
-            summary: "One way to think about the market",
-            detail: "Breaking down the SMB cross-border opportunity: US-EU corridor (~30% of volume), US-Asia (~25%), Intra-Asia (~20%), LatAm (~15%), Other (~10%). US-EU is most competitive. LatAm and Intra-Asia have less competition but more regulatory complexity. Depends which corridors they're targeting.",
-            sources: [{ name: "Corridor analysis", quality: "medium" }],
-            confidence: "medium",
-            followUp: "Want me to look at specific regulatory requirements in their target markets?",
-            keyInsight: "Rough framing: corridor choice matters"
-          }
-        },
-        team: {
-          "default": {
-            summary: "Some questions that might help",
-            detail: "Questions you could ask: (1) Walk me through your most complex technical challenge, (2) Who's your first payments/fintech hire going to be?, (3) Tell me about a time you were wrong about a product decision, (4) How do you divide responsibilities between CEO/CTO day-to-day?",
-            sources: [{ name: "Due diligence patterns", quality: "medium" }],
-            confidence: "high",
-            followUp: null,
-            keyInsight: "Possible angles for a founder call"
-          }
-        },
-        traction: {
-          "default": {
-            summary: "Standard data request framing",
-            detail: "You could ask: 'To help us move forward, could you share: (1) Current MRR and MoM growth rate, (2) Number of active customers and transaction volume, (3) Customer acquisition cost and payback period, (4) Net revenue retention or churn rate, (5) 2-3 customer references we could speak with.'",
-            sources: [{ name: "Standard Seed diligence", quality: "high" }],
-            confidence: "high",
-            followUp: null,
-            keyInsight: "Template for data request"
-          }
-        },
-        edge: {
-          "default": {
-            summary: "Technical questions that might reveal depth",
-            detail: "Things you could ask: (1) How do you achieve instant settlement - pre-funding, banking partnerships, or other?, (2) What's your capital efficiency ratio?, (3) Which banking/payment partners are you integrated with?, (4) How do you handle FX risk?, (5) What's your compliance/licensing status?",
-            sources: [{ name: "Technical DD framework", quality: "medium" }],
-            confidence: "high",
-            followUp: null,
-            keyInsight: "These might reveal if the tech claim is real"
-          }
-        },
-        product: {
-          "default": {
-            summary: "Ways to get product signal without demo",
-            detail: "Some options: (1) Request recorded product walkthrough, (2) Ask for customer case study with metrics, (3) Check LinkedIn for beta user feedback, (4) Search Twitter/X for mentions, (5) Ask founders to connect you with 2-3 current users.",
-            sources: [{ name: "Product DD alternatives", quality: "medium" }],
-            confidence: "medium",
-            followUp: null,
-            keyInsight: "Customer references might be best proxy"
-          }
-        }
-      };
-      
-      const lensResponses = followUpResponses[entry.lens] || {};
-      const response = followUpText.toLowerCase().includes('sanity') || followUpText.toLowerCase().includes('check') 
-        ? (lensResponses["sanity-check"] || lensResponses["default"])
-        : lensResponses["default"] || {
-            summary: "Follow-up research",
-            detail: "I've looked into this further. The best next step would be to discuss directly with the founders to get primary source information.",
-            sources: [{ name: "Additional research", quality: "low" }],
-            confidence: "low",
-            followUp: null,
-            keyInsight: "Recommend direct founder discussion"
-          };
-      
-      const aiEntry = {
-        id: Date.now() + 1,
-        type: 'ai',
-        lens: entry.lens,
-        triggeredBy: userEntry.id,
-        ...response,
-        timestamp: new Date().toISOString(),
-        userConfirmed: null
-      };
-      
-      setEntries(prev => [...prev, aiEntry]);
-      updateDeal({ workingNotes: [...newEntries, aiEntry] });
-      setIsAIThinking(false);
-    }, 1200);
-  };
-
-  // Handle attachment
-  const handleAttachment = () => {
-    const attachment = {
-      id: Date.now(),
-      type: 'attachment',
-      content: '[Pitch deck attached]',
-      fileName: 'FinanceFlow_Pitch_Deck.pdf',
-      timestamp: new Date().toISOString(),
-      lens: null
-    };
-    
-    const newEntries = [...entries, attachment];
-    setEntries(newEntries);
-    
-    // AI reacts to attachment
-    setTimeout(() => {
-      const aiReaction = {
-        id: Date.now() + 1,
-        type: 'ai',
-        lens: 'market',
-        triggeredBy: attachment.id,
-        summary: "Quick scan of the deck",
-        detail: "Claims I noticed: $50B TAM, instant settlement via proprietary tech, 2 pilot customers. The TAM calculation methodology isn't shown — worth asking about.",
-        sources: [{ name: "FinanceFlow_Pitch_Deck.pdf", quality: "primary" }],
-        confidence: "medium",
-        followUp: "Want me to fact-check the $50B TAM claim against industry data?",
-        keyInsight: "Initial scan: some claims worth questioning",
-        timestamp: new Date().toISOString(),
-        userConfirmed: null
-      };
-      
-      setEntries(prev => [...prev, aiReaction]);
-      updateDeal({ workingNotes: [...newEntries, aiReaction] });
-    }, 1500);
-    
-    setToast({ message: 'Deck attached', type: 'success' });
-  };
-
-  // Voice recording
-  const toggleRecording = () => {
-    if (isRecording) {
-      setIsRecording(false);
-      // Simulate voice transcription
-      const voiceEntry = {
-        id: Date.now(),
-        type: 'voice',
-        content: '"I like the market opportunity but I\'m worried about the team\'s lack of payments experience..."',
-        timestamp: new Date().toISOString(),
-        lens: 'team'
-      };
-      
-      const newEntries = [...entries, voiceEntry];
-      setEntries(newEntries);
-      
-      // AI responds to voice note
-      setTimeout(() => {
-        const aiReaction = {
-          id: Date.now() + 1,
-          type: 'ai',
-          lens: 'team',
-          triggeredBy: voiceEntry.id,
-          summary: "That's a reasonable thing to wonder about",
-          detail: "Domain expertise matters but isn't always predictive. Stripe founders had no payments background. What sometimes matters more: technical depth, learning velocity, ability to recruit domain experts. Could go either way.",
-          sources: [{ name: "Pattern matching from fintechs", quality: "medium" }],
-          confidence: "medium",
-          followUp: "Want me to find examples of successful founders who entered payments without direct experience?",
-          keyInsight: "Reasonable concern — unclear if dealbreaker",
-          timestamp: new Date().toISOString(),
-          userConfirmed: null
-        };
-        
-        setEntries(prev => [...prev, aiReaction]);
-        updateDeal({ workingNotes: [...newEntries, aiReaction] });
-      }, 1200);
-      
-      setToast({ message: 'Voice note transcribed', type: 'success' });
-    } else {
-      setIsRecording(true);
-      setToast({ message: 'Recording... tap again to stop', type: 'success' });
-    }
-  };
-
-  const formatTime = (ts) => {
-    const d = new Date(ts);
-    const now = new Date();
-    const diffMs = now - d;
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-    
-    // Show relative time for recent entries
-    if (diffMins < 1) return 'just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    
-    // Show date + time for older entries
-    const timeStr = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-    if (diffDays < 7) {
-      const dayStr = d.toLocaleDateString('en-US', { weekday: 'short' });
-      return `${dayStr} ${timeStr}`;
-    }
-    
-    // Full date for entries older than a week
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' + timeStr;
-  };
-
-  const lensNames = {
-    market: 'Market',
-    team: 'Team', 
-    traction: 'Traction',
-    edge: 'Moat',
-    product: 'Product'
-  };
-
-  // Softer color palette matching the design
-  const lensColors = {
-    market: 'bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400',
-    team: 'bg-violet-50 text-violet-600 dark:bg-violet-900/20 dark:text-violet-400',
-    traction: 'bg-teal-50 text-teal-600 dark:bg-teal-900/20 dark:text-teal-400',
-    edge: 'bg-orange-50 text-orange-600 dark:bg-orange-900/20 dark:text-orange-400',
-    product: 'bg-pink-50 text-pink-600 dark:bg-pink-900/20 dark:text-pink-400'
-  };
-
-  const sourceQualityColors = {
-    high: 'text-blue-600',
-    medium: 'text-stone-500',
-    low: 'text-stone-400',
-    primary: 'text-blue-600'
-  };
-
-  // Count gaps
-  const gaps = entries.filter(e => e.type === 'ai' && e.isGap && !e.userConfirmed).length;
-  
-  // Progressive disclosure - has user started?
-  const hasStarted = entries.length > 0;
-  const hasMultipleInputs = entries.filter(e => e.type === 'user' || e.type === 'voice').length >= 2;
+  const handleRemove = (id) => onUpdate(docs.filter(d => d.id !== id));
 
   return (
-    <div className="space-y-6">
-      {/* Company Header */}
-      <div className="bg-white dark:bg-stone-800 rounded-2xl p-5">
-        <div className="flex items-start gap-4">
-          <div className="w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#10b981' }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-              <rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/>
-            </svg>
-          </div>
-          
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <h2 className="text-xl font-bold text-stone-900 dark:text-white">{deal.companyName}</h2>
-              <a href={deal.website || '#'} className="text-stone-400 hover:text-stone-600">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
-                </svg>
-              </a>
-            </div>
-            <p className="text-sm text-stone-500 dark:text-stone-400">
-              {deal.stage} · {deal.industry} · <svg className="inline w-3 h-3 mb-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg> {deal.location || 'San Francisco, CA'}
-            </p>
-          </div>
+    <div className="bg-white dark:bg-stone-800 rounded-2xl overflow-hidden">
+      <div className="px-5 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2">
+            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>
+          </svg>
+          <h3 className="text-sm font-medium text-stone-900 dark:text-white">Documents</h3>
+          {docs.length > 0 && <span className="text-xs text-stone-400">({docs.length})</span>}
         </div>
-
-        <p className="mt-4 text-stone-600 dark:text-stone-300 text-sm leading-relaxed">
-          {deal.overview || 'B2B payments platform simplifying cross-border transactions for SMBs. Reduces settlement time from 3-5 days to instant.'}
-        </p>
-
-        {deal.founders && deal.founders.length > 0 && (
-          <div className="flex items-center gap-2 mt-4 pt-4 border-t border-stone-100 dark:border-stone-700">
-            <span className="text-sm text-stone-500">Founders:</span>
-            <div className="flex items-center gap-3">
-              {deal.founders.map((founder, idx) => (
-                <div key={idx} className="flex items-center gap-1.5">
-                  <div className="w-6 h-6 rounded-full bg-stone-200 dark:bg-stone-700 flex items-center justify-center text-xs font-medium text-stone-600 dark:text-stone-300">
-                    {founder.name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
-                  </div>
-                  <span className="text-sm text-stone-700 dark:text-stone-300">{founder.name}</span>
-                  <span className="text-xs text-stone-400">({founder.role})</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        <button
+          onClick={() => { setShowAdd(!showAdd); setError(''); }}
+          className="text-xs font-medium text-[#5B6DC4] hover:text-[#4a5ba8] transition-colors"
+        >
+          {showAdd ? 'Cancel' : '+ Add link'}
+        </button>
       </div>
 
-      {/* Angles touched - Only show after multiple inputs, softer framing */}
-      {hasMultipleInputs && (
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-stone-300">Angles touched:</span>
-          {Object.entries(lensProgress).map(([key, lens]) => (
-            <div 
-              key={key}
-              className="px-2.5 py-1 rounded-full text-xs flex items-center gap-1.5"
-              style={
-                lens.touched 
-                  ? { backgroundColor: '#F5F5F4', color: '#78716C' }
-                  : { backgroundColor: 'transparent', color: '#D6D3D1' }
-              }
-            >
-              {lens.touched && (
-                <span className="w-1 h-1 rounded-full" style={{ backgroundColor: '#A8A29E' }} />
-              )}
-              <span>{lens.name}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Working Notes - Conversation Flow */}
-      <div className="bg-white dark:bg-stone-800 rounded-2xl overflow-hidden">
-        <div className="p-4 border-b border-stone-100 dark:border-stone-700">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="font-semibold text-stone-900 dark:text-white">
-                {hasStarted ? 'Working Notes' : 'Your thoughts'}
-              </h3>
-              {hasStarted && (
-                <p className="text-xs text-stone-300 dark:text-stone-600">Rough notes · nothing final</p>
-              )}
-            </div>
-            {/* Remove status badges - too judgmental */}
-          </div>
-        </div>
-
-        {/* Conversation entries */}
-        <div className="p-4 space-y-4 max-h-[60vh] overflow-y-auto">
-          {entries.length === 0 && (
-            <div className="text-center py-12">
-              <p className="text-stone-600 dark:text-stone-300 font-medium mb-2">What's your gut reaction to this company?</p>
-              <p className="text-sm text-stone-400 dark:text-stone-500">Type below or use voice. No structure needed.</p>
-            </div>
-          )}
-          
-          {entries.map((entry, idx) => (
-            <div key={entry.id}>
-              {/* User entry */}
-              {(entry.type === 'user' || entry.type === 'voice' || entry.type === 'attachment') && (
-                <div className="flex gap-3">
-                  <div className="w-8 h-8 rounded-full bg-stone-200 dark:bg-stone-700 flex items-center justify-center flex-shrink-0">
-                    {entry.type === 'voice' ? (
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-stone-500">
-                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-                      </svg>
-                    ) : entry.type === 'attachment' ? (
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-stone-500">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                      </svg>
-                    ) : (
-                      <span className="text-xs font-medium text-stone-500">You</span>
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs text-stone-400">{formatTime(entry.timestamp)}</span>
-                      {entry.lens && (
-                        <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: '#EEF2FF', color: '#5B6DC4' }}>
-                          {lensNames[entry.lens]}
-                        </span>
-                      )}
-                      {entry.isFromAI && (
-                        <span className="text-xs text-stone-400 italic">from AI insight</span>
-                      )}
-                    </div>
-                    <p className="text-stone-700 dark:text-stone-200">
-                      {entry.type === 'voice' && <span className="italic">{entry.content}</span>}
-                      {entry.type === 'attachment' && (
-                        <span className="flex items-center gap-2">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-stone-400">
-                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
-                          </svg>
-                          {entry.fileName || entry.content}
-                        </span>
-                      )}
-                      {entry.type === 'user' && entry.content}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* AI response - framed as thinking mirror, not verdict */}
-              {entry.type === 'ai' && (
-                <div className="flex gap-3 ml-4">
-                  <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 bg-stone-200 dark:bg-stone-600">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#78716C" strokeWidth="2">
-                      <path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z"/>
-                    </svg>
-                  </div>
-                  <div className="flex-1 bg-stone-50/50 dark:bg-stone-700/30 rounded-xl p-4 border border-stone-100 dark:border-stone-700">
-                    {/* Anchor to user's original question */}
-                    {getOriginalQuestion(entry) && (
-                      <p className="text-xs text-stone-400 mb-2 italic">
-                        Re: "{getOriginalQuestion(entry).slice(0, 50)}{getOriginalQuestion(entry).length > 50 ? '...' : ''}"
-                      </p>
-                    )}
-                    
-                    {/* Softer lens tag */}
-                    <div className="flex items-center gap-2 mb-3">
-                      <span className="text-xs text-stone-400">
-                        {lensNames[entry.lens]} angle
-                      </span>
-                      <span className="text-xs text-stone-300">·</span>
-                      <span className="text-xs text-stone-300">
-                        {entry.confidence === 'High' ? 'decent data' : entry.confidence === 'Medium' ? 'partial data' : 'thin data'}
-                      </span>
-                    </div>
-                    
-                    {/* Initial read - no green/yellow success framing */}
-                    <div className="mb-3">
-                      <p className="text-xs text-stone-400 mb-1">Initial read:</p>
-                      <p className="text-sm text-stone-600 dark:text-stone-300">
-                        {entry.keyInsight}
-                      </p>
-                    </div>
-
-                    <p className="text-sm text-stone-500 dark:text-stone-400 mb-3">{entry.detail}</p>
-                    
-                    {/* Open loop - end with uncertainty */}
-                    <p className="text-xs text-stone-400 italic mb-3">Could be wrong. Worth checking.</p>
-                    
-                    {/* Sources - now clickable */}
-                    <div className="flex flex-wrap gap-2 mb-3">
-                      {entry.sources.map((source, sidx) => (
-                        <a 
-                          key={sidx} 
-                          href={source.url || '#'} 
-                          target="_blank" 
-                          rel="noopener noreferrer"
-                          className={`text-xs flex items-center gap-1 hover:underline cursor-pointer ${sourceQualityColors[source.quality]}`}
-                          onClick={(e) => { if (!source.url) e.preventDefault(); }}
-                        >
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                            <polyline points="15 3 21 3 21 9"/>
-                            <line x1="10" y1="14" x2="21" y2="3"/>
-                          </svg>
-                          {source.name} →
-                        </a>
-                      ))}
-                    </div>
-
-                    {/* Actions - pending state */}
-                    {entry.userConfirmed === null && !showNeedMoreOptions && (
-                      <div className="flex flex-col gap-3 pt-3 border-t border-stone-100 dark:border-stone-600">
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            onClick={() => handleConfirmation(entry.id, true)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors bg-stone-100 text-stone-600 hover:bg-stone-200"
-                          >
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
-                            Got it
-                          </button>
-                          <button
-                            onClick={() => handleConfirmation(entry.id, false)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-stone-50 text-stone-500 hover:bg-stone-100 transition-colors border border-stone-200"
-                          >
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 12a9 9 0 1 1-9-9"/><path d="M21 3v9h-9"/></svg>
-                            More on this
-                          </button>
-                          <button
-                            onClick={() => {
-                              setNewNote('');
-                              document.querySelector('textarea')?.focus();
-                            }}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-stone-50 text-stone-500 hover:bg-stone-100 transition-colors border border-stone-200"
-                          >
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg>
-                            Add thought
-                          </button>
-                        </div>
-                        
-                        {/* Follow-up question - softer framing */}
-                        {entry.followUp && (
-                          <button
-                            onClick={() => handleFollowUp(entry)}
-                            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-left transition-colors border border-stone-100 hover:border-stone-200 hover:bg-stone-50 text-stone-500"
-                          >
-                            <span>→ {entry.followUp}</span>
-                          </button>
-                        )}
-                      </div>
-                    )}
-                    
-                    {/* Dig deeper options - scoped follow-ups */}
-                    {showNeedMoreOptions === entry.id && (
-                      <div className="pt-3 border-t border-stone-100 dark:border-stone-600">
-                        <p className="text-xs text-stone-500 mb-2">What would help?</p>
-                        <div className="flex flex-wrap gap-2">
-                          {(needMoreOptions[entry.lens] || []).map((option, idx) => (
-                            <button
-                              key={idx}
-                              onClick={() => handleNeedMoreOption(entry, option)}
-                              className="text-xs px-3 py-2 rounded-lg border border-stone-200 text-stone-600 hover:bg-stone-50 hover:border-stone-300 transition-colors text-left"
-                            >
-                              {option.label}
-                            </button>
-                          ))}
-                        </div>
-                        <button 
-                          onClick={() => setShowNeedMoreOptions(null)}
-                          className="text-xs text-stone-400 mt-2 hover:text-stone-600"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    )}
-                    
-                    {/* Confirmed state - softer, less permanent */}
-                    {entry.userConfirmed === true && (
-                      <div className="mt-3 p-2 rounded-lg bg-stone-50 dark:bg-stone-700/30">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-stone-400">
-                            ✓ Noted
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-
-          {/* AI thinking indicator */}
-          {isAIThinking && (
-            <div className="flex gap-3 ml-4">
-              <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 animate-pulse" style={{ backgroundColor: '#5B6DC4' }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                  <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-                </svg>
-              </div>
-              <div className="flex items-center gap-2 text-sm text-stone-400">
-                <span>Researching</span>
-                <span className="flex gap-1">
-                  <span className="w-1.5 h-1.5 bg-stone-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}/>
-                  <span className="w-1.5 h-1.5 bg-stone-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}/>
-                  <span className="w-1.5 h-1.5 bg-stone-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}/>
-                </span>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Input area */}
-        <div className="p-4 border-t border-stone-100 dark:border-stone-700">
-          {/* Recording waveform overlay */}
-          {isRecording && (
-            <div className="mb-3 bg-red-50 dark:bg-red-900/20 rounded-xl p-4 border border-red-200 dark:border-red-800">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse" />
-                  <span className="text-sm font-medium text-red-600 dark:text-red-400">Recording...</span>
-                </div>
-                {/* Waveform visualization */}
-                <div className="flex items-center gap-0.5 h-6">
-                  {[...Array(12)].map((_, i) => (
-                    <div 
-                      key={i}
-                      className="w-1 bg-red-400 dark:bg-red-500 rounded-full"
-                      style={{
-                        height: `${Math.random() * 100}%`,
-                        minHeight: '4px',
-                        animation: `waveform 0.5s ease-in-out ${i * 0.05}s infinite alternate`
-                      }}
-                    />
-                  ))}
-                </div>
-                <button
-                  onClick={toggleRecording}
-                  className="px-3 py-1.5 bg-red-500 text-white text-sm font-medium rounded-lg hover:bg-red-600 transition-colors"
-                >
-                  Stop
-                </button>
-              </div>
-              <style>{`
-                @keyframes waveform {
-                  0% { height: 20%; }
-                  100% { height: 80%; }
-                }
-              `}</style>
-            </div>
-          )}
-          
-          <div className="flex gap-2">
-            <div className="flex-1 relative">
-              <textarea
-                value={newNote}
-                onChange={(e) => setNewNote(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    addNote();
-                  }
-                }}
-                placeholder={isRecording ? "Recording voice note..." : "Type a thought, question, or concern..."}
-                disabled={isRecording}
-                className={`w-full bg-stone-50 dark:bg-stone-700/50 rounded-xl px-4 py-3 pr-24 text-stone-800 dark:text-stone-200 placeholder-stone-400 text-sm focus:outline-none focus:ring-2 focus:ring-[#5B6DC4]/30 resize-none ${isRecording ? 'opacity-50' : ''}`}
-                rows={2}
-              />
-              <div className="absolute right-2 bottom-2 flex items-center gap-1">
-                <button 
-                  onClick={handleAttachment}
-                  disabled={isRecording}
-                  className={`p-2 transition-colors ${isRecording ? 'text-stone-300 cursor-not-allowed' : 'text-stone-400 hover:text-stone-600'}`}
-                  title="Attach file"
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
-                  </svg>
-                </button>
-                <button 
-                  onClick={toggleRecording}
-                  className={`p-2 transition-colors ${isRecording ? 'text-red-500 animate-pulse' : 'text-stone-400 hover:text-stone-600'}`}
-                  title={isRecording ? "Stop recording" : "Voice note"}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                  </svg>
-                </button>
-              </div>
-            </div>
-            <button
-              onClick={addNote}
-              disabled={!newNote.trim() || isRecording}
-              className="px-4 py-2 rounded-xl text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-              style={{ backgroundColor: '#5B6DC4' }}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
-              </svg>
-            </button>
-          </div>
-          <p className="text-xs text-stone-400 mt-2">Press Enter to send · AI will auto-research relevant areas</p>
-        </div>
-      </div>
-
-      {/* Contextual Questions - dynamically generated based on deal + notes */}
-      {contextualQuestions.length > 0 && (
-        <div className="bg-stone-50 dark:bg-stone-800/50 rounded-xl p-4 space-y-3">
-          <div className="flex items-center gap-2">
-            <svg className="text-[#5B6DC4]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M9 18h6"/><path d="M10 22h4"/>
-              <path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/>
-            </svg>
-            <span className="text-xs font-medium text-stone-600 dark:text-stone-300">
-              Questions worth exploring for this {deal.industry} {deal.stage}
-            </span>
-          </div>
-          <div className="space-y-2">
-            {contextualQuestions.slice(0, 3).map((q) => (
+      {/* Add form */}
+      {showAdd && (
+        <div className="mx-5 mb-4 p-4 bg-stone-50 dark:bg-stone-700/50 rounded-xl space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            {DOC_TYPES.map(t => (
               <button
-                key={q.id}
-                onClick={() => autoSubmitPrompt(q.question)}
-                disabled={isAIThinking}
-                className="w-full text-left p-3 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed hover:bg-white dark:hover:bg-stone-700 group"
-                style={{ backgroundColor: 'transparent', border: '1px solid #E7E5E4' }}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-stone-700 dark:text-stone-200 group-hover:text-[#5B6DC4]">
-                      {q.question}
-                    </p>
-                    <p className="text-xs text-stone-400 mt-0.5">
-                      {q.triggeredBy ? `Based on ${q.triggeredBy}` : q.context}
-                    </p>
-                  </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${
-                    q.priority === 'high' 
-                      ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' 
-                      : 'bg-stone-100 text-stone-500 dark:bg-stone-700 dark:text-stone-400'
-                  }`}>
-                    {q.category}
-                  </span>
-                </div>
-              </button>
-            ))}
-          </div>
-          {contextualQuestions.length > 3 && (
-            <p className="text-xs text-stone-400 text-center">
-              +{contextualQuestions.length - 3} more questions available
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* Fallback quick prompts if no contextual questions (edge case) */}
-      {contextualQuestions.length === 0 && hasStarted && (() => {
-        const allPrompts = ['How big is this market?', 'What do we know about the founders?', 'Who are the competitors?', 'Is there any traction data?'];
-        const askedQuestions = entries.filter(e => e.type === 'user').map(e => e.content);
-        const remainingPrompts = allPrompts.filter(p => !askedQuestions.includes(p));
-        
-        if (remainingPrompts.length === 0) return null;
-        
-        return (
-          <div className="flex flex-wrap gap-2 items-center">
-            <span className="text-xs text-stone-400">Others often explore:</span>
-            {remainingPrompts.map(prompt => (
-              <button
-                key={prompt}
-                onClick={() => autoSubmitPrompt(prompt)}
-                disabled={isAIThinking}
-                className="text-xs px-3 py-1.5 rounded-full font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ 
-                  backgroundColor: '#F5F5F4', 
-                  color: '#78716C',
-                  border: '1px solid #E7E5E4'
-                }}
-                onMouseOver={(e) => {
-                  e.currentTarget.style.backgroundColor = '#5B6DC4';
-                  e.currentTarget.style.color = 'white';
-                }}
-                onMouseOut={(e) => {
-                  e.currentTarget.style.backgroundColor = '#EEF2FF';
-                  e.currentTarget.style.color = '#5B6DC4';
-                }}
-              >
-                {prompt}
-              </button>
-            ))}
-          </div>
-        );
-      })()}
-
-      {/* Decision Section - Only show after user has started */}
-      {hasStarted && (
-        <div className="text-center pt-4" style={{ opacity: hasMultipleInputs ? 1 : 0.5 }}>
-          <div className="flex items-center justify-center gap-4 mb-4">
-            <div className="flex-1 h-px bg-stone-100 dark:bg-stone-700" />
-            <span className="text-xs text-stone-300 tracking-wide">
-              {hasMultipleInputs ? 'Whenever you\'re ready' : 'Keep exploring'}
-            </span>
-            <div className="flex-1 h-px bg-stone-100 dark:bg-stone-700" />
-          </div>
-          
-          {/* Remove progress summary - too judgmental early on */}
-          
-          {gaps > 0 && hasMultipleInputs && (
-            <p className="text-sm mb-4" style={{ color: '#8B6914' }}>
-              You're choosing to decide with {gaps} open question{gaps > 1 ? 's' : ''}
-            </p>
-          )}
-          
-          <div className="flex flex-col items-center gap-3">
-            <div className="flex items-center justify-center gap-4">
-              <button 
-                onClick={() => setShowInvestModal(true)}
-                disabled={!hasMultipleInputs}
-                className="flex flex-col items-center gap-1 px-6 py-3 rounded-xl font-medium transition-all text-white min-w-[100px] disabled:opacity-40 disabled:cursor-not-allowed"
-                style={{ backgroundColor: '#10b981' }}
-              >
-                <span className="flex items-center gap-2">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="12" cy="12" r="10"/><path d="M12 6v12"/><path d="M6 12h12"/>
-                  </svg>
-                  Invest
-                </span>
-                <span className="text-[10px] opacity-80 font-normal">Record why you're investing now</span>
-              </button>
-              <button 
-                onClick={() => setShowWatchModal(true)}
-                disabled={!hasMultipleInputs}
-                className="group flex flex-col items-center gap-1 px-6 py-3 rounded-xl font-medium transition-all border border-stone-300 text-stone-600 hover:border-amber-400 hover:text-amber-600 hover:bg-amber-50 min-w-[100px] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-stone-300 disabled:hover:text-stone-600 disabled:hover:bg-transparent"
-              >
-                <span className="flex items-center gap-2">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-                  </svg>
-                  Watch
-                </span>
-                <span className="text-[10px] opacity-70 font-normal group-hover:opacity-100">What would change your mind</span>
-              </button>
-              <button 
-                onClick={() => setShowPassModal(true)}
-                disabled={!hasMultipleInputs}
-                className="group flex flex-col items-center gap-1 px-6 py-3 rounded-xl font-medium transition-all border border-stone-300 text-stone-600 hover:border-red-400 hover:text-red-600 hover:bg-red-50 min-w-[100px] disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-stone-300 disabled:hover:text-stone-600 disabled:hover:bg-transparent"
-              >
-                <span className="flex items-center gap-2">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                  </svg>
-                  Pass
-              </span>
-              <span className="text-[10px] opacity-70 font-normal group-hover:opacity-100">Why is this a no right now?</span>
-            </button>
-          </div>
-        </div>
-        
-        <p className="text-xs text-stone-400 mt-4">Take your time. You can always revisit this later.</p>
-        
-        {/* Generate Memo button - only show when ready */}
-        {hasMultipleInputs && entries.length > 0 && (
-          <button
-            onClick={() => setShowMemoModal(true)}
-            className="mt-6 flex items-center gap-2 mx-auto px-4 py-2 rounded-lg text-sm font-medium transition-all border border-stone-200 text-stone-500 hover:border-[#5B6DC4] hover:text-[#5B6DC4] hover:bg-[#5B6DC4]/5"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/>
-            </svg>
-            Generate Investment Memo
-          </button>
-        )}
-        </div>
-      )}
-
-      {/* Invest Modal */}
-      {showInvestModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-stone-800 rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6">
-              {/* Header */}
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex items-center gap-3">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2">
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
-                  </svg>
-                  <h3 className="text-lg font-semibold text-stone-900 dark:text-white">Why I'm investing</h3>
-                </div>
-                <button 
-                  onClick={() => setShowInvestModal(false)}
-                  className="p-1 text-stone-400 hover:text-stone-600"
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                  </svg>
-                </button>
-              </div>
-              <p className="text-sm text-stone-500 dark:text-stone-400 mb-6">
-                Capture what convinced you. This helps you remember your thesis later.
-              </p>
-
-              {/* Your reasoning */}
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">
-                  Your reasoning
-                </label>
-                <textarea
-                  value={investReasoning}
-                  onChange={(e) => setInvestReasoning(e.target.value)}
-                  placeholder="What convinced you? What's the thesis?"
-                  className="w-full bg-stone-50 dark:bg-stone-700/50 rounded-xl p-4 text-stone-800 dark:text-stone-200 placeholder-stone-400 text-sm focus:outline-none focus:ring-2 focus:ring-[#5B6DC4]/30 min-h-[120px] resize-none border border-stone-200 dark:border-stone-600"
-                />
-              </div>
-
-              {/* Notification preferences */}
-              <div className="mb-6">
-                <div className="flex items-center gap-2 mb-3">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-stone-400">
-                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-                  </svg>
-                  <span className="text-sm text-stone-600 dark:text-stone-400">Monitor updates for this company</span>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-3">
-                  <button
-                    onClick={() => setNotificationPref('weekly')}
-                    className={`p-3 rounded-xl border-2 text-left transition-all ${
-                      notificationPref === 'weekly' 
-                        ? 'border-[#5B6DC4] bg-[#5B6DC4]/10 ring-2 ring-[#5B6DC4]/20' 
-                        : 'border-stone-200 dark:border-stone-600 hover:border-stone-300'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      {notificationPref === 'weekly' ? (
-                        <div className="w-4 h-4 rounded-full bg-[#5B6DC4] flex items-center justify-center">
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
-                        </div>
-                      ) : (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-stone-400">
-                          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-                        </svg>
-                      )}
-                      <span className={`text-sm font-medium ${notificationPref === 'weekly' ? 'text-[#5B6DC4]' : 'text-stone-700 dark:text-stone-300'}`}>Weekly updates</span>
-                    </div>
-                    <p className="text-xs text-stone-500">Get notified weekly about company news</p>
-                  </button>
-                  
-                  <button
-                    onClick={() => setNotificationPref('monthly')}
-                    className={`p-3 rounded-xl border-2 text-left transition-all ${
-                      notificationPref === 'monthly' 
-                        ? 'border-[#5B6DC4] bg-[#5B6DC4]/10 ring-2 ring-[#5B6DC4]/20' 
-                        : 'border-stone-200 dark:border-stone-600 hover:border-stone-300'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      {notificationPref === 'monthly' ? (
-                        <div className="w-4 h-4 rounded-full bg-[#5B6DC4] flex items-center justify-center">
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
-                        </div>
-                      ) : (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-stone-400">
-                          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-                        </svg>
-                      )}
-                      <span className={`text-sm font-medium ${notificationPref === 'monthly' ? 'text-[#5B6DC4]' : 'text-stone-700 dark:text-stone-300'}`}>Monthly digest</span>
-                    </div>
-                    <p className="text-xs text-stone-500">Monthly summary of key updates</p>
-                  </button>
-                  
-                  <button
-                    onClick={() => setNotificationPref('milestones')}
-                    className={`p-3 rounded-xl border-2 text-left transition-all ${
-                      notificationPref === 'milestones' 
-                        ? 'border-[#5B6DC4] bg-[#5B6DC4]/10 ring-2 ring-[#5B6DC4]/20' 
-                        : 'border-stone-200 dark:border-stone-600 hover:border-stone-300'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      {notificationPref === 'milestones' ? (
-                        <div className="w-4 h-4 rounded-full bg-[#5B6DC4] flex items-center justify-center">
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
-                        </div>
-                      ) : (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-stone-400">
-                          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-                        </svg>
-                      )}
-                      <span className={`text-sm font-medium ${notificationPref === 'milestones' ? 'text-[#5B6DC4]' : 'text-stone-700 dark:text-stone-300'}`}>Milestones only</span>
-                    </div>
-                    <p className="text-xs text-stone-500">Only funding, launches, or major news</p>
-                  </button>
-                  
-                  <button
-                    onClick={() => setNotificationPref('none')}
-                    className={`p-3 rounded-xl border-2 text-left transition-all ${
-                      notificationPref === 'none' 
-                        ? 'border-[#5B6DC4] bg-[#5B6DC4]/10 ring-2 ring-[#5B6DC4]/20' 
-                        : 'border-stone-200 dark:border-stone-600 hover:border-stone-300'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      {notificationPref === 'none' ? (
-                        <div className="w-4 h-4 rounded-full bg-[#5B6DC4] flex items-center justify-center">
-                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
-                        </div>
-                      ) : (
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-stone-400">
-                          <path d="M13.73 21a2 2 0 0 1-3.46 0"/><path d="M18.63 13A17.89 17.89 0 0 1 18 8"/><path d="M6.26 6.26A5.86 5.86 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8a6 6 0 0 0-9.33-5"/><line x1="1" y1="1" x2="23" y2="23"/>
-                        </svg>
-                      )}
-                      <span className={`text-sm font-medium ${notificationPref === 'none' ? 'text-[#5B6DC4]' : 'text-stone-700 dark:text-stone-300'}`}>No notifications</span>
-                    </div>
-                    <p className="text-xs text-stone-500">I'll check back manually</p>
-                  </button>
-                </div>
-              </div>
-
-              {/* Actions - Centered */}
-              <div className="flex items-center justify-center gap-3 pt-4 border-t border-stone-100 dark:border-stone-700">
-                <button
-                  onClick={() => setShowInvestModal(false)}
-                  className="px-5 py-2.5 rounded-lg text-sm font-medium text-stone-600 hover:bg-stone-100 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleInvestConfirm}
-                  className="px-5 py-2.5 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90"
-                  style={{ backgroundColor: '#10b981' }}
-                >
-                  🎉 Confirm & Generate Memo
-                </button>
-              </div>
-              
-              <p className="text-xs text-stone-400 text-center mt-4">
-                Your rationale will be saved and included in your investment memo
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Confetti Animation */}
-      {showConfetti && <ConfettiCelebration />}
-
-      {/* Watch Modal */}
-      {showWatchModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-stone-800 rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6">
-              {/* Header */}
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex items-center gap-3">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="2">
-                    <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-                  </svg>
-                  <h3 className="text-lg font-semibold text-stone-900 dark:text-white">Why I'm watching</h3>
-                </div>
-                <button 
-                  onClick={() => setShowWatchModal(false)}
-                  className="p-1 text-stone-400 hover:text-stone-600"
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                  </svg>
-                </button>
-              </div>
-              <p className="text-sm text-stone-500 dark:text-stone-400 mb-6">
-                What would need to change for you to invest?
-              </p>
-
-              {/* Why watching */}
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">
-                  What's holding you back?
-                </label>
-                <textarea
-                  value={watchReason}
-                  onChange={(e) => setWatchReason(e.target.value)}
-                  placeholder="e.g., Need to see more traction, waiting for next funding round..."
-                  className="w-full bg-stone-50 dark:bg-stone-700/50 rounded-xl p-4 text-stone-800 dark:text-stone-200 placeholder-stone-400 text-sm focus:outline-none focus:ring-2 focus:ring-[#5B6DC4]/30 min-h-[80px] resize-none border border-stone-200 dark:border-stone-600"
-                />
-              </div>
-
-              {/* Re-engage condition */}
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">
-                  When should we remind you to check back?
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {['In 1 month', 'In 3 months', 'After next raise', 'When they hit milestones'].map(option => (
-                    <button
-                      key={option}
-                      onClick={() => setWatchCondition(option)}
-                      className={`px-3 py-2 rounded-lg text-sm text-left transition-colors ${
-                        watchCondition === option 
-                          ? 'bg-amber-100 text-amber-700 border border-amber-300' 
-                          : 'bg-stone-50 text-stone-600 border border-stone-200 hover:border-stone-300'
-                      }`}
-                    >
-                      {option}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Actions */}
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-stone-100 dark:border-stone-700">
-                <button
-                  onClick={() => setShowWatchModal(false)}
-                  className="px-5 py-2.5 rounded-lg text-sm font-medium text-stone-600 hover:bg-stone-100 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    onUpdate({ 
-                      ...deal, 
-                      deferData: { reason: watchReason, condition: watchCondition },
-                      workingNotes: entries 
-                    });
-                    onTransition('deferred');
-                    setShowWatchModal(false);
-                  }}
-                  className="px-5 py-2.5 rounded-lg text-sm font-medium text-white transition-colors"
-                  style={{ backgroundColor: '#D97706' }}
-                >
-                  Add to Watchlist
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Pass Modal */}
-      {showPassModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-stone-800 rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6">
-              {/* Header */}
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex items-center gap-3">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#DC2626" strokeWidth="2">
-                    <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
-                  </svg>
-                  <h3 className="text-lg font-semibold text-stone-900 dark:text-white">Why I'm passing</h3>
-                </div>
-                <button 
-                  onClick={() => setShowPassModal(false)}
-                  className="p-1 text-stone-400 hover:text-stone-600"
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                  </svg>
-                </button>
-              </div>
-              <p className="text-sm text-stone-500 dark:text-stone-400 mb-6">
-                Capture your reasoning so you remember why you passed.
-              </p>
-
-              {/* Pass reason */}
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">
-                  Main reason for passing
-                </label>
-                <div className="grid grid-cols-2 gap-2 mb-3">
-                  {['Not thesis fit', 'Team concerns', 'Market too small', 'Too early', 'Valuation too high', 'Competitive concerns'].map(reason => (
-                    <button
-                      key={reason}
-                      onClick={() => setPassReason(reason)}
-                      className={`px-3 py-2 rounded-lg text-sm text-left transition-colors ${
-                        passReason === reason 
-                          ? 'bg-red-100 text-red-700 border border-red-300' 
-                          : 'bg-stone-50 text-stone-600 border border-stone-200 hover:border-stone-300'
-                      }`}
-                    >
-                      {reason}
-                    </button>
-                  ))}
-                </div>
-                <textarea
-                  value={passReason}
-                  onChange={(e) => setPassReason(e.target.value)}
-                  placeholder="Add any additional notes..."
-                  className="w-full bg-stone-50 dark:bg-stone-700/50 rounded-xl p-4 text-stone-800 dark:text-stone-200 placeholder-stone-400 text-sm focus:outline-none focus:ring-2 focus:ring-[#5B6DC4]/30 min-h-[60px] resize-none border border-stone-200 dark:border-stone-600"
-                />
-              </div>
-
-              {/* Actions */}
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-stone-100 dark:border-stone-700">
-                <button
-                  onClick={() => setShowPassModal(false)}
-                  className="px-5 py-2.5 rounded-lg text-sm font-medium text-stone-600 hover:bg-stone-100 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    // Save pass reason in the correct format for PassedView
-                    const passData = {
-                      reasons: passReason ? [passReason] : [],
-                      whyPass: passReason,
-                      passedAt: new Date().toISOString()
-                    };
-                    onUpdate({ 
-                      ...deal, 
-                      passed: passData,
-                      workingNotes: entries 
-                    });
-                    onTransition('passed');
-                    setShowPassModal(false);
-                  }}
-                  className="px-5 py-2.5 rounded-lg text-sm font-medium text-white transition-colors"
-                  style={{ backgroundColor: '#DC2626' }}
-                >
-                  Confirm Pass
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Investment Memo Modal */}
-      {showMemoModal && (() => {
-        const memo = generateMemo();
-        return (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white dark:bg-stone-800 rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-              {/* Header */}
-              <div className="p-6 border-b border-stone-100 dark:border-stone-700">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ backgroundColor: '#EEF2FF' }}>
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
-                      </svg>
-                    </div>
-                    <div>
-                      <h3 className="text-lg font-semibold text-stone-900 dark:text-white">Investment Memo</h3>
-                      <p className="text-xs text-stone-400">Generated {memo.generatedAt}</p>
-                    </div>
-                  </div>
-                  <button 
-                    onClick={() => setShowMemoModal(false)}
-                    className="p-1 text-stone-400 hover:text-stone-600"
-                  >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                    </svg>
-                  </button>
-                </div>
-              </div>
-
-              {/* Content - Scrollable */}
-              <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                {/* Deal Overview */}
-                <div className="bg-stone-50 dark:bg-stone-700/50 rounded-xl p-4">
-                  <h4 className="text-sm font-semibold text-stone-900 dark:text-white mb-3 flex items-center gap-2">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/>
-                    </svg>
-                    Deal Overview
-                  </h4>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div>
-                      <span className="text-stone-500">Company</span>
-                      <p className="font-medium text-stone-900 dark:text-white">{memo.deal.name}</p>
-                    </div>
-                    <div>
-                      <span className="text-stone-500">Stage</span>
-                      <p className="font-medium text-stone-900 dark:text-white">{memo.deal.stage}</p>
-                    </div>
-                    <div>
-                      <span className="text-stone-500">Industry</span>
-                      <p className="font-medium text-stone-900 dark:text-white">{memo.deal.industry}</p>
-                    </div>
-                    <div>
-                      <span className="text-stone-500">Location</span>
-                      <p className="font-medium text-stone-900 dark:text-white">{memo.deal.location}</p>
-                    </div>
-                  </div>
-                  <p className="mt-3 text-sm text-stone-600 dark:text-stone-400">{memo.deal.overview}</p>
-                  
-                  {memo.deal.founders.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-stone-200 dark:border-stone-600">
-                      <span className="text-xs text-stone-500">Founders</span>
-                      <div className="flex flex-wrap gap-2 mt-1">
-                        {memo.deal.founders.map((f, i) => (
-                          <span key={i} className="text-sm text-stone-700 dark:text-stone-300">
-                            {f.name} ({f.role}){i < memo.deal.founders.length - 1 ? ',' : ''}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Research Progress */}
-                <div className="bg-stone-50 dark:bg-stone-700/50 rounded-xl p-4">
-                  <h4 className="text-sm font-semibold text-stone-900 dark:text-white mb-3 flex items-center gap-2">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-                    </svg>
-                    Research Progress
-                  </h4>
-                  <div className="flex items-center gap-4">
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between text-sm mb-1">
-                        <span className="text-stone-600">Areas explored</span>
-                        <span className="font-medium">{memo.progress.areasExplored} / {memo.progress.totalAreas}</span>
-                      </div>
-                      <div className="h-2 bg-stone-200 dark:bg-stone-600 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full rounded-full transition-all" 
-                          style={{ 
-                            width: `${(memo.progress.areasExplored / memo.progress.totalAreas) * 100}%`,
-                            backgroundColor: '#10b981'
-                          }} 
-                        />
-                      </div>
-                    </div>
-                    {memo.progress.gaps > 0 && (
-                      <span className="text-xs px-2 py-1 rounded-full" style={{ backgroundColor: '#FEF3CD', color: '#8B6914' }}>
-                        {memo.progress.gaps} open gap{memo.progress.gaps > 1 ? 's' : ''}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Your Notes & Research */}
-                <div>
-                  <h4 className="text-sm font-semibold text-stone-900 dark:text-white mb-3 flex items-center gap-2">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/>
-                    </svg>
-                    Your Notes & Research Timeline
-                  </h4>
-                  
-                  <div className="space-y-3">
-                    {memo.entries.map((entry, idx) => (
-                      <div key={entry.id} className="border-l-2 border-stone-200 dark:border-stone-600 pl-4 py-2">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-xs text-stone-400">{entry.formattedTime}</span>
-                          {entry.lens && (
-                            <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: '#EEF2FF', color: '#5B6DC4' }}>
-                              {lensNames[entry.lens]}
-                            </span>
-                          )}
-                          {entry.type === 'ai' && (
-                            <span className="text-xs text-stone-400">AI Research</span>
-                          )}
-                          {entry.userConfirmed && (
-                            <span className="text-xs" style={{ color: '#2D7A2D' }}>✓</span>
-                          )}
-                        </div>
-                        
-                        {entry.type === 'user' && (
-                          <p className="text-sm text-stone-700 dark:text-stone-300">{entry.content}</p>
-                        )}
-                        
-                        {entry.type === 'voice' && (
-                          <p className="text-sm text-stone-700 dark:text-stone-300 italic">🎤 "{entry.content}"</p>
-                        )}
-                        
-                        {entry.type === 'ai' && (
-                          <div className="bg-white dark:bg-stone-800 rounded-lg p-3 mt-1">
-                            {entry.keyInsight && (
-                              <p className="text-sm font-medium mb-1" style={{ color: entry.isGap ? '#8B6914' : '#2D5A2D' }}>
-                                {entry.isGap ? '⚠️ ' : '💡 '}{entry.keyInsight}
-                              </p>
-                            )}
-                            <p className="text-sm text-stone-600 dark:text-stone-400">{entry.detail}</p>
-                            {entry.sources && entry.sources.length > 0 && (
-                              <div className="flex flex-wrap gap-1 mt-2">
-                                {entry.sources.map((s, si) => (
-                                  <span key={si} className="text-xs text-stone-400">📎 {s.name}</span>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Footer */}
-              <div className="p-4 border-t border-stone-100 dark:border-stone-700 flex items-center justify-between">
-                <p className="text-xs text-stone-400">
-                  This memo captures your research as of {memo.generatedAt}
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => {
-                      // Save memo to deal
-                      onUpdate({ 
-                        ...deal, 
-                        memo: { ...memo, savedAt: new Date().toISOString() },
-                        workingNotes: entries 
-                      });
-                      setToast({ message: 'Memo saved to deal', type: 'success' });
-                    }}
-                    className="px-4 py-2 rounded-lg text-sm font-medium border border-stone-200 text-stone-600 hover:bg-stone-50 transition-colors"
-                  >
-                    Save to Deal
-                  </button>
-                  <button
-                    onClick={() => {
-                      // Copy to clipboard
-                      const text = `INVESTMENT MEMO - ${memo.deal.name}\nGenerated: ${memo.generatedAt}\n\n` +
-                        `DEAL OVERVIEW\n${memo.deal.name} | ${memo.deal.stage} | ${memo.deal.industry}\n${memo.deal.overview}\n\n` +
-                        `RESEARCH NOTES\n` +
-                        memo.entries.map(e => 
-                          `[${e.formattedTime}] ${e.type === 'ai' ? 'AI: ' : ''}${e.content || e.keyInsight || ''}`
-                        ).join('\n');
-                      navigator.clipboard.writeText(text);
-                      setToast({ message: 'Copied to clipboard', type: 'success' });
-                    }}
-                    className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors"
-                    style={{ backgroundColor: '#5B6DC4' }}
-                  >
-                    Copy to Clipboard
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-    </div>
-  );
-};
-
-// Watching View
-const DeferredView = ({ deal, onUpdate, onTransition }) => {
-  const [revisitCriteria, setRevisitCriteria] = useState(deal.watching?.trigger || '');
-  const [isMonitoring, setIsMonitoring] = useState(deal.tracked !== false);
-  const [showFullNotes, setShowFullNotes] = useState(false);
-  const [showPassModal, setShowPassModal] = useState(false);
-  const [passReason, setPassReason] = useState('');
-  
-  // Get deferred date
-  const deferredDate = deal.statusEnteredAt || deal.deferData?.deferredAt;
-  const deferredDateFormatted = deferredDate 
-    ? new Date(deferredDate).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
-    : 'Unknown';
-  
-  // Get original screening notes (first 2-4 lines)
-  const getScreeningExcerpt = () => {
-    const thesis = deal.screening?.thesis || '';
-    const notes = deal.workingNotes?.filter(n => n.type === 'user')?.slice(0, 2) || [];
-    if (thesis) return thesis;
-    if (notes.length > 0) return notes.map(n => n.content).join(' ');
-    return 'No screening notes recorded.';
-  };
-  
-  // Determine signal state
-  const getSignalState = () => {
-    // Check for any activity since deferral
-    const deferralTime = new Date(deferredDate || Date.now()).getTime();
-    const recentSignals = deal.milestones?.filter(m => new Date(m.date).getTime() > deferralTime) || [];
-    
-    if (recentSignals.length === 0) {
-      return {
-        label: 'Quiet',
-        description: 'No meaningful signals since deferral. Silence is information.',
-        color: 'text-stone-500',
-        bg: 'bg-stone-100'
-      };
-    }
-    if (recentSignals.length >= 3) {
-      return {
-        label: 'Active',
-        description: `${recentSignals.length} signals since deferral. May warrant a second look.`,
-        color: 'text-emerald-600',
-        bg: 'bg-emerald-50'
-      };
-    }
-    return {
-      label: 'Some activity',
-      description: `${recentSignals.length} signal${recentSignals.length > 1 ? 's' : ''} since deferral.`,
-      color: 'text-amber-600',
-      bg: 'bg-amber-50'
-    };
-  };
-  
-  const signalState = getSignalState();
-  
-  const handleCriteriaChange = (value) => {
-    setRevisitCriteria(value);
-    onUpdate({ 
-      ...deal, 
-      watching: { 
-        ...deal.watching, 
-        trigger: value 
-      } 
-    });
-  };
-  
-  const toggleMonitoring = () => {
-    const newMonitoring = !isMonitoring;
-    setIsMonitoring(newMonitoring);
-    onUpdate({ ...deal, tracked: newMonitoring });
-  };
-  
-  return (
-    <div className="space-y-4">
-      {/* Question prompt */}
-      <p className="text-center text-stone-500 dark:text-stone-400 py-2">
-        What evidence would change my mind?
-      </p>
-
-      {/* Decision snapshot - collapsible */}
-      <div className="bg-white dark:bg-stone-800 rounded-2xl border border-stone-200 dark:border-stone-700 p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-stone-900 dark:text-stone-100">Decision snapshot</h3>
-          <span className="text-xs text-stone-400">Recorded during initial screening · {deferredDateFormatted}</span>
-        </div>
-        <p className="text-sm text-stone-600 dark:text-stone-400 leading-relaxed line-clamp-3">
-          {getScreeningExcerpt()}
-        </p>
-        {(deal.screening?.thesis || deal.workingNotes?.length > 0) && (
-          <button 
-            onClick={() => setShowFullNotes(!showFullNotes)}
-            className="mt-3 text-xs text-[#5B6DC4] hover:underline"
-          >
-            {showFullNotes ? 'Hide full notes' : 'View full screening notes'}
-          </button>
-        )}
-        {showFullNotes && deal.workingNotes && (
-          <div className="mt-3 pt-3 border-t border-stone-100 dark:border-stone-700 space-y-2 max-h-48 overflow-y-auto">
-            {deal.workingNotes.filter(n => n.type === 'user').map((note, idx) => (
-              <p key={idx} className="text-xs text-stone-500 dark:text-stone-400">{note.content}</p>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Revisit criteria */}
-      <div className="bg-white dark:bg-stone-800 rounded-2xl border border-stone-200 dark:border-stone-700 p-5">
-        <h3 className="font-semibold text-stone-900 dark:text-stone-100 mb-4">Revisit criteria</h3>
-        <div className="relative">
-          <textarea
-            value={revisitCriteria}
-            onChange={(e) => handleCriteriaChange(e.target.value)}
-            placeholder="What signal or outcome would falsify your current view?"
-            className="w-full min-h-[80px] p-4 rounded-xl text-sm text-stone-700 dark:text-stone-300 placeholder-stone-400 dark:placeholder-stone-500 bg-transparent resize-none focus:outline-none"
-            style={{ 
-              border: '2px dashed #d6d3d1',
-              borderRadius: '12px'
-            }}
-          />
-          <p className="mt-2 text-xs text-stone-400 dark:text-stone-500 px-1">
-            Examples: repeatable sales motion, technical risk resolved, strong lead investor, evidence churn is stabilizing.
-          </p>
-        </div>
-      </div>
-
-      {/* Signal state */}
-      <div className="bg-white dark:bg-stone-800 rounded-2xl border border-stone-200 dark:border-stone-700 p-5">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="font-semibold text-stone-900 dark:text-stone-100">Signal state</h3>
-            <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
-              {signalState.description}
-            </p>
-            <p className="text-xs text-stone-400 dark:text-stone-500 mt-1">
-              Deferred {deferredDateFormatted}
-            </p>
-          </div>
-          <span className={`text-sm font-medium px-3 py-1 rounded-full ${signalState.bg} ${signalState.color}`}>
-            {signalState.label}
-          </span>
-        </div>
-      </div>
-
-      {/* Ambient monitoring */}
-      <div className="bg-white dark:bg-stone-800 rounded-2xl border border-stone-200 dark:border-stone-700 p-5">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="font-semibold text-stone-900 dark:text-stone-100">Ambient monitoring</h3>
-            <p className="text-sm text-stone-500 dark:text-stone-400 mt-0.5">
-              Glance if something meaningful happens. No obligation.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <span 
-              className={`text-sm font-medium px-3 py-1 rounded-full transition-colors ${
-                isMonitoring 
-                  ? 'text-[#5B6DC4] bg-[#5B6DC4]/10' 
-                  : 'text-stone-400 bg-stone-100 dark:bg-stone-700'
-              }`}
-            >
-              {isMonitoring ? 'On' : 'Off'}
-            </span>
-            <button
-              onClick={toggleMonitoring}
-              className={`relative w-12 h-7 rounded-full transition-colors ${
-                isMonitoring ? 'bg-[#5B6DC4]' : 'bg-stone-300 dark:bg-stone-600'
-              }`}
-            >
-              <span 
-                className={`absolute top-1 w-5 h-5 bg-white rounded-full shadow transition-transform ${
-                  isMonitoring ? 'right-1' : 'left-1'
+                key={t.value}
+                onClick={() => setForm(f => ({ ...f, type: t.value }))}
+                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all border ${
+                  form.type === t.value
+                    ? 'border-[#5B6DC4] bg-[#5B6DC4]/10 text-[#5B6DC4]'
+                    : 'border-stone-200 dark:border-stone-600 text-stone-500 dark:text-stone-400 hover:border-stone-300'
                 }`}
-              />
-            </button>
+              >
+                <span>{t.icon}</span> {t.label}
+              </button>
+            ))}
           </div>
+          <input
+            type="text"
+            placeholder="Label (e.g. SAFE Agreement, K-1 2023)"
+            value={form.label}
+            onChange={e => { setForm(f => ({ ...f, label: e.target.value })); setError(''); }}
+            className="w-full p-2.5 text-sm border border-stone-200 dark:border-stone-600 rounded-lg bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100 placeholder-stone-400 focus:outline-none focus:border-[#5B6DC4]"
+          />
+          <input
+            type="url"
+            placeholder="https://drive.google.com/..."
+            value={form.url}
+            onChange={e => { setForm(f => ({ ...f, url: e.target.value })); setError(''); }}
+            className="w-full p-2.5 text-sm border border-stone-200 dark:border-stone-600 rounded-lg bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100 placeholder-stone-400 focus:outline-none focus:border-[#5B6DC4]"
+          />
+          {error && <p className="text-xs text-red-500">{error}</p>}
+          <button
+            onClick={handleAdd}
+            className="w-full py-2 text-sm font-medium text-white rounded-lg transition-colors"
+            style={{ backgroundColor: '#5B6DC4' }}
+          >
+            Add document
+          </button>
         </div>
-      </div>
+      )}
 
-      {/* Learning framing */}
-      <div className="bg-stone-50 dark:bg-stone-800/50 rounded-2xl border border-stone-200 dark:border-stone-700 p-4 text-center">
-        <p className="text-sm text-stone-400 dark:text-stone-500">
-          Collecting evidence on your judgment. Not missed opportunities.
-        </p>
-      </div>
-
-      {/* Reopen in Screening */}
-      <button 
-        onClick={() => onTransition('screening')}
-        className="w-full bg-white dark:bg-stone-800 rounded-2xl border border-stone-200 dark:border-stone-700 p-5 hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors text-center"
-      >
-        <div className="flex items-center justify-center gap-2 text-[#5B6DC4]">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <polyline points="1 4 1 10 7 10"/>
-            <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
-          </svg>
-          <span className="font-semibold">Reopen in Screening</span>
+      {/* Document list */}
+      {docs.length === 0 && !showAdd ? (
+        <div className="px-5 pb-5 text-center">
+          <p className="text-sm text-stone-400 dark:text-stone-500">No documents yet</p>
+          <p className="text-xs text-stone-300 dark:text-stone-600 mt-1">Add links to your SAFE, tax forms, cap table, and updates</p>
         </div>
-        <p className="text-sm text-stone-400 dark:text-stone-500 mt-1">
-          Return this company to active evaluation.
-        </p>
-      </button>
-
-      {/* Close for now */}
-      <button 
-        onClick={() => setShowPassModal(true)}
-        className="w-full bg-white dark:bg-stone-800 rounded-2xl border border-stone-200 dark:border-stone-700 p-5 hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors text-center"
-      >
-        <div className="flex items-center justify-center gap-2 text-stone-500 dark:text-stone-400">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10"/>
-          </svg>
-          <span className="font-semibold">Close for now</span>
-        </div>
-        <p className="text-sm text-stone-400 dark:text-stone-500 mt-1">
-          Record why you're passing on this opportunity.
-        </p>
-      </button>
-      
-      {/* Pass Modal */}
-      {showPassModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-stone-800 rounded-2xl max-w-md w-full shadow-xl">
-            <div className="p-6">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2">
-                    <circle cx="12" cy="12" r="10"/>
-                    <line x1="15" y1="9" x2="9" y2="15"/>
-                    <line x1="9" y1="9" x2="15" y2="15"/>
+      ) : (
+        <div className="px-5 pb-5 space-y-2">
+          {docs.map(doc => {
+            const docType = DOC_TYPES.find(t => t.value === doc.type) || DOC_TYPES[5];
+            return (
+              <div key={doc.id} className="flex items-center gap-3 p-3 bg-stone-50 dark:bg-stone-700/50 rounded-xl group">
+                <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm flex-shrink-0 ${docType.color}`}>
+                  {docType.icon}
+                </span>
+                <div className="flex-1 min-w-0">
+                  <a
+                    href={doc.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm font-medium text-stone-900 dark:text-stone-100 hover:text-[#5B6DC4] dark:hover:text-[#8b9ff4] transition-colors truncate block"
+                  >
+                    {doc.label}
+                    <svg className="inline ml-1 mb-0.5 opacity-50" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+                    </svg>
+                  </a>
+                  <p className="text-xs text-stone-400 dark:text-stone-500">{docType.label}</p>
+                </div>
+                <button
+                  onClick={() => handleRemove(doc.id)}
+                  className="opacity-0 group-hover:opacity-100 p-1 text-stone-300 hover:text-red-400 transition-all"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M3 6h18M19 6l-1 14H6L5 6M10 11v6M14 11v6M9 6V4h6v2"/>
                   </svg>
-                </div>
-                <div>
-                  <h3 className="text-lg font-semibold text-stone-900 dark:text-white">Pass on {deal.companyName}</h3>
-                  <p className="text-sm text-stone-500">Capture your reasoning</p>
-                </div>
-              </div>
-
-              {/* Pass reason buttons */}
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">
-                  Main reason for passing
-                </label>
-                <div className="grid grid-cols-2 gap-2 mb-3">
-                  {['Not thesis fit', 'Team concerns', 'Market too small', 'Too early', 'Valuation too high', 'Competitive concerns'].map(reason => (
-                    <button
-                      key={reason}
-                      onClick={() => setPassReason(reason)}
-                      className={`px-3 py-2 rounded-lg text-sm text-left transition-colors ${
-                        passReason === reason 
-                          ? 'bg-red-100 text-red-700 border border-red-300' 
-                          : 'bg-stone-50 text-stone-600 border border-stone-200 hover:border-stone-300'
-                      }`}
-                    >
-                      {reason}
-                    </button>
-                  ))}
-                </div>
-                <textarea
-                  value={passReason}
-                  onChange={(e) => setPassReason(e.target.value)}
-                  placeholder="Add any additional notes..."
-                  className="w-full bg-stone-50 dark:bg-stone-700/50 rounded-xl p-4 text-stone-800 dark:text-stone-200 placeholder-stone-400 text-sm focus:outline-none focus:ring-2 focus:ring-red-300 min-h-[60px] resize-none border border-stone-200 dark:border-stone-600"
-                />
-              </div>
-
-              {/* Actions */}
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-stone-100 dark:border-stone-700">
-                <button
-                  onClick={() => { setShowPassModal(false); setPassReason(''); }}
-                  className="px-5 py-2.5 rounded-lg text-sm font-medium text-stone-600 hover:bg-stone-100 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    const passData = {
-                      reasons: passReason ? [passReason] : [],
-                      whyPass: passReason,
-                      passedAt: new Date().toISOString()
-                    };
-                    onUpdate({ ...deal, passed: passData });
-                    onTransition('passed');
-                    setShowPassModal(false);
-                  }}
-                  className="px-5 py-2.5 rounded-lg text-sm font-medium text-white bg-red-600 hover:bg-red-700 transition-colors"
-                >
-                  Confirm Pass
                 </button>
               </div>
-            </div>
-          </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -6205,13 +2173,51 @@ const DeferredView = ({ deal, onUpdate, onTransition }) => {
 };
 
 // Invested View - Clean confirmation design
-const InvestedView = ({ deal, onUpdate, onTransition, setToast }) => {
-  const [showChangeDecision, setShowChangeDecision] = useState(false);
+const InvestedView = ({ deal, onUpdate, setToast }) => {
   const inv = deal.investment || {};
+  const [showUpdateLog, setShowUpdateLog] = useState(false);
+  const [showAddUpdate, setShowAddUpdate] = useState(false);
+  const [newUpdateNote, setNewUpdateNote] = useState('');
+
+  // Update log nudge logic
+  const lastUpdate = inv.lastUpdateReceived || deal.lastUpdateReceived;
+  const nextExpected = inv.nextUpdateExpected || deal.nextUpdateExpected;
+  const daysSinceUpdate = lastUpdate ? Math.floor((Date.now() - new Date(lastUpdate).getTime()) / 86400000) : null;
+  const daysUntilNext = nextExpected ? Math.floor((new Date(nextExpected).getTime() - Date.now()) / 86400000) : null;
+  const updateOverdue = daysUntilNext !== null && daysUntilNext < -7;
+  const updateDueSoon = daysUntilNext !== null && daysUntilNext >= -7 && daysUntilNext <= 14;
+
+  // Update log entries from milestones typed as 'update'
+  const updateEntries = (deal.milestones || [])
+    .filter(m => m.type === 'update' || m.type === 'investor-update')
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  const handleAddUpdate = () => {
+    if (!newUpdateNote.trim()) return;
+    const updated = {
+      ...deal,
+      milestones: [...(deal.milestones || []), {
+        id: `u-${Date.now()}`,
+        type: 'update',
+        title: 'Founder update',
+        description: newUpdateNote.trim(),
+        date: new Date().toISOString()
+      }],
+      lastUpdateReceived: new Date().toISOString()
+    };
+    onUpdate(updated);
+    setNewUpdateNote('');
+    setShowAddUpdate(false);
+    if (setToast) setToast({ message: 'Update logged', type: 'success' });
+  };
+
+  const handleUpdateDocs = (newDocs) => {
+    onUpdate({ ...deal, documents: newDocs });
+  };
 
   return (
-    <div className="space-y-6">
-      {/* Company Header - Same as Screening */}
+    <div className="space-y-4">
+      {/* Company Header */}
       <div className="bg-white dark:bg-stone-800 rounded-2xl p-5">
         <div className="flex items-start gap-4">
           <div className="w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0" style={{ backgroundColor: '#10b981' }}>
@@ -6219,25 +2225,24 @@ const InvestedView = ({ deal, onUpdate, onTransition, setToast }) => {
               <rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/>
             </svg>
           </div>
-          
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
               <h2 className="text-xl font-bold text-stone-900 dark:text-white">{deal.companyName}</h2>
-              <a href={deal.website || '#'} className="text-stone-400 hover:text-stone-600">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
-                </svg>
-              </a>
+              {deal.website && (
+                <a href={deal.website} target="_blank" rel="noopener noreferrer" className="text-stone-400 hover:text-stone-600">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
+                  </svg>
+                </a>
+              )}
             </div>
-            <p className="text-sm text-stone-500 dark:text-stone-400">
-              {deal.stage} · {deal.industry} · <svg className="inline w-3 h-3 mb-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg> {deal.location || 'San Francisco, CA'}
-            </p>
+            <p className="text-sm text-stone-500 dark:text-stone-400">{deal.stage} · {deal.industry}</p>
           </div>
         </div>
 
-        <p className="mt-4 text-stone-600 dark:text-stone-300 text-sm leading-relaxed">
-          {deal.overview || 'B2B payments platform simplifying cross-border transactions for SMBs. Reduces settlement time from 3-5 days to instant.'}
-        </p>
+        {deal.overview && (
+          <p className="mt-4 text-stone-600 dark:text-stone-300 text-sm leading-relaxed">{deal.overview}</p>
+        )}
 
         {deal.founders && deal.founders.length > 0 && (
           <div className="flex items-center gap-2 mt-4 pt-4 border-t border-stone-100 dark:border-stone-700">
@@ -6257,368 +2262,168 @@ const InvestedView = ({ deal, onUpdate, onTransition, setToast }) => {
         )}
       </div>
 
-      {/* Investing Confirmation Card */}
-      <div 
-        className="rounded-2xl p-8 text-center"
-        style={{ 
-          background: 'linear-gradient(135deg, #D1FAE5 0%, #A7F3D0 50%, #6EE7B7 100%)',
-          border: '1px solid #A7F3D0'
-        }}
-      >
-        {/* Dollar icon with circle */}
-        <div className="w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center" style={{ backgroundColor: '#10b981' }}>
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10"/>
-            <line x1="12" y1="6" x2="12" y2="18"/>
+      {/* Investment Summary */}
+      <div className="bg-white dark:bg-stone-800 rounded-2xl p-5">
+        <div className="flex items-center gap-2 mb-4">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="6" x2="12" y2="18"/>
             <path d="M15 9.5c0-1.5-1.5-2.5-3-2.5s-3 .5-3 2.5c0 1.5 1.5 2 3 2.5s3 1 3 2.5c0 1.5-1.5 2.5-3 2.5s-3-1-3-2.5"/>
           </svg>
+          <h3 className="font-medium text-stone-900 dark:text-white">Investment</h3>
         </div>
-        
-        <h2 className="text-2xl font-bold mb-2" style={{ color: '#059669' }}>You're investing</h2>
-        <p className="text-base mb-4" style={{ color: '#047857' }}>Time to finalize terms and wire the funds.</p>
-        
-        {/* Screening locked indicator */}
-        <div className="flex items-center justify-center gap-2" style={{ color: '#6B7280' }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-          </svg>
-          <span className="text-sm">Screening locked</span>
-        </div>
-      </div>
-
-      {/* Investment Thesis (if captured) */}
-      {deal.investReasoning && (
-        <div className="bg-white dark:bg-stone-800 rounded-2xl p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
-            </svg>
-            <h3 className="font-medium text-stone-900 dark:text-white">Your investment thesis</h3>
-          </div>
-          <p className="text-sm text-stone-600 dark:text-stone-400 italic">"{deal.investReasoning}"</p>
-          <p className="text-xs text-stone-400 mt-3">Captured at decision · included in your memo</p>
-        </div>
-      )}
-
-      {/* Change Decision */}
-      <div className="text-center pt-4">
-        <button 
-          onClick={() => setShowChangeDecision(true)}
-          className="text-sm text-stone-400 hover:text-stone-600 transition-colors"
-        >
-          Change my decision
-        </button>
-      </div>
-
-      {/* Change Decision Modal */}
-      {showChangeDecision && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-stone-800 rounded-2xl max-w-sm w-full p-6">
-            <h3 className="text-lg font-semibold text-stone-900 dark:text-white mb-2">Change your decision?</h3>
-            <p className="text-sm text-stone-500 dark:text-stone-400 mb-6">
-              This will move the deal back to your pipeline for re-evaluation.
-            </p>
-            
-            <div className="space-y-2">
-              <button
-                onClick={() => {
-                  onTransition('screening');
-                  setShowChangeDecision(false);
-                }}
-                className="w-full p-3 rounded-xl border border-stone-200 dark:border-stone-600 text-left hover:bg-stone-50 dark:hover:bg-stone-700 transition-colors"
-              >
-                <p className="text-sm font-medium text-stone-900 dark:text-white">Back to Screening</p>
-                <p className="text-xs text-stone-500">Re-evaluate this opportunity</p>
-              </button>
-              
-              <button
-                onClick={() => {
-                  onTransition('deferred');
-                  setShowChangeDecision(false);
-                }}
-                className="w-full p-3 rounded-xl border border-stone-200 dark:border-stone-600 text-left hover:bg-stone-50 dark:hover:bg-stone-700 transition-colors"
-              >
-                <p className="text-sm font-medium text-stone-900 dark:text-white">Move to Watch</p>
-                <p className="text-xs text-stone-500">Monitor but don't invest yet</p>
-              </button>
-              
-              <button
-                onClick={() => {
-                  onTransition('passed');
-                  setShowChangeDecision(false);
-                }}
-                className="w-full p-3 rounded-xl border border-stone-200 dark:border-stone-600 text-left hover:bg-stone-50 dark:hover:bg-stone-700 transition-colors"
-              >
-                <p className="text-sm font-medium text-stone-900 dark:text-white">Pass</p>
-                <p className="text-xs text-stone-500">Decide not to invest</p>
-              </button>
+        <div className="grid grid-cols-2 gap-4">
+          {inv.amount && (
+            <div>
+              <p className="text-xs text-stone-400 uppercase tracking-wide mb-1">Amount</p>
+              <p className="text-lg font-semibold text-stone-900 dark:text-stone-100">${(inv.amount / 1000).toFixed(0)}K</p>
             </div>
-            
-            <button
-              onClick={() => setShowChangeDecision(false)}
-              className="w-full mt-4 p-2 text-sm text-stone-500 hover:text-stone-700 transition-colors"
-            >
-              Keep as Investing
-            </button>
-          </div>
+          )}
+          {inv.vehicle && (
+            <div>
+              <p className="text-xs text-stone-400 uppercase tracking-wide mb-1">Vehicle</p>
+              <p className="text-sm font-medium text-stone-900 dark:text-stone-100">{inv.vehicle}</p>
+            </div>
+          )}
+          {inv.ownershipPercent && (
+            <div>
+              <p className="text-xs text-stone-400 uppercase tracking-wide mb-1">Ownership</p>
+              <p className="text-sm font-medium text-stone-900 dark:text-stone-100">{inv.ownershipPercent}%</p>
+            </div>
+          )}
+          {inv.date && (
+            <div>
+              <p className="text-xs text-stone-400 uppercase tracking-wide mb-1">Date</p>
+              <p className="text-sm font-medium text-stone-900 dark:text-stone-100">
+                {new Date(inv.date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+              </p>
+            </div>
+          )}
         </div>
-      )}
+        {(inv.whyYes || deal.investReasoning) && (
+          <div className="mt-4 pt-4 border-t border-stone-100 dark:border-stone-700">
+            <p className="text-xs text-stone-400 uppercase tracking-wide mb-2">Your thesis</p>
+            <p className="text-sm text-stone-600 dark:text-stone-400 italic">"{inv.whyYes || deal.investReasoning}"</p>
+          </div>
+        )}
+      </div>
+
+      {/* Update Log */}
+      <div className="bg-white dark:bg-stone-800 rounded-2xl overflow-hidden">
+        {/* Nudge banner */}
+        {updateOverdue && (
+          <div className="px-5 py-3 flex items-center gap-3" style={{ backgroundColor: '#FEF3C7', borderBottom: '1px solid #FDE68A' }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#D97706" strokeWidth="2">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <p className="text-sm text-amber-800">
+              Update overdue by {Math.abs(daysUntilNext)} days — worth nudging the founder?
+            </p>
+          </div>
+        )}
+        {updateDueSoon && !updateOverdue && (
+          <div className="px-5 py-3 flex items-center gap-3" style={{ backgroundColor: '#F0FDF4', borderBottom: '1px solid #BBF7D0' }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#16A34A" strokeWidth="2">
+              <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+            </svg>
+            <p className="text-sm text-emerald-800">
+              {daysUntilNext > 0 ? `Update expected in ${daysUntilNext} days` : 'Update expected today'}
+            </p>
+          </div>
+        )}
+
+        <button
+          onClick={() => setShowUpdateLog(!showUpdateLog)}
+          className="w-full px-5 py-4 flex items-center justify-between hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+            <span className="text-sm font-medium text-stone-700 dark:text-stone-300">Update log</span>
+            {updateEntries.length > 0 && (
+              <span className="text-xs text-stone-400">({updateEntries.length})</span>
+            )}
+            {daysSinceUpdate !== null && (
+              <span className={`text-xs px-2 py-0.5 rounded-full ${updateOverdue ? 'bg-amber-100 text-amber-700' : 'bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400'}`}>
+                Last {daysSinceUpdate}d ago
+              </span>
+            )}
+          </div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a8a29e" strokeWidth="2"
+            className={`transition-transform ${showUpdateLog ? 'rotate-180' : ''}`}>
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
+
+        {showUpdateLog && (
+          <div className="px-5 pb-5 border-t border-stone-100 dark:border-stone-700">
+            <div className="pt-4 space-y-3">
+              {updateEntries.length === 0 && !showAddUpdate && (
+                <p className="text-sm text-stone-400 dark:text-stone-500 text-center py-2">No updates logged yet</p>
+              )}
+              {updateEntries.map(entry => (
+                <div key={entry.id} className="flex gap-3">
+                  <div className="w-1.5 h-1.5 rounded-full bg-stone-300 dark:bg-stone-600 mt-2 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm text-stone-700 dark:text-stone-300">{entry.description}</p>
+                    <p className="text-xs text-stone-400 mt-0.5">
+                      {new Date(entry.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </p>
+                  </div>
+                </div>
+              ))}
+
+              {showAddUpdate ? (
+                <div className="space-y-2 pt-1">
+                  <textarea
+                    value={newUpdateNote}
+                    onChange={e => setNewUpdateNote(e.target.value)}
+                    placeholder="What did you hear from the founder? Revenue milestone, new hire, next round timing..."
+                    rows={3}
+                    className="w-full p-3 text-sm border border-stone-200 dark:border-stone-600 rounded-xl bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100 placeholder-stone-400 focus:outline-none focus:border-[#5B6DC4] resize-none"
+                    autoFocus
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleAddUpdate}
+                      className="flex-1 py-2 text-sm font-medium text-white rounded-lg"
+                      style={{ backgroundColor: '#5B6DC4' }}
+                    >
+                      Log update
+                    </button>
+                    <button
+                      onClick={() => { setShowAddUpdate(false); setNewUpdateNote(''); }}
+                      className="px-4 py-2 text-sm text-stone-500 hover:text-stone-700 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setShowAddUpdate(true)}
+                  className="text-sm text-[#5B6DC4] hover:text-[#4a5ba8] transition-colors"
+                >
+                  + Log update
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Document Links */}
+      <DocumentLinksSection
+        docs={deal.documents || []}
+        onUpdate={handleUpdateDocs}
+      />
+
     </div>
   );
 };
 
 // Monitoring View
 // Passed View
-const PassedView = ({ deal, onUpdate, onTransition }) => {
-  const [keyLearning, setKeyLearning] = useState(deal.passed?.keyLearning || '');
-  const [isEditingLearning, setIsEditingLearning] = useState(false);
-  const [showNotes, setShowNotes] = useState(false);
-  
-  // Handle both old format (passReason on deal) and new format (passed object)
-  const p = deal.passed || {};
-  const reasons = p.reasons || (deal.passReason ? [deal.passReason] : []);
-  const passedAt = p.passedAt || deal.statusEnteredAt;
-  const passedDaysAgo = passedAt ? Math.floor((Date.now() - new Date(passedAt).getTime()) / 86400000) : null;
-  
-  // Get founder info
-  const founderName = deal.founders?.[0]?.name || '';
-  
-  // Save key learning
-  const saveKeyLearning = () => {
-    onUpdate({
-      ...deal,
-      passed: { ...deal.passed, keyLearning }
-    });
-    setIsEditingLearning(false);
-  };
-  
-  return (
-    <div className="space-y-5">
-      {/* Company Header */}
-      <div className="bg-white dark:bg-stone-800 rounded-2xl p-5">
-        <div className="flex items-start gap-4">
-          <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-stone-300 to-stone-400 flex items-center justify-center text-white font-bold text-lg">
-            {deal.companyName?.slice(0, 2).toUpperCase()}
-          </div>
-          <div className="flex-1">
-            <h2 className="text-xl font-semibold text-stone-900 dark:text-white">{deal.companyName}</h2>
-            <p className="text-stone-500 dark:text-stone-400">{deal.industry} · {deal.stage}</p>
-            {founderName && <p className="text-sm text-stone-400 mt-1">{founderName}</p>}
-          </div>
-          <div className="text-right">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-300 rounded-lg text-sm font-medium">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
-              </svg>
-              Passed
-            </span>
-            {passedDaysAgo !== null && (
-              <p className="text-xs text-stone-400 mt-1">{passedDaysAgo === 0 ? 'Today' : `${passedDaysAgo}d ago`}</p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Why You Passed - Primary Focus */}
-      <div className="bg-white dark:bg-stone-800 rounded-2xl p-5 border-l-4 border-red-400">
-        <div className="flex items-start gap-3 mb-4">
-          <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>
-            </svg>
-          </div>
-          <div>
-            <h3 className="font-semibold text-stone-900 dark:text-white">Why you passed</h3>
-            <p className="text-sm text-stone-500 dark:text-stone-400">Your reasoning at the time</p>
-          </div>
-        </div>
-        
-        {reasons.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
-            {reasons.map((r, i) => (
-              <span key={i} className="px-4 py-2 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-xl text-sm font-medium">
-                {r}
-              </span>
-            ))}
-          </div>
-        ) : (
-          <p className="text-stone-400 italic">No reason recorded</p>
-        )}
-      </div>
-
-      {/* Key Learning - Editable */}
-      <div className="bg-white dark:bg-stone-800 rounded-2xl p-5">
-        <div className="flex items-start justify-between mb-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2">
-                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-              </svg>
-            </div>
-            <div>
-              <h3 className="font-semibold text-stone-900 dark:text-white">Key learning</h3>
-              <p className="text-sm text-stone-500 dark:text-stone-400">What did this teach you?</p>
-            </div>
-          </div>
-          {!isEditingLearning && (
-            <button 
-              onClick={() => setIsEditingLearning(true)}
-              className="p-2 text-stone-400 hover:text-stone-600 hover:bg-stone-100 dark:hover:bg-stone-700 rounded-lg transition-colors"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-              </svg>
-            </button>
-          )}
-        </div>
-        
-        {isEditingLearning ? (
-          <div className="space-y-3">
-            <textarea
-              value={keyLearning}
-              onChange={(e) => setKeyLearning(e.target.value)}
-              placeholder="e.g., 'I tend to overvalue market size claims without proof points' or 'Team chemistry matters more than individual pedigree'"
-              className="w-full bg-stone-50 dark:bg-stone-700/50 rounded-xl p-4 text-stone-800 dark:text-stone-200 placeholder-stone-400 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 min-h-[100px] resize-none border border-stone-200 dark:border-stone-600"
-            />
-            <div className="flex justify-end gap-2">
-              <button 
-                onClick={() => { setKeyLearning(deal.passed?.keyLearning || ''); setIsEditingLearning(false); }}
-                className="px-4 py-2 text-sm text-stone-600 hover:bg-stone-100 rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
-              <button 
-                onClick={saveKeyLearning}
-                className="px-4 py-2 text-sm font-medium text-white bg-amber-500 hover:bg-amber-600 rounded-lg transition-colors"
-              >
-                Save Learning
-              </button>
-            </div>
-          </div>
-        ) : keyLearning ? (
-          <p className="text-stone-700 dark:text-stone-300 bg-amber-50 dark:bg-amber-900/20 rounded-xl p-4 italic">"{keyLearning}"</p>
-        ) : (
-          <button 
-            onClick={() => setIsEditingLearning(true)}
-            className="w-full p-4 border-2 border-dashed border-stone-200 dark:border-stone-600 rounded-xl text-stone-400 hover:border-amber-300 hover:text-amber-600 transition-colors text-sm"
-          >
-            + Add a learning to reference for future deals
-          </button>
-        )}
-      </div>
-
-      {/* Deal Snapshot - Compact */}
-      <div className="bg-white dark:bg-stone-800 rounded-2xl p-5">
-        <h3 className="text-xs font-medium text-stone-400 uppercase tracking-wide mb-4">Deal snapshot</h3>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-stone-100 dark:bg-stone-700 flex items-center justify-center">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2">
-                <circle cx="12" cy="5" r="3"/><line x1="12" y1="22" x2="12" y2="8"/><path d="M5 12H2a10 10 0 0 0 20 0h-3"/>
-              </svg>
-            </div>
-            <div>
-              <p className="text-xs text-stone-400">Sector</p>
-              <p className="text-sm font-medium text-stone-700 dark:text-stone-300">{deal.industry || '—'}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-stone-100 dark:bg-stone-700 flex items-center justify-center">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2">
-                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
-              </svg>
-            </div>
-            <div>
-              <p className="text-xs text-stone-400">Stage</p>
-              <p className="text-sm font-medium text-stone-700 dark:text-stone-300">{deal.stage || '—'}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-stone-100 dark:bg-stone-700 flex items-center justify-center">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2">
-                <line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-              </svg>
-            </div>
-            <div>
-              <p className="text-xs text-stone-400">Ask</p>
-              <p className="text-sm font-medium text-stone-700 dark:text-stone-300">
-                {deal.dealTerms?.raising ? `$${(deal.dealTerms.raising / 1000000).toFixed(1)}M` : '—'}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-stone-100 dark:bg-stone-700 flex items-center justify-center">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2">
-                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-              </svg>
-            </div>
-            <div>
-              <p className="text-xs text-stone-400">Passed on</p>
-              <p className="text-sm font-medium text-stone-700 dark:text-stone-300">
-                {passedAt ? new Date(passedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Screening Notes - Collapsible */}
-      {(deal.workingNotes?.length > 0 || deal.notes?.length > 0) && (
-        <div className="bg-white dark:bg-stone-800 rounded-2xl overflow-hidden">
-          <button 
-            onClick={() => setShowNotes(!showNotes)}
-            className="w-full px-5 py-4 flex items-center justify-between hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors"
-          >
-            <div className="flex items-center gap-3">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
-              </svg>
-              <span className="text-sm font-medium text-stone-700 dark:text-stone-300">Screening notes</span>
-              <span className="text-xs text-stone-400">({deal.workingNotes?.length || deal.notes?.length || 0} entries)</span>
-            </div>
-            <svg 
-              width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a8a29e" strokeWidth="2"
-              className={`transition-transform ${showNotes ? 'rotate-180' : ''}`}
-            >
-              <polyline points="6 9 12 15 18 9"/>
-            </svg>
-          </button>
-          
-          {showNotes && (
-            <div className="px-5 pb-5 pt-0 border-t border-stone-100 dark:border-stone-700">
-              <div className="space-y-3 mt-4 max-h-64 overflow-y-auto">
-                {(deal.workingNotes || deal.notes?.map((n, i) => ({ id: i, content: n, type: 'user' })) || []).map((note, i) => (
-                  <div key={note.id || i} className="text-sm text-stone-600 dark:text-stone-400 bg-stone-50 dark:bg-stone-700/50 rounded-lg p-3">
-                    {note.content || note}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Actions */}
-      <div className="pt-2 space-y-3">
-        <button
-          onClick={() => onTransition('screening')}
-          className="w-full flex items-center justify-center gap-2 px-5 py-3 bg-stone-900 dark:bg-stone-100 text-white dark:text-stone-900 rounded-xl font-medium hover:bg-stone-800 dark:hover:bg-stone-200 transition-colors"
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-          </svg>
-          Reactivate as Screening
-        </button>
-        
-        <p className="text-xs text-stone-400 text-center">
-          Changed your mind? Bring this deal back into your active pipeline.
-        </p>
-      </div>
-    </div>
-  );
-};
-
 
 // Portfolio Monitor Page - Health tracking and news feed for invested companies
 const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) => {
@@ -6635,6 +2440,55 @@ const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) 
   );
   
   // Generate activity feed from all portfolio companies
+  const [fetchedSignals, setFetchedSignals] = useState({});
+  const [signalError, setSignalError] = useState(null);
+
+  // Fetch real signals via Claude API with web search
+  const fetchSignalsForCompany = async (deal) => {
+    try {
+      const response = await fetch("/api/signals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyName: deal.companyName,
+          industry: deal.industry,
+          website: deal.website || null
+        })
+      });
+
+      const data = await response.json();
+      const signals = Array.isArray(data.signals) ? data.signals : [];
+      return signals;
+    } catch (e) {
+      console.error(`Signal fetch failed for ${deal.companyName}:`, e);
+      return [];
+    }
+  };
+
+  const fetchAllSignals = async () => {
+    setIsRefreshing(true);
+    setSignalError(null);
+    try {
+      const results = await Promise.all(
+        portfolioDeals.map(async (deal) => {
+          const signals = await fetchSignalsForCompany(deal);
+          return { dealId: deal.id, companyName: deal.companyName, signals };
+        })
+      );
+      const byDeal = {};
+      results.forEach(r => { byDeal[r.dealId] = r.signals; });
+      setFetchedSignals(byDeal);
+      setLastRefreshed(new Date());
+    } catch (e) {
+      setSignalError('Could not fetch signals. Showing milestones only.');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  // Fetch on mount
+  useEffect(() => { fetchAllSignals(); }, []);
+
   const generateActivityFeed = () => {
     const activities = [];
     
@@ -6657,33 +2511,27 @@ const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) 
           });
         });
       }
-      
-      // Add simulated recent signals for demo
-      if (deal.companyName === 'CloudBase') {
-        activities.push(
-          { id: `${deal.id}-signal-1`, companyId: deal.id, companyName: deal.companyName, type: 'team', title: 'New VP of Engineering Hired', description: 'Former Google engineer Jane Smith joins as VP of Engineering to lead product development.', date: new Date(Date.now() - 2*86400000).toISOString(), source: 'LinkedIn', sourceUrl: 'https://linkedin.com', verified: true, sentiment: 'positive' },
-          { id: `${deal.id}-signal-2`, companyId: deal.id, companyName: deal.companyName, type: 'product', title: 'Enterprise API v2.0 Launch', description: 'Major product update with new enterprise features including SSO, audit logs, and custom integrations.', date: new Date(Date.now() - 5*86400000).toISOString(), source: 'X (Twitter)', sourceUrl: 'https://twitter.com', verified: true, sentiment: 'positive' },
-          { id: `${deal.id}-signal-3`, companyId: deal.id, companyName: deal.companyName, type: 'press', title: 'Featured in TechCrunch', description: 'CloudBase highlighted as one of the top DevTools startups to watch in 2025.', date: new Date(Date.now() - 12*86400000).toISOString(), source: 'TechCrunch', sourceUrl: 'https://techcrunch.com', verified: true, sentiment: 'positive' }
-        );
-      }
-      
-      if (deal.companyName === 'Acme Analytics') {
-        activities.push(
-          { id: `${deal.id}-signal-1`, companyId: deal.id, companyName: deal.companyName, type: 'partnership', title: 'AWS Marketplace Launch', description: 'Acme Analytics now available on AWS Marketplace for enterprise customers.', date: new Date(Date.now() - 3*86400000).toISOString(), source: 'AWS Blog', sourceUrl: 'https://aws.amazon.com/blogs', verified: true, sentiment: 'positive' },
-          { id: `${deal.id}-signal-2`, companyId: deal.id, companyName: deal.companyName, type: 'hiring', title: 'Hiring 15 Engineers', description: '15 new engineering roles posted, signaling continued growth investment.', date: new Date(Date.now() - 8*86400000).toISOString(), source: 'LinkedIn', sourceUrl: 'https://linkedin.com', verified: true, sentiment: 'positive' },
-          { id: `${deal.id}-signal-3`, companyId: deal.id, companyName: deal.companyName, type: 'podcast', title: 'CEO on Data Eng Podcast', description: 'David Lee discusses the future of analytics on the Data Engineering Podcast.', date: new Date(Date.now() - 15*86400000).toISOString(), source: 'Podcast', sourceUrl: 'https://dataengineeringpodcast.com', verified: true, sentiment: 'neutral' }
-        );
-      }
-      
-      if (deal.companyName === 'SecureVault') {
-        activities.push(
-          { id: `${deal.id}-signal-1`, companyId: deal.id, companyName: deal.companyName, type: 'fundraising', title: 'Reportedly Raising Series A', description: 'Sources indicate SecureVault is in talks for a $15M Series A round.', date: new Date(Date.now() - 1*86400000).toISOString(), source: 'The Information', sourceUrl: 'https://theinformation.com', verified: false, sentiment: 'positive' },
-          { id: `${deal.id}-signal-2`, companyId: deal.id, companyName: deal.companyName, type: 'product', title: 'SOC 2 Type II Certification', description: 'SecureVault achieves SOC 2 Type II certification, enabling enterprise sales.', date: new Date(Date.now() - 10*86400000).toISOString(), source: 'Company Blog', sourceUrl: '#', verified: true, sentiment: 'positive' }
-        );
-      }
+
+      // Add fetched real signals
+      const signals = fetchedSignals[deal.id] || [];
+      signals.forEach((s, i) => {
+        activities.push({
+          id: `${deal.id}-fetched-${i}`,
+          companyId: deal.id,
+          companyName: deal.companyName,
+          type: s.type || 'press',
+          title: s.title,
+          description: s.description,
+          date: s.date || new Date().toISOString(),
+          source: s.source || 'Web',
+          sourceUrl: s.sourceUrl || null,
+          verified: true,
+          sentiment: s.sentiment || 'neutral',
+          isLive: true
+        });
+      });
     });
     
-    // Sort by date descending
     return activities.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   };
   
@@ -6911,21 +2759,14 @@ const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) 
             </div>
             <div className="flex items-center gap-3">
               <button 
-                onClick={() => {
-                  // Simulate refresh - in production this would fetch new signals
-                  setIsRefreshing(true);
-                  setTimeout(() => {
-                    setIsRefreshing(false);
-                    setLastRefreshed(new Date());
-                  }, 2000);
-                }}
+                onClick={fetchAllSignals}
                 disabled={isRefreshing}
                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors disabled:opacity-50"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={isRefreshing ? 'animate-spin' : ''}>
                   <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
                 </svg>
-                {isRefreshing ? 'Checking...' : 'Pull Updates'}
+                {isRefreshing ? 'Searching...' : 'Pull Updates'}
               </button>
               <span className="text-xs text-stone-400">{portfolioDeals.length} companies</span>
             </div>
@@ -7136,9 +2977,36 @@ const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) 
               <span className="text-xs text-stone-400">{filteredActivities.length} signals</span>
             </div>
           </div>
+
+          {/* Error banner */}
+          {signalError && (
+            <div className="mx-4 mt-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <p className="text-xs text-amber-800">{signalError}</p>
+            </div>
+          )}
           
           <div className="divide-y divide-stone-100 dark:divide-stone-700">
-            {filteredActivities.length === 0 ? (
+            {/* Loading skeleton */}
+            {isRefreshing && filteredActivities.length === 0 && (
+              <div className="p-4 space-y-4">
+                {[1,2,3].map(i => (
+                  <div key={i} className="flex gap-4 animate-pulse">
+                    <div className="w-2 h-2 rounded-full bg-stone-200 mt-1.5 flex-shrink-0"/>
+                    <div className="flex-1 space-y-2">
+                      <div className="flex gap-2">
+                        <div className="h-4 w-16 bg-stone-200 rounded-full"/>
+                        <div className="h-4 w-12 bg-stone-200 rounded-full"/>
+                      </div>
+                      <div className="h-4 w-3/4 bg-stone-200 rounded"/>
+                      <div className="h-3 w-1/2 bg-stone-100 rounded"/>
+                    </div>
+                  </div>
+                ))}
+                <p className="text-xs text-stone-400 text-center pt-2">Searching web for latest signals…</p>
+              </div>
+            )}
+            {!isRefreshing && filteredActivities.length === 0 ? (
               <div className="p-8 text-center">
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#d6d3d1" strokeWidth="1.5" className="mx-auto mb-3">
                   <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
@@ -7181,7 +3049,13 @@ const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) 
                             {getTypeIcon(activity.type)}
                             {activity.type}
                           </span>
-                          {activity.verified && (
+                          {activity.isLive && (
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 flex items-center gap-1">
+                              <svg width="8" height="8" viewBox="0 0 10 10"><circle cx="5" cy="5" r="5" fill="#3b82f6"/></svg>
+                              Live
+                            </span>
+                          )}
+                          {activity.verified && !activity.isLive && (
                             <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 flex items-center gap-1">
                               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
                               Verified
@@ -7328,24 +3202,17 @@ const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) 
 
 // Main App (internal, wrapped by auth)
 function ConvexApp({ userMenu, syncStatus }) {
-  const [page, setPage] = useState('list'); // Start at list instead of login since auth handles that
-  const [activeTab, setActiveTab] = useState('active'); // 'active' | 'deferred' | 'portfolio'
+  const [page, setPage] = useState('list');
   const [deals, setDeals] = useState([]);
   const [selected, setSelected] = useState(null);
   const [toast, setToast] = useState(null);
-  const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
-  const [sortBy, setSortBy] = useState('newest'); // 'newest' | 'oldest' | 'alphabetical' | 'loi' | 'industry' | 'stage' | 'source'
+  const [sortBy, setSortBy] = useState('newest');
   const [showSortDropdown, setShowSortDropdown] = useState(false);
   const [userPrefs, setUserPrefs] = useState(null);
   const [showAddPortfolio, setShowAddPortfolio] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   
-  // Modal states for decision closure
-  const [showDeferModal, setShowDeferModal] = useState(false);
-  const [showInvestModal, setShowInvestModal] = useState(false);
-  const [showPassModal, setShowPassModal] = useState(false);
-  const [modalDeal, setModalDeal] = useState(null);
 
   // Theme effect - applies dark class to html element
   useEffect(() => {
@@ -7383,76 +3250,26 @@ function ConvexApp({ userMenu, syncStatus }) {
 
   useEffect(() => { setDeals(createDemoDeals()); }, []);
 
-  // Computed deal lists for each tab
-  const activeDeals = deals.filter(d => d.status === 'screening');
-  const deferredDeals = deals.filter(d => d.status === 'deferred');
+  // Portfolio deals
   const portfolioDeals = deals.filter(d => d.status === 'invested');
-  const passedDeals = deals.filter(d => d.status === 'passed');
 
-  // Counts for tabs
-  const tabCounts = {
-    active: activeDeals.length,
-    deferred: deferredDeals.length,
-    portfolio: portfolioDeals.length,
-    passed: passedDeals.length
-  };
-
-  // Filter deals based on active tab
+  // Filter and sort portfolio deals
   const getFilteredDeals = () => {
-    let base = [];
-    if (activeTab === 'active') base = activeDeals;
-    else if (activeTab === 'deferred') base = deferredDeals;
-    else if (activeTab === 'portfolio') base = portfolioDeals;
-    else if (activeTab === 'passed') base = passedDeals;
+    let base = portfolioDeals;
     
     if (search) base = base.filter(d => d.companyName.toLowerCase().includes(search.toLowerCase()));
     
-    if (filter !== 'all') {
-      if (activeTab === 'deferred') {
-        if (filter === 'watching') base = base.filter(d => d.deferType !== 'learning');
-        if (filter === 'learning') base = base.filter(d => d.deferType === 'learning');
-      } else if (activeTab === 'portfolio') {
-        if (filter === 'invested') base = base.filter(d => !d.needsAttention);
-        if (filter === 'needsAttention') base = base.filter(d => d.needsAttention);
-      } else if (activeTab === 'passed') {
-        // Filter by pass reason
-        if (filter !== 'all') {
-          base = base.filter(d => {
-            const reasons = d.passed?.reasons || (d.passReason ? [d.passReason] : []);
-            return reasons.some(r => r.toLowerCase().includes(filter.toLowerCase()));
-          });
-        }
-      }
-    }
-    
-    // Sort deals
     return base.sort((a, b) => {
-      if (sortBy === 'newest') {
-        return new Date(b.statusEnteredAt || b.createdAt).getTime() - new Date(a.statusEnteredAt || a.createdAt).getTime();
-      }
-      if (sortBy === 'oldest') {
-        return new Date(a.statusEnteredAt || a.createdAt).getTime() - new Date(b.statusEnteredAt || b.createdAt).getTime();
-      }
-      if (sortBy === 'alphabetical') {
-        return a.companyName.localeCompare(b.companyName);
-      }
-      if (sortBy === 'loi') {
-        // Sort by LOI deadline, soonest first, nulls at end
-        const aLoi = a.loiDue ? new Date(a.loiDue).getTime() : Infinity;
-        const bLoi = b.loiDue ? new Date(b.loiDue).getTime() : Infinity;
-        return aLoi - bLoi;
-      }
-      if (sortBy === 'industry') {
-        return (a.industry || 'zzz').localeCompare(b.industry || 'zzz');
-      }
+      if (sortBy === 'newest') return new Date(b.statusEnteredAt || b.createdAt).getTime() - new Date(a.statusEnteredAt || a.createdAt).getTime();
+      if (sortBy === 'oldest') return new Date(a.statusEnteredAt || a.createdAt).getTime() - new Date(b.statusEnteredAt || b.createdAt).getTime();
+      if (sortBy === 'alphabetical') return a.companyName.localeCompare(b.companyName);
+      if (sortBy === 'industry') return (a.industry || 'zzz').localeCompare(b.industry || 'zzz');
       if (sortBy === 'stage') {
         const stageOrder = { 'pre-seed': 1, 'seed': 2, 'series-a': 3, 'series-b': 4, 'series-c': 5, 'growth': 6 };
         return (stageOrder[a.stage] || 99) - (stageOrder[b.stage] || 99);
       }
       if (sortBy === 'source') {
-        const aSource = a.source?.channel || a.investment?.source || 'zzz';
-        const bSource = b.source?.channel || b.investment?.source || 'zzz';
-        return aSource.localeCompare(bSource);
+        return (a.source?.channel || 'zzz').localeCompare(b.source?.channel || 'zzz');
       }
       return 0;
     });
@@ -7470,73 +3287,6 @@ function ConvexApp({ userMenu, syncStatus }) {
     setDeals(prev => [newDeal, ...prev]);
     const statusLabel = STATUS_CONFIG[newDeal.status]?.label || newDeal.status;
     setToast({ message: `${newDeal.companyName} added as ${statusLabel}`, type: 'success' });
-  };
-
-  const transitionStatus = (dealId, newStatus, extras = {}) => {
-    const now = new Date().toISOString();
-    setDeals(prev => prev.map(d => d.id === dealId ? { ...d, status: newStatus, statusEnteredAt: now, lastActivity: now, lastAssessedAt: now, ...extras } : d));
-    setSelected(prev => prev ? { ...prev, status: newStatus, statusEnteredAt: now, lastActivity: now, lastAssessedAt: now, ...extras } : null);
-    setToast({ message: `Moved to ${STATUS_CONFIG[newStatus].label}`, type: 'success' });
-  };
-
-  // Decision closure handlers
-  const handleDefer = (deal) => {
-    setModalDeal(deal);
-    setShowDeferModal(true);
-  };
-
-  const confirmDefer = (data) => {
-    if (modalDeal) {
-      transitionStatus(modalDeal.id, 'deferred', { 
-        deferData: data,
-        tracked: true // Deferred companies are tracked by default
-      });
-    }
-    setShowDeferModal(false);
-    setModalDeal(null);
-  };
-
-  const handleInvest = (deal) => {
-    setModalDeal(deal);
-    setShowInvestModal(true);
-  };
-
-  const confirmInvest = (data) => {
-    if (modalDeal) {
-      transitionStatus(modalDeal.id, 'invested', {
-        investment: {
-          ...modalDeal.investment,
-          amount: data.amount,
-          vehicle: data.vehicle,
-          date: new Date().toISOString(),
-          whyYes: data.whyYes
-        }
-      });
-      // Navigate to portfolio monitor after investing
-      setSelected(null);
-      setPage('portfolio-monitor');
-    }
-    setShowInvestModal(false);
-    setModalDeal(null);
-  };
-
-  const handlePass = (deal) => {
-    setModalDeal(deal);
-    setShowPassModal(true);
-  };
-
-  const confirmPass = (data) => {
-    if (modalDeal) {
-      transitionStatus(modalDeal.id, 'passed', {
-        passed: {
-          reason: data.reason,
-          whyPass: data.whyPass,
-          passedAt: new Date().toISOString()
-        }
-      });
-    }
-    setShowPassModal(false);
-    setModalDeal(null);
   };
 
   const toggleEngagement = (dealId) => {
@@ -7557,13 +3307,6 @@ function ConvexApp({ userMenu, syncStatus }) {
   if (page === 'settings') return (
     <ThemeContext.Provider value={{ theme: settings.appearance, setTheme: (t) => setSettings(prev => ({ ...prev, appearance: t })) }}>
       <SettingsPage settings={settings} onUpdate={setSettings} onClose={() => setPage('list')} />
-    </ThemeContext.Provider>
-  );
-
-  // Dashboard page
-  if (page === 'dashboard') return (
-    <ThemeContext.Provider value={{ theme: settings.appearance, setTheme: (t) => setSettings(prev => ({ ...prev, appearance: t })) }}>
-      <DashboardPage deals={deals} onClose={() => setPage('list')} />
     </ThemeContext.Provider>
   );
 
@@ -7925,9 +3668,7 @@ function ConvexApp({ userMenu, syncStatus }) {
 
   // Detail
   if (page === 'detail' && selected) {
-    const config = STATUS_CONFIG[selected.status];
-    const Views = { 'screening': ScreeningView, 'deferred': DeferredView, 'invested': InvestedView, 'passed': PassedView };
-    const StageView = Views[selected.status];
+    const config = STATUS_CONFIG[selected.status] || STATUS_CONFIG['invested'];
 
     return (
       <div className="min-h-screen bg-stone-100 dark:bg-stone-900">
@@ -7936,118 +3677,42 @@ function ConvexApp({ userMenu, syncStatus }) {
           <div className="flex items-center justify-between px-6 py-4">
             <button onClick={() => setPage('list')} className="flex items-center gap-1 text-stone-500 dark:text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 transition-colors">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
-              <span className="text-sm font-medium">Pipeline</span>
+              <span className="text-sm font-medium">Portfolio</span>
             </button>
-            {/* Status toggle - different for deferred */}
-            {selected.status === 'deferred' ? (
-              <div className="flex items-center bg-stone-100 dark:bg-stone-700 rounded-lg p-1">
-                <button 
-                  onClick={() => {
-                    transitionStatus(selected.id, 'screening');
-                  }}
-                  className="px-4 py-1.5 rounded-md text-sm font-medium transition-all text-stone-500 dark:text-stone-400"
-                >
-                  Active
-                </button>
-                <button 
-                  className="px-4 py-1.5 rounded-md text-sm font-medium bg-white dark:bg-stone-600 text-[#5B6DC4] shadow-sm"
-                >
-                  Watching
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <button 
-                  onClick={() => toggleEngagement(selected.id)}
-                  className={`px-3 py-1 rounded-lg text-sm font-medium transition-all ${
-                    selected.engagement === 'active' 
-                      ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400' 
-                      : 'bg-stone-200 dark:bg-stone-700 text-stone-500 dark:text-stone-400'
-                  }`}
-                >
-                  {selected.engagement === 'active' ? 'Active' : 'Inactive'}
-                </button>
-                <span 
-                  className="px-3 py-1 rounded-lg text-sm font-medium border"
-                  style={{ 
-                    backgroundColor: selected.status === 'screening' ? 'rgba(91, 109, 196, 0.1)' : selected.status === 'invested' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(91, 109, 196, 0.1)',
-                    color: selected.status === 'screening' ? '#5B6DC4' : selected.status === 'invested' ? '#059669' : '#5B6DC4',
-                    borderColor: selected.status === 'screening' ? 'rgba(91, 109, 196, 0.3)' : selected.status === 'invested' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(91, 109, 196, 0.3)'
-                  }}
-                >
-                  {config.label}
-                </span>
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage('portfolio-monitor')}
+                className="px-3 py-1 rounded-lg text-sm font-medium transition-colors"
+                style={{ backgroundColor: '#5B6DC4', color: 'white' }}
+                title="Portfolio Monitor"
+              >
+                <svg className="inline mr-1 mb-0.5" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>
+                </svg>
+                Monitor
+              </button>
+              <button 
+                onClick={() => toggleEngagement(selected.id)}
+                className={`px-3 py-1 rounded-lg text-sm font-medium transition-all ${
+                  selected.engagement === 'active' 
+                    ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400' 
+                    : 'bg-stone-200 dark:bg-stone-700 text-stone-500 dark:text-stone-400'
+                }`}
+              >
+                {selected.engagement === 'active' ? 'Active' : 'Inactive'}
+              </button>
+            </div>
           </div>
         </header>
         <main className="px-6 py-6">
-          {StageView && <StageView deal={selected} onUpdate={updateDeal} onTransition={(s, e) => transitionStatus(selected.id, s, e)} setToast={setToast} />}
+          <InvestedView deal={selected} onUpdate={updateDeal} setToast={setToast} />
         </main>
         {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
       </div>
     );
   }
 
-  // List with 3-tab navigation
-  const getTabFilters = () => {
-    if (activeTab === 'active') return [
-      { key: 'all', label: 'All', count: activeDeals.length },
-    ];
-    if (activeTab === 'deferred') return [
-      { key: 'all', label: 'All', count: deferredDeals.length },
-      { key: 'watching', label: 'Watching', count: deferredDeals.filter(d => d.deferType !== 'learning').length, color: '#5B6DC4' },
-      { key: 'learning', label: 'Learning', count: deferredDeals.filter(d => d.deferType === 'learning').length, color: '#5B6DC4' },
-    ];
-    if (activeTab === 'portfolio') return [
-      { key: 'all', label: 'All', count: portfolioDeals.length },
-      { key: 'invested', label: 'Invested', count: portfolioDeals.filter(d => !d.needsAttention).length, color: '#10b981' },
-      { key: 'needsAttention', label: 'Needs Attention', count: portfolioDeals.filter(d => d.needsAttention).length, color: '#ef4444' },
-    ];
-    if (activeTab === 'passed') {
-      // Get unique pass reasons for filters
-      const allReasons = passedDeals.flatMap(d => d.passed?.reasons || (d.passReason ? [d.passReason] : []));
-      const reasonCounts = allReasons.reduce((acc, r) => {
-        acc[r] = (acc[r] || 0) + 1;
-        return acc;
-      }, {});
-      const topReasons = Object.entries(reasonCounts)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 4);
-      
-      return [
-        { key: 'all', label: 'All', count: passedDeals.length },
-        ...topReasons.map(([reason, count]) => ({
-          key: reason.toLowerCase(),
-          label: reason,
-          count,
-          color: '#dc2626'
-        }))
-      ];
-    }
-    return [];
-  };
-
-  const tabFilters = getTabFilters();
-
-  const getEmptyState = () => {
-    if (activeTab === 'active') return { title: 'No leads yet', subtitle: 'Add a company to start evaluating. Take your time.' };
-    if (activeTab === 'deferred') return { title: 'Nothing paused', subtitle: 'Deals you defer will rest here quietly.' };
-    if (activeTab === 'portfolio') return { title: 'No investments yet', subtitle: 'When you invest, your portfolio builds here.' };
-    if (activeTab === 'passed') return { title: 'No passed deals', subtitle: 'Deals you pass on will be archived here for reference.' };
-    return { title: 'No deals', subtitle: '' };
-  };
-
-  const emptyState = getEmptyState();
-
-  // Get tab subtitle
-  const getTabSubtitle = () => {
-    if (activeTab === 'active') return 'Companies you\'re evaluating';
-    if (activeTab === 'deferred') return 'Deferred doesn\'t mean no. It means not yet.';
-    if (activeTab === 'portfolio') return 'Decisions you stand behind';
-    if (activeTab === 'passed') return 'Learning from the deals you declined';
-    return '';
-  };
+  const emptyState = { title: 'No investments yet', subtitle: 'When you invest, your portfolio builds here.' };
 
   return (
     <div className="min-h-screen bg-stone-100 dark:bg-stone-900">
@@ -8067,18 +3732,6 @@ function ConvexApp({ userMenu, syncStatus }) {
             {syncStatus}
           </div>
           <div className="flex items-center gap-3">
-            <button 
-              onClick={() => setPage('dashboard')}
-              className="p-2 text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 transition-colors"
-              title="Capital & Signals"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="3" width="7" height="7" rx="1"/>
-                <rect x="14" y="3" width="7" height="7" rx="1"/>
-                <rect x="3" y="14" width="7" height="7" rx="1"/>
-                <rect x="14" y="14" width="7" height="7" rx="1"/>
-              </svg>
-            </button>
             <button 
               onClick={() => setPage('settings')}
               className="p-2 text-stone-400 hover:text-stone-600 dark:hover:text-stone-300 transition-colors"
@@ -8101,151 +3754,14 @@ function ConvexApp({ userMenu, syncStatus }) {
           </div>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="px-6 pb-4">
-          <div className="flex gap-1">
-            <button 
-              onClick={() => { setActiveTab('active'); setFilter('all'); }}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${activeTab === 'active' ? 'bg-stone-100 dark:bg-stone-700 border border-stone-200 dark:border-stone-600' : 'hover:bg-stone-50 dark:hover:bg-stone-700/50'}`}
-              style={{ color: activeTab === 'active' ? '#1c1917' : '#78716c' }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
-              Leads
-              <span className="px-1.5 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: activeTab === 'active' ? '#5B6DC4' : '#e7e5e4', color: activeTab === 'active' ? 'white' : '#78716c' }}>{tabCounts.active}</span>
-            </button>
-            <button 
-              onClick={() => { setActiveTab('deferred'); setFilter('all'); }}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${activeTab === 'deferred' ? 'bg-stone-100 dark:bg-stone-700 border border-stone-200 dark:border-stone-600' : 'hover:bg-stone-50 dark:hover:bg-stone-700/50'}`}
-              style={{ color: activeTab === 'deferred' ? '#1c1917' : '#78716c' }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="10" y1="15" x2="10" y2="9"/><line x1="14" y1="15" x2="14" y2="9"/></svg>
-              Deferred
-              <span className="px-1.5 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: activeTab === 'deferred' ? '#5B6DC4' : '#e7e5e4', color: activeTab === 'deferred' ? 'white' : '#78716c' }}>{tabCounts.deferred}</span>
-            </button>
-            <button 
-              onClick={() => { setActiveTab('portfolio'); setFilter('all'); }}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${activeTab === 'portfolio' ? 'bg-stone-100 dark:bg-stone-700 border border-stone-200 dark:border-stone-600' : 'hover:bg-stone-50 dark:hover:bg-stone-700/50'}`}
-              style={{ color: activeTab === 'portfolio' ? '#1c1917' : '#78716c' }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-              Portfolio
-              <span className="px-1.5 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: activeTab === 'portfolio' ? '#5B6DC4' : '#e7e5e4', color: activeTab === 'portfolio' ? 'white' : '#78716c' }}>{tabCounts.portfolio}</span>
-            </button>
-            <button 
-              onClick={() => { setActiveTab('passed'); setFilter('all'); }}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${activeTab === 'passed' ? 'bg-stone-100 dark:bg-stone-700 border border-stone-200 dark:border-stone-600' : 'hover:bg-stone-50 dark:hover:bg-stone-700/50'}`}
-              style={{ color: activeTab === 'passed' ? '#1c1917' : '#78716c' }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-              Passed
-              <span className="px-1.5 py-0.5 rounded text-xs font-medium" style={{ backgroundColor: activeTab === 'passed' ? '#5B6DC4' : '#e7e5e4', color: activeTab === 'passed' ? 'white' : '#78716c' }}>{tabCounts.passed}</span>
-            </button>
-          </div>
-        </div>
+        {/* Tab Navigation - removed, portfolio only */}
       </header>
 
       {/* Content */}
       <div className="px-6 py-6">
-        {/* LEADS TAB - Momentum Summary */}
-        {activeTab === 'active' && activeDeals.length > 0 && (() => {
-          const dealsWithNotes = activeDeals.filter(d => d.workingNotes?.length > 0 || d.notes?.length > 0).length;
-          const dealsWithProgress = activeDeals.filter(d => {
-            const explored = d.workingNotes?.filter(n => n.type === 'ai' && n.userConfirmed)?.length || 0;
-            return explored > 0;
-          }).length;
-          const upcomingReminders = activeDeals.filter(d => d.loiDue && daysUntil(d.loiDue) <= 7 && daysUntil(d.loiDue) >= 0).length;
-          const dealsWithSignals = activeDeals.filter(d => d.hasNewSignal).length;
-          
-          return (
-            <div className="mb-6 bg-white dark:bg-stone-800 rounded-2xl p-5 border border-stone-200 dark:border-stone-700">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h2 className="text-sm font-medium text-stone-900 dark:text-stone-100">Your momentum this week</h2>
-                  <p className="text-xs text-stone-400 mt-0.5">Based on your activity across {activeDeals.length} active leads</p>
-                </div>
-                {dealsWithProgress > 0 && (
-                  <div className="flex items-center gap-1.5 text-emerald-600">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
-                    <span className="text-sm font-medium">Making progress</span>
-                  </div>
-                )}
-              </div>
-              
-              <div className="grid grid-cols-4 gap-4">
-                <div className="text-center">
-                  <div className="text-2xl font-semibold text-stone-900 dark:text-stone-100">{dealsWithProgress}</div>
-                  <div className="text-xs text-stone-500 dark:text-stone-400">in motion</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-2xl font-semibold text-stone-900 dark:text-stone-100">{dealsWithNotes}</div>
-                  <div className="text-xs text-stone-500 dark:text-stone-400">with your notes</div>
-                </div>
-                <div className="text-center">
-                  <div className={`text-2xl font-semibold ${upcomingReminders > 0 ? 'text-amber-600' : 'text-stone-900 dark:text-stone-100'}`}>
-                    {upcomingReminders}
-                  </div>
-                  <div className="text-xs text-stone-500 dark:text-stone-400">due this week</div>
-                </div>
-                <div className="text-center">
-                  <div className={`text-2xl font-semibold ${dealsWithSignals > 0 ? 'text-[#5B6DC4]' : 'text-stone-900 dark:text-stone-100'}`}>
-                    {dealsWithSignals}
-                  </div>
-                  <div className="text-xs text-stone-500 dark:text-stone-400">new signals</div>
-                </div>
-              </div>
 
-              {/* Process reflection - Pride through mirrors */}
-              {dealsWithNotes >= 2 && (
-                <div className="mt-4 pt-4 border-t border-stone-100 dark:border-stone-700">
-                  <div className="flex items-start gap-2 text-stone-600 dark:text-stone-400">
-                    <svg className="mt-0.5 text-stone-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
-                    <p className="text-sm">
-                      You've captured notes on {dealsWithNotes} of {activeDeals.length} leads. Your future self will thank you.
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })()}
-
-        {/* DEFERRED TAB - Relief message */}
-        {activeTab === 'deferred' && deferredDeals.length > 0 && (() => {
-          const dealsWithSignals = deferredDeals.filter(d => d.hasNewSignal).length;
-          return (
-            <>
-              {/* Reframe message */}
-              <div className="mb-6 text-center py-6">
-                <div className="w-10 h-10 rounded-full bg-stone-100 dark:bg-stone-700 flex items-center justify-center mx-auto mb-3">
-                  <svg className="text-stone-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
-                </div>
-                <p className="text-sm text-stone-400 max-w-sm mx-auto">
-                  These are conscious pauses, not forgotten deals. They'll surface when conditions change.
-                </p>
-              </div>
-
-              {/* Signal alert - gentle */}
-              {dealsWithSignals > 0 && (
-                <div className="mb-5 bg-white dark:bg-stone-800 rounded-2xl p-4 border border-stone-200 dark:border-stone-700">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-[#5B6DC4]/10 flex items-center justify-center">
-                      <svg className="text-[#5B6DC4]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                    </div>
-                    <div>
-                      <p className="text-sm text-stone-700 dark:text-stone-300">
-                        <span className="font-medium">{dealsWithSignals} paused {dealsWithSignals === 1 ? 'deal has' : 'deals have'} new signals</span>
-                      </p>
-                      <p className="text-xs text-stone-400">Worth checking when you have a moment</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </>
-          );
-        })()}
-
-        {/* PORTFOLIO TAB - Identity summary */}
-        {activeTab === 'portfolio' && portfolioDeals.length > 0 && (() => {
+        {/* Portfolio summary */}
+        {portfolioDeals.length > 0 && (() => {
           const totalDeployed = portfolioDeals.reduce((sum, d) => sum + (d.investment?.amount || 0), 0);
           const avgCheck = portfolioDeals.length > 0 ? totalDeployed / portfolioDeals.length : 0;
           const industries = [...new Set(portfolioDeals.map(d => d.industry))];
@@ -8268,7 +3784,6 @@ function ConvexApp({ userMenu, syncStatus }) {
                 )}
               </div>
 
-              {/* Pattern reflection - narrative coherence */}
               <div className="pt-4 border-t border-stone-100 dark:border-stone-700 space-y-2">
                 {industries.length > 0 && (
                   <div className="flex items-start gap-2 text-stone-600 dark:text-stone-400">
@@ -8284,58 +3799,10 @@ function ConvexApp({ userMenu, syncStatus }) {
           );
         })()}
 
-        {/* PASSED TAB - Learning summary */}
-        {activeTab === 'passed' && passedDeals.length > 0 && (() => {
-          // Group pass reasons
-          const allReasons = passedDeals.flatMap(d => d.passed?.reasons || (d.passReason ? [d.passReason] : []));
-          const reasonCounts = allReasons.reduce((acc, r) => {
-            acc[r] = (acc[r] || 0) + 1;
-            return acc;
-          }, {});
-          const topReasons = Object.entries(reasonCounts).sort((a, b) => b[1] - a[1]).slice(0, 3);
-          
-          return (
-            <div className="mb-6 bg-white dark:bg-stone-800 rounded-2xl p-6 border border-stone-200 dark:border-stone-700">
-              <div className="flex items-start justify-between mb-4">
-                <div>
-                  <h2 className="text-base font-medium text-stone-900 dark:text-stone-100">Passed deals</h2>
-                  <p className="text-sm text-stone-400 mt-0.5">
-                    {passedDeals.length} {passedDeals.length === 1 ? 'company' : 'companies'} you've passed on
-                  </p>
-                </div>
-                <div className="text-right">
-                  <div className="text-xl font-semibold text-stone-900 dark:text-stone-100">{passedDeals.length}</div>
-                  <p className="text-xs text-stone-400">total passes</p>
-                </div>
-              </div>
-
-              {/* Reason breakdown */}
-              {topReasons.length > 0 && (
-                <div className="pt-4 border-t border-stone-100 dark:border-stone-700">
-                  <p className="text-xs text-stone-400 uppercase tracking-wide mb-3">Common reasons</p>
-                  <div className="flex flex-wrap gap-2">
-                    {topReasons.map(([reason, count]) => (
-                      <span key={reason} className="px-3 py-1.5 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-lg text-sm flex items-center gap-2">
-                        {reason}
-                        <span className="text-red-400 dark:text-red-500 text-xs">({count})</span>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })()}
-
-        {/* Subtitle + Portfolio Monitor button */}
+        {/* Portfolio Monitor button */}
         <div className="flex items-center justify-between mb-4">
-          <p className="text-sm text-stone-500 dark:text-stone-400">
-            {activeTab === 'active' ? 'Companies you\'re evaluating' : 
-             activeTab === 'deferred' ? '' : 
-             activeTab === 'portfolio' ? 'Companies' :
-             activeTab === 'passed' ? 'Review your decisions and learn from patterns' : ''}
-          </p>
-          {activeTab === 'portfolio' && portfolioDeals.length > 0 && (
+          <p className="text-sm text-stone-500 dark:text-stone-400">Companies</p>
+          {portfolioDeals.length > 0 && (
             <button
               onClick={() => setPage('portfolio-monitor')}
               className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
@@ -8373,7 +3840,7 @@ function ConvexApp({ userMenu, syncStatus }) {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="16" y2="12"/><line x1="4" y1="18" x2="12" y2="18"/>
                 </svg>
-                Sort: {sortBy === 'newest' ? 'Newest' : sortBy === 'oldest' ? 'Oldest' : sortBy === 'alphabetical' ? 'A-Z' : sortBy === 'loi' ? 'LOI Due' : sortBy === 'industry' ? 'Industry' : sortBy === 'stage' ? 'Stage' : sortBy === 'source' ? 'Source' : 'Newest'}
+                Sort: {sortBy === 'newest' ? 'Newest' : sortBy === 'oldest' ? 'Oldest' : sortBy === 'alphabetical' ? 'A-Z' : sortBy === 'industry' ? 'Industry' : sortBy === 'stage' ? 'Stage' : sortBy === 'source' ? 'Source' : 'Newest'}
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <polyline points="6 9 12 15 18 9"/>
                 </svg>
@@ -8387,7 +3854,6 @@ function ConvexApp({ userMenu, syncStatus }) {
                       { key: 'newest', label: 'Newest First', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> },
                       { key: 'oldest', label: 'Oldest First', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 8 14"/></svg> },
                       { key: 'alphabetical', label: 'Name (A-Z)', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"/></svg> },
-                      { key: 'loi', label: 'LOI Deadline', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg> },
                       { key: 'industry', label: 'Industry', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="5" r="3"/><line x1="12" y1="22" x2="12" y2="8"/><path d="M5 12H2a10 10 0 0 0 20 0h-3"/></svg> },
                       { key: 'stage', label: 'Stage', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg> },
                       { key: 'source', label: 'Source / Channel', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
@@ -8413,24 +3879,7 @@ function ConvexApp({ userMenu, syncStatus }) {
               )}
             </div>
             
-            {/* Filter pills - inline with search */}
-            <div className="flex gap-2">
-              {tabFilters.map(f => (
-                <button 
-                  key={f.key} 
-                  onClick={() => setFilter(f.key)} 
-                  className={`px-4 py-2.5 rounded-xl text-sm font-medium whitespace-nowrap flex items-center gap-2 transition-colors ${
-                    filter === f.key 
-                      ? 'bg-stone-100 dark:bg-stone-700 text-stone-900 dark:text-stone-100' 
-                      : 'text-stone-500 dark:text-stone-400 hover:bg-stone-50 dark:hover:bg-stone-700/50'
-                  }`}
-                >
-                  {f.color && <span className="w-2 h-2 rounded-full" style={{ backgroundColor: f.color }}></span>}
-                  {f.label}
-                  <span className="text-stone-400">{f.count}</span>
-                </button>
-              ))}
-            </div>
+            {/* Filter pills - removed (portfolio only) */}
           </div>
         </div>
 
@@ -8444,137 +3893,13 @@ function ConvexApp({ userMenu, syncStatus }) {
           ) : (
             filtered.map(deal => {
               const founderName = deal.founders?.[0]?.name || deal.source?.name || '';
-              const showLoi = deal.loiDue && (deal.status === 'screening' || deal.status === 'diligence');
-              const loiDaysLeft = deal.loiDue ? daysUntil(deal.loiDue) : null;
-              const formatLoiDate = () => {
-                if (loiDaysLeft === null) return '';
-                if (loiDaysLeft < 0) return `${Math.abs(loiDaysLeft)}d overdue`;
-                if (loiDaysLeft <= 7) return `${loiDaysLeft}d`;
-                return `${Math.ceil(loiDaysLeft / 7)}w`;
-              };
-
-              // Get badge styling based on status
-              const getBadgeStyle = () => {
-                if (deal.status === 'screening') {
-                  return { bg: 'rgba(91, 109, 196, 0.1)', color: '#5B6DC4', border: 'rgba(91, 109, 196, 0.3)', label: 'Screening' };
-                }
-                if (deal.status === 'diligence') {
-                  return { bg: 'rgba(245, 158, 11, 0.1)', color: '#d97706', border: 'rgba(245, 158, 11, 0.3)', label: 'Diligence' };
-                }
-                if (deal.status === 'deferred') {
-                  return { bg: 'rgba(91, 109, 196, 0.1)', color: '#5B6DC4', border: 'rgba(91, 109, 196, 0.3)', label: deal.deferType === 'learning' ? 'Learning' : 'Watching' };
-                }
-                if (deal.status === 'invested') {
-                  return deal.needsAttention 
-                    ? { bg: 'rgba(239, 68, 68, 0.1)', color: '#dc2626', border: 'rgba(239, 68, 68, 0.3)', label: 'Needs Attention' }
-                    : { bg: 'rgba(16, 185, 129, 0.1)', color: '#059669', border: 'rgba(16, 185, 129, 0.3)', label: 'Invested' };
-                }
-                if (deal.status === 'passed') {
-                  return { bg: 'rgba(120, 113, 108, 0.1)', color: '#78716c', border: 'rgba(120, 113, 108, 0.3)', label: 'Passed' };
-                }
-                return { bg: '#f5f5f4', color: '#78716c', border: '#e7e5e4', label: deal.status };
-              };
-
-              const badge = getBadgeStyle();
-
-              // Get secondary info
-              const getSecondaryInfo = () => {
-                if (activeTab === 'active' && showLoi) {
-                  const isUrgent = loiDaysLeft !== null && loiDaysLeft <= 5;
-                  return { text: `LOI due · ${formatLoiDate()}`, color: isUrgent ? '#d97706' : '#a8a29e' };
-                }
-                if (activeTab === 'deferred' && deal.deferData?.conditionDetail) {
-                  return { text: deal.deferData.conditionDetail, color: '#78716c', icon: '👁' };
-                }
-                if (activeTab === 'portfolio' && deal.portfolioMetrics) {
-                  const isPositive = deal.portfolioMetrics.mrrChange?.startsWith('+');
-                  return { 
-                    text: `${deal.portfolioMetrics.mrrChange} MRR`, 
-                    color: isPositive ? '#059669' : '#dc2626',
-                    suffix: `${deal.portfolioMetrics.monthsInvested}mo`
-                  };
-                }
-                if (activeTab === 'passed') {
-                  const passReason = deal.passed?.reasons?.[0] || deal.passReason || 'No reason';
-                  const passedAt = deal.passed?.passedAt || deal.statusEnteredAt;
-                  const daysAgoVal = passedAt ? Math.floor((Date.now() - new Date(passedAt).getTime()) / 86400000) : null;
-                  return { 
-                    text: passReason, 
-                    color: '#dc2626',
-                    suffix: daysAgoVal !== null ? `${daysAgoVal}d ago` : ''
-                  };
-                }
-                return null;
-              };
-
-              const secondaryInfo = getSecondaryInfo();
-              
-              // Get qualitative hook - last note or open question
-              const getQualitativeHook = () => {
-                if (deal.workingNotes?.length > 0) {
-                  // Find last user note or AI gap
-                  const lastUserNote = [...deal.workingNotes].reverse().find(n => n.type === 'user' || n.type === 'voice');
-                  const openGap = deal.workingNotes.find(n => n.type === 'ai' && n.isGap && !n.userConfirmed);
-                  
-                  if (openGap) {
-                    return `Open question: ${openGap.keyInsight?.slice(0, 35) || 'needs exploration'}${openGap.keyInsight?.length > 35 ? '...' : ''}`;
-                  }
-                  if (lastUserNote) {
-                    const content = lastUserNote.content?.replace(/^["']|["']$/g, '') || '';
-                    return `Last note: ${content.slice(0, 35)}${content.length > 35 ? '...' : ''}`;
-                  }
-                }
-                if (deal.notes?.length > 0) {
-                  const lastNote = deal.notes[deal.notes.length - 1];
-                  return `Last note: ${lastNote.slice(0, 35)}${lastNote.length > 35 ? '...' : ''}`;
-                }
-                return null;
-              };
-              
-              const qualitativeHook = getQualitativeHook();
-              
-              // Calculate progress for Leads tab (areas explored)
-              const getExploredCount = () => {
-                if (!deal.workingNotes) return 0;
-                const confirmedLenses = new Set(deal.workingNotes.filter(n => n.type === 'ai' && n.userConfirmed).map(n => n.lens));
-                return confirmedLenses.size;
-              };
-              const exploredCount = getExploredCount();
-              const progressPercent = (exploredCount / 5) * 100;
-              
-              // Check if this deal has a new signal
-              const hasSignal = deal.hasNewSignal;
-              
-              // Get deferred reason display
-              const getDeferReason = () => {
-                if (!deal.deferData) return null;
-                const reasons = { timing: 'Timing', conviction: 'Conviction', information: 'Information', life: 'Life happened' };
-                return reasons[deal.deferData.condition] || deal.deferData.condition;
-              };
-              
               const isInactive = deal.engagement === 'inactive';
               
               return (
                 <div 
                   key={deal.id} 
-                  onClick={() => { 
-                    // Portfolio companies go to portfolio monitor, others go to detail
-                    if (activeTab === 'portfolio' && deal.status === 'invested') {
-                      setSelected(deal);
-                      setPage('portfolio-monitor');
-                    } else {
-                      setSelected(deal); 
-                      setPage('detail'); 
-                    }
-                  }}
-                  className={`bg-white dark:bg-stone-800 rounded-2xl border cursor-pointer transition-all hover:shadow-sm ${
-                    hasSignal && activeTab === 'active' 
-                      ? 'border-[#5B6DC4]/30 shadow-sm' 
-                      : activeTab === 'deferred'
-                        ? 'border-stone-150 dark:border-stone-700 hover:border-stone-200'
-                        : 'border-stone-200 dark:border-stone-700 hover:border-stone-300 dark:hover:border-stone-600'
-                  } ${isInactive ? 'opacity-50' : ''}`}
-                  style={activeTab === 'deferred' ? { borderColor: '#E7E5E4' } : {}}
+                  onClick={() => { setSelected(deal); setPage('detail'); }}
+                  className={`bg-white dark:bg-stone-800 rounded-2xl border cursor-pointer transition-all hover:shadow-sm border-stone-200 dark:border-stone-700 hover:border-stone-300 dark:hover:border-stone-600 ${isInactive ? 'opacity-50' : ''}`}
                 >
                   {/* Inactive indicator banner */}
                   {isInactive && (
@@ -8587,176 +3912,43 @@ function ConvexApp({ userMenu, syncStatus }) {
                       </div>
                     </div>
                   )}
-                  
-                  {/* Signal banner for Leads with new signals - Curiosity */}
-                  {hasSignal && activeTab === 'active' && deal.signalText && !isInactive && (
-                    <div className="px-5 py-2.5 bg-[#5B6DC4]/5 dark:bg-[#5B6DC4]/10 border-b border-[#5B6DC4]/10 rounded-t-2xl">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <svg className="text-[#5B6DC4]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                          <span className="text-sm text-stone-600 dark:text-stone-300">{deal.signalText}</span>
-                        </div>
-                        <span className="text-xs font-medium text-[#5B6DC4]">Worth a look →</span>
-                      </div>
-                    </div>
-                  )}
-                  
-                  {/* Signal banner for Deferred - softer */}
-                  {hasSignal && activeTab === 'deferred' && deal.signalText && !isInactive && (
-                    <div className="px-5 py-2.5 bg-stone-50 dark:bg-stone-700/50 border-b border-stone-100 dark:border-stone-600 rounded-t-2xl">
-                      <div className="flex items-center gap-2">
-                        <svg className="text-[#5B6DC4]" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-                        <span className="text-sm text-stone-600 dark:text-stone-300">{deal.signalText}</span>
-                        <span className="text-xs text-stone-400 ml-auto">Something shifted</span>
-                      </div>
-                    </div>
-                  )}
 
                   <div className="p-5 flex items-center">
-                    {/* Company Initial with progress ring for Leads */}
+                    {/* Company initial */}
                     <div className="relative mr-4 flex-shrink-0">
-                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-                        activeTab === 'deferred' 
-                          ? 'bg-stone-50 dark:bg-stone-700' 
-                          : activeTab === 'portfolio'
-                            ? 'bg-emerald-50 dark:bg-emerald-900/30'
-                            : 'bg-stone-200 dark:bg-stone-700'
-                      }`}>
-                        <span className={`text-lg font-semibold ${
-                          activeTab === 'deferred'
-                            ? 'text-stone-300 dark:text-stone-500'
-                            : activeTab === 'portfolio'
-                              ? 'text-emerald-600 dark:text-emerald-400'
-                              : 'text-stone-500 dark:text-stone-400'
-                        }`}>{deal.companyName?.charAt(0)?.toUpperCase()}</span>
+                      <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-emerald-50 dark:bg-emerald-900/30">
+                        <span className="text-lg font-semibold text-emerald-600 dark:text-emerald-400">{deal.companyName?.charAt(0)?.toUpperCase()}</span>
                       </div>
-                      {/* Progress ring for Leads - Momentum */}
-                      {activeTab === 'active' && exploredCount > 0 && (
-                        <svg className="absolute -inset-1 w-14 h-14" viewBox="0 0 56 56">
-                          <circle cx="28" cy="28" r="26" fill="none" stroke="#E7E5E4" strokeWidth="2"/>
-                          <circle cx="28" cy="28" r="26" fill="none" stroke="#5B6DC4" strokeWidth="2"
-                            strokeDasharray={`${progressPercent * 1.63} 163`} strokeLinecap="round"
-                            transform="rotate(-90 28 28)" className="transition-all duration-500"/>
-                        </svg>
-                      )}
                     </div>
                     
                     {/* Company Info */}
                     <div className="flex-1 min-w-0">
-                      <h3 className={`font-semibold mb-0.5 ${
-                        activeTab === 'deferred' 
-                          ? 'text-stone-700 dark:text-stone-300' 
-                          : 'text-stone-900 dark:text-stone-100'
-                      }`}>{deal.companyName}</h3>
-                      <p className={`text-sm ${
-                        activeTab === 'deferred' 
-                          ? 'text-stone-400 dark:text-stone-500' 
-                          : 'text-stone-500 dark:text-stone-400'
-                      }`}>{deal.industry} · {deal.stage}</p>
-                      <p className={`text-sm ${
-                        activeTab === 'deferred' 
-                          ? 'text-stone-400 dark:text-stone-500' 
-                          : 'text-stone-400 dark:text-stone-500'
-                      }`}>{founderName}</p>
+                      <h3 className="font-semibold mb-0.5 text-stone-900 dark:text-stone-100">{deal.companyName}</h3>
+                      <p className="text-sm text-stone-500 dark:text-stone-400">{deal.industry} · {deal.stage}</p>
+                      <p className="text-sm text-stone-400 dark:text-stone-500">{founderName}</p>
                       
-                      {/* Leads: Show your note with "Your note:" prefix */}
-                      {activeTab === 'active' && qualitativeHook && (
-                        <p className="text-sm text-stone-500 dark:text-stone-400 mt-2 italic truncate">
-                          {qualitativeHook.startsWith('Last note:') 
-                            ? <><span className="text-stone-400 dark:text-stone-500 not-italic">Your note:</span> {qualitativeHook.replace('Last note: ', '')}</>
-                            : qualitativeHook
-                          }
-                        </p>
-                      )}
-                      
-                      {/* Deferred: Show your reasoning when you paused */}
-                      {activeTab === 'deferred' && deal.deferData?.conditionDetail && (
-                        <div className="mt-3 p-3 bg-stone-50 dark:bg-stone-700/50 rounded-xl">
-                          <p className="text-sm text-stone-500 dark:text-stone-400 italic">"{deal.deferData.conditionDetail}"</p>
-                          {deal.deferData.waitingFor && (
-                            <p className="text-xs text-stone-400 dark:text-stone-500 mt-1">
-                              Waiting for: {deal.deferData.waitingFor}
-                            </p>
-                          )}
-                        </div>
-                      )}
-                      
-                      {/* Portfolio: Show your thesis */}
-                      {activeTab === 'portfolio' && deal.investment?.whyYes && (
+                      {/* Investment thesis */}
+                      {deal.investment?.whyYes && (
                         <div className="mt-3 p-3 bg-stone-50 dark:bg-stone-700/50 rounded-xl">
                           <p className="text-xs text-stone-400 dark:text-stone-500 uppercase tracking-wide mb-1">Your thesis</p>
                           <p className="text-sm text-stone-600 dark:text-stone-300 line-clamp-2">"{deal.investment.whyYes}"</p>
                         </div>
                       )}
-                      
-                      {/* Passed: Show why you passed */}
-                      {activeTab === 'passed' && (deal.passed?.reasons?.[0] || deal.passReason) && (
-                        <div className="mt-3 p-3 bg-red-50 dark:bg-red-900/20 rounded-xl">
-                          <p className="text-xs text-red-400 dark:text-red-400 uppercase tracking-wide mb-1">Why you passed</p>
-                          <p className="text-sm text-red-600 dark:text-red-300 line-clamp-2">"{deal.passed?.reasons?.[0] || deal.passReason}"</p>
-                        </div>
-                      )}
                     </div>
                   
-                    {/* Right side - Badge and Info */}
+                    {/* Right side - amount and date */}
                     <div className="flex flex-col items-end gap-1.5 ml-4">
-                      {/* Badge - different styling for Deferred (muted) */}
-                      {activeTab === 'deferred' ? (
-                        <>
-                          <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400">
-                            {getDeferReason() || badge.label}
-                          </span>
-                          {deal.deferData?.deferredAt && (
-                            <span className="text-xs text-stone-400 dark:text-stone-500">
-                              Paused {formatRelativeTime(deal.deferData.deferredAt)}
-                            </span>
-                          )}
-                        </>
-                      ) : activeTab === 'portfolio' ? (
-                        <>
-                          <span className="text-sm font-medium text-stone-900 dark:text-stone-100">
-                            {deal.investment?.amount ? `$${(deal.investment.amount / 1000).toFixed(0)}K` : ''}
-                          </span>
-                          {deal.investment?.date && (
-                            <span className="text-xs text-stone-400 dark:text-stone-500">
-                              {formatRelativeTime(deal.investment.date)}
-                            </span>
-                          )}
-                        </>
-                      ) : activeTab === 'passed' ? (
-                        <>
-                          <span className="px-2.5 py-1 rounded-lg text-xs font-medium bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400">
-                            Passed
-                          </span>
-                          {(deal.passed?.passedAt || deal.statusEnteredAt) && (
-                            <span className="text-xs text-stone-400 dark:text-stone-500">
-                              {formatRelativeTime(deal.passed?.passedAt || deal.statusEnteredAt)}
-                            </span>
-                          )}
-                        </>
-                      ) : (
-                        <>
-                          <span 
-                            className="px-2.5 py-1 rounded-lg text-xs font-medium"
-                            style={{ backgroundColor: badge.bg, color: badge.color, border: `1px solid ${badge.border}` }}
-                          >
-                            {badge.label}
-                          </span>
-                          {secondaryInfo && (
-                            <span className="text-xs flex items-center gap-1" style={{ color: secondaryInfo.color }}>
-                              {secondaryInfo.icon && <span>{secondaryInfo.icon}</span>}
-                              {secondaryInfo.text}
-                              {secondaryInfo.suffix && <span className="text-stone-400 ml-1">{secondaryInfo.suffix}</span>}
-                            </span>
-                          )}
-                        </>
+                      <span className="text-sm font-medium text-stone-900 dark:text-stone-100">
+                        {deal.investment?.amount ? `$${(deal.investment.amount / 1000).toFixed(0)}K` : ''}
+                      </span>
+                      {deal.investment?.date && (
+                        <span className="text-xs text-stone-400 dark:text-stone-500">
+                          {formatRelativeTime(deal.investment.date)}
+                        </span>
                       )}
                     </div>
                   
-                    {/* Chevron - more muted for Deferred */}
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" 
-                      stroke={activeTab === 'deferred' ? '#d6d3d1' : '#a8a29e'} 
-                      strokeWidth="2" className="ml-3 flex-shrink-0">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a8a29e" strokeWidth="2" className="ml-3 flex-shrink-0">
                       <polyline points="9 18 15 12 9 6"/>
                     </svg>
                   </div>
@@ -8766,46 +3958,21 @@ function ConvexApp({ userMenu, syncStatus }) {
           )}
         </div>
         
-        {/* Footer messages - emotional closure for each tab */}
+        {/* Footer */}
         {filtered.length > 0 && (
           <div className="mt-8 text-center space-y-1">
-            {activeTab === 'active' && (
-              <p className="text-sm text-stone-400 dark:text-stone-500">
-                {(() => {
-                  const inMotion = activeDeals.filter(d => {
-                    const explored = d.workingNotes?.filter(n => n.type === 'ai' && n.userConfirmed)?.length || 0;
-                    return explored > 0;
-                  }).length;
-                  if (inMotion === activeDeals.length) return "All leads in motion. You're building a deliberate practice.";
-                  if (inMotion > 0) return `${inMotion} of ${activeDeals.length} leads have your attention. That's how good decisions get made.`;
-                  return "Pick a company when you're ready. Thoughtful beats fast.";
-                })()}
-              </p>
-            )}
-            {activeTab === 'deferred' && (
-              <p className="text-sm text-stone-400 dark:text-stone-500">
-                {deferredDeals.length} {deferredDeals.length === 1 ? 'decision' : 'decisions'} resting. No rush to resolve them.
-              </p>
-            )}
-            {activeTab === 'portfolio' && (
-              <>
-                <p className="text-sm text-stone-400 dark:text-stone-500">
-                  {portfolioDeals.length} {portfolioDeals.length === 1 ? 'investment' : 'investments'}. Each one a deliberate choice.
-                </p>
-                <p className="text-xs text-stone-300 dark:text-stone-600">
-                  The best investors stay curious about their own patterns
-                </p>
-              </>
-            )}
+            <p className="text-sm text-stone-400 dark:text-stone-500">
+              {portfolioDeals.length} {portfolioDeals.length === 1 ? 'investment' : 'investments'}. Each one a deliberate choice.
+            </p>
+            <p className="text-xs text-stone-300 dark:text-stone-600">
+              The best investors stay curious about their own patterns
+            </p>
           </div>
         )}
       </div>
 
       {/* Modals */}
       {showAddPortfolio && <AddPortfolioModal onClose={() => setShowAddPortfolio(false)} onAdd={addDeal} />}
-      {showDeferModal && modalDeal && <DeferModal deal={modalDeal} onConfirm={confirmDefer} onClose={() => { setShowDeferModal(false); setModalDeal(null); }} />}
-      {showInvestModal && modalDeal && <InvestModal deal={modalDeal} onConfirm={confirmInvest} onClose={() => { setShowInvestModal(false); setModalDeal(null); }} />}
-      {showPassModal && modalDeal && <PassModal deal={modalDeal} onConfirm={confirmPass} onClose={() => { setShowPassModal(false); setModalDeal(null); }} />}
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   );
