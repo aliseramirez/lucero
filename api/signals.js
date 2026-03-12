@@ -28,7 +28,7 @@ module.exports = async function handler(req, res) {
         'anthropic-beta': 'web-search-2025-03-05'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-5',
         max_tokens: 1000,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
         system: `You are a startup intelligence assistant. Search for recent news about a portfolio company and return ONLY a JSON array of signal objects. No preamble, no markdown, no code fences — just the raw JSON array.
@@ -55,7 +55,7 @@ Return 2–4 signals. Only include verifiable, specific, recent events from the 
     if (!response.ok) {
       const err = await response.text();
       console.error('Anthropic API error:', err);
-      return res.status(502).json({ error: 'Upstream API error', signals: [] });
+      return res.status(502).json({ error: err, signals: [] });
     }
 
     const data = await response.json();
