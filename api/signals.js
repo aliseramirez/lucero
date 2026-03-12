@@ -7,7 +7,14 @@ module.exports = async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { companyName, industry, website } = req.body;
+  // Vercel sometimes needs manual body parsing
+  let body = req.body;
+  if (typeof body === 'string') {
+    try { body = JSON.parse(body); } catch { body = {}; }
+  }
+  if (!body) body = {};
+
+  const { companyName, industry, website } = body;
 
   if (!companyName) {
     return res.status(400).json({ error: 'companyName is required' });
@@ -81,6 +88,6 @@ Return 2–4 signals. Only include verifiable, specific, recent events from the 
 
   } catch (err) {
     console.error('Handler error:', err);
-    return res.status(500).json({ error: err.message, signals: [] });
+    return res.status(500).json({ error: err.message, stack: err.stack, signals: [] });
   }
 }
