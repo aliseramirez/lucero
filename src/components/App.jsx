@@ -463,7 +463,7 @@ const useUserData = () => {
   // Get storage key for current user
   const getStorageKey = useCallback((key) => {
     if (!user?.id) return null;
-    return `angelflow_${user.id}_${key}`;
+    return `convex_${user.id}_${key}`;
   }, [user?.id]);
   
   // Load data from localStorage (user-isolated)
@@ -4117,8 +4117,8 @@ const OnboardingFlow = ({ user, onComplete, onLogout }) => {
   const [step, setStep] = useState('welcome'); // 'welcome' | 'howitworks' | 'questions'
   const [prefs, setPrefs] = useState({
     investorType: null,
-    dealVolume: null,
-    investmentStage: null,
+    portfolioSize: null,
+    updateFrequency: null,
     checkSize: null
   });
   
@@ -4156,7 +4156,7 @@ const OnboardingFlow = ({ user, onComplete, onLogout }) => {
             Welcome{user?.name ? `, ${user.name.split(' ')[0]}` : ''}!
           </h1>
           <p style={{ fontSize: '16px', color: '#78716c', marginBottom: '32px', maxWidth: '400px' }}>
-            Let's set up Convex to match how you invest. This takes about 2 minutes.
+            Know what's happening at your portfolio companies without having to chase it.
           </p>
           
           <button
@@ -4200,30 +4200,30 @@ const OnboardingFlow = ({ user, onComplete, onLogout }) => {
     const steps = [
       {
         number: 1,
-        title: 'Capture deals quickly',
-        description: 'Add companies as you hear about them. Voice notes, quick forms, or paste a deck link.',
+        title: 'Add companies you\'ve invested in',
+        description: 'Log your portfolio — stage, vehicle, thesis, founders, terms. Everything in one place.',
         icon: '📥',
         color: '#5B6DC4'
       },
       {
         number: 2,
-        title: 'Make decisions, not lists',
-        description: 'Every deal gets a decision: Invest, Defer, or Pass. No purgatory.',
-        icon: '⚖️',
+        title: 'Passive signals, no chasing',
+        description: 'Real news pulled from the web on demand — funding rounds, launches, grants, press coverage.',
+        icon: '📡',
         color: '#10B981'
       },
       {
         number: 3,
-        title: 'Context fills in',
-        description: 'Market size, competitors, team backgrounds. You stay in flow.',
-        icon: '🔍',
+        title: 'Update log with nudge',
+        description: 'Log founder updates. Get a reminder when you\'ve gone too long without checking in.',
+        icon: '🔔',
         color: '#F59E0B'
       },
       {
         number: 4,
-        title: 'Learn from outcomes',
-        description: 'Record your reasoning. See how your thesis evolves over time.',
-        icon: '📈',
+        title: 'Documents in one place',
+        description: 'Link your SAFEs, K-1s, cap table, and equity docs per company. No more hunting through email.',
+        icon: '📄',
         color: '#8B5CF6'
       }
     ];
@@ -4334,35 +4334,35 @@ const OnboardingFlow = ({ user, onComplete, onLogout }) => {
         key: 'investorType',
         question: 'How do you invest?',
         options: [
-          { value: 'solo', label: 'Solo angel', desc: 'Individual investments' },
+          { value: 'solo', label: 'Solo angel', desc: 'Individual investments from personal capital' },
           { value: 'syndicate', label: 'Syndicate lead', desc: 'Lead deals with co-investors' },
-          { value: 'fund', label: 'Small fund', desc: 'GP of a micro-fund' }
+          { value: 'fund', label: 'Micro-fund GP', desc: 'Managing a small fund' }
         ]
       },
       {
-        key: 'dealVolume',
-        question: 'How many deals do you see per month?',
+        key: 'portfolioSize',
+        question: 'How many active portfolio companies?',
         options: [
-          { value: 'low', label: '1-5', desc: 'Selective pipeline' },
-          { value: 'medium', label: '5-20', desc: 'Active pipeline' },
-          { value: 'high', label: '20+', desc: 'High volume' }
+          { value: 'small', label: '1–5', desc: 'Early days' },
+          { value: 'medium', label: '6–15', desc: 'Growing portfolio' },
+          { value: 'large', label: '15+', desc: 'Established portfolio' }
         ]
       },
       {
-        key: 'investmentStage',
-        question: 'What stage do you focus on?',
+        key: 'updateFrequency',
+        question: 'How often do founders update you?',
         options: [
-          { value: 'pre-seed', label: 'Pre-seed', desc: 'Idea to early product' },
-          { value: 'seed', label: 'Seed', desc: 'Product-market fit' },
-          { value: 'mixed', label: 'Mixed', desc: 'Multiple stages' }
+          { value: 'regular', label: 'Monthly or quarterly', desc: 'Consistent cadence' },
+          { value: 'irregular', label: 'Sporadically', desc: 'Whenever they feel like it' },
+          { value: 'rarely', label: 'Rarely', desc: 'I usually have to ask' }
         ]
       },
       {
         key: 'checkSize',
         question: 'Typical check size?',
         options: [
-          { value: 'small', label: '$5-25K', desc: 'Smaller bets' },
-          { value: 'medium', label: '$25-100K', desc: 'Standard angel' },
+          { value: 'small', label: '$5–25K', desc: 'Smaller bets' },
+          { value: 'medium', label: '$25–100K', desc: 'Standard angel' },
           { value: 'large', label: '$100K+', desc: 'Larger positions' }
         ]
       }
