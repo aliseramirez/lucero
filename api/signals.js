@@ -36,25 +36,12 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
-        max_tokens: 1000,
+        max_tokens: 500,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-        system: `You are a startup intelligence assistant. Search for recent news about a portfolio company and return ONLY a JSON array of signal objects. No preamble, no markdown, no code fences — just the raw JSON array.
-
-Each signal object must have exactly these fields:
-{
-  "title": "short headline (max 10 words)",
-  "description": "1-2 sentence factual summary of what happened",
-  "type": one of: "fundraising" | "hiring" | "product" | "partnership" | "press" | "growth",
-  "source": "publication or platform name",
-  "sourceUrl": "full URL string if available, else null",
-  "date": "ISO 8601 date string — best estimate of when this happened",
-  "sentiment": "positive" | "neutral" | "negative"
-}
-
-Return 2–4 signals. Only include verifiable, specific, recent events from the last 6 months. If nothing meaningful is found, return [].`,
+        system: `Return ONLY a JSON array of 2-3 recent news signals about the company. No preamble, no markdown. Each object: {"title":"","description":"","type":"fundraising|hiring|product|partnership|press|growth","source":"","sourceUrl":"","date":"","sentiment":"positive|neutral|negative"}. If nothing found, return [].`,
         messages: [{
           role: 'user',
-          content: `Search for recent news (last 6 months) about ${companyName} — a ${industry || 'startup'}${website ? ` at ${website}` : ''}. Focus on: funding rounds, product launches, key hires, partnerships, press coverage, grants. Return the JSON array only.`
+          content: `Recent news (last 6 months) about ${companyName} (${industry || 'startup'}). JSON array only.`
         }]
       })
     });
