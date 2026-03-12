@@ -2469,12 +2469,13 @@ const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) 
     setIsRefreshing(true);
     setSignalError(null);
     try {
-      const results = await Promise.all(
-        portfolioDeals.map(async (deal) => {
-          const signals = await fetchSignalsForCompany(deal);
-          return { dealId: deal.id, companyName: deal.companyName, signals };
-        })
-      );
+      const results = [];
+      for (let i = 0; i < portfolioDeals.length; i++) {
+        if (i > 0) await new Promise(r => setTimeout(r, 2000)); // 2s between requests
+        const deal = portfolioDeals[i];
+        const signals = await fetchSignalsForCompany(deal);
+        results.push({ dealId: deal.id, signals });
+      }
       const byDeal = {};
       results.forEach(r => { byDeal[r.dealId] = r.signals; });
       setFetchedSignals(byDeal);
