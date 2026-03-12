@@ -2574,59 +2574,16 @@ const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) 
   // Generate trajectory assessment for each company
   const getTrajectoryAssessment = (deal) => {
     const companyActivities = activityFeed.filter(a => a.companyId === deal.id);
-    const positiveCount = companyActivities.filter(a => a.sentiment === 'positive').length;
-    const recentActivity = companyActivities.filter(a => daysAgo(a.date) < 30).length;
-    const investedDate = deal.investment?.date || deal.statusEnteredAt;
-    const monthsSinceInvestment = Math.floor(daysAgo(investedDate) / 30);
-    
-    // Demo assessments based on company - with relative framing
-    if (deal.companyName === 'CloudBase') {
-      return {
-        trajectory: 'accelerating',
-        confidence: 'moderate',
-        // Relative summary - compared to peers
-        summary: 'Relative to similar DevTools companies at this stage, signals suggest accelerating execution.',
-        // What changed since investment
-        sinceThen: 'Since your investment: Series A closed, team grew 40%, shipped 3 major releases.',
-        // Market context with comparison
-        marketContext: 'Peer companies raised Series B 3-4 quarters after comparable hiring patterns. CloudBase is tracking ahead of median.',
-        // Explicit comparison framing
-        comparedTo: 'peers',
-        uncertainty: null,
-        assessedAt: new Date().toISOString()
-      };
-    }
-    if (deal.companyName === 'Acme Analytics') {
-      return {
-        trajectory: 'steady',
-        confidence: 'high',
-        summary: 'Relative to your original thesis, execution remains consistent with expectations.',
-        sinceThen: 'Since your investment: Hit $10M ARR (up from $1M), expanded to 80 employees, closed Series B.',
-        marketContext: 'Analytics category exit multiples stable at 8-12x ARR. Acme tracking toward upper quartile if growth sustains.',
-        comparedTo: 'thesis',
-        uncertainty: null,
-        assessedAt: new Date().toISOString()
-      };
-    }
-    if (deal.companyName === 'SecureVault') {
-      return {
-        trajectory: 'too-early',
-        confidence: 'low',
-        summary: 'Too early to compare against benchmarks. Baseline still forming.',
-        sinceThen: `Invested ${monthsSinceInvestment < 1 ? 'recently' : monthsSinceInvestment + ' months ago'}. Limited signal history to assess change.`,
-        marketContext: 'Security category seeing increased funding. SOC 2 certification (achieved) typically unlocks enterprise pipeline within 2-3 quarters.',
-        comparedTo: 'baseline',
-        uncertainty: 'Insufficient signal density — check back in 60-90 days for meaningful comparison.',
-        assessedAt: new Date().toISOString()
-      };
-    }
-    
-    // Default for other companies
-    if (recentActivity === 0) {
+    const positiveSignals = companyActivities.filter(a => a.sentiment === 'positive').length;
+    const negativeSignals = companyActivities.filter(a => a.sentiment === 'negative').length;
+    const totalSignals = companyActivities.length;
+    const recentSignals = companyActivities.filter(a => daysAgo(a.date) < 60).length;
+
+    if (totalSignals === 0) {
       return {
         trajectory: 'unclear',
         confidence: 'low',
-        summary: 'No recent signals to compare against expectations.',
+        summary: 'No recent signals found yet.',
         sinceThen: 'No observable changes since last assessment.',
         marketContext: null,
         comparedTo: null,
@@ -2634,15 +2591,24 @@ const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) 
         assessedAt: new Date().toISOString()
       };
     }
-    
+
+    const trajectory = negativeSignals > positiveSignals ? 'declining'
+      : positiveSignals >= 2 && recentSignals >= 1 ? 'accelerating'
+      : positiveSignals >= 1 ? 'steady'
+      : 'unclear';
+
     return {
-      trajectory: positiveCount > 2 ? 'steady' : 'unclear',
-      confidence: 'low',
-      summary: 'Limited signal history. Insufficient data for meaningful comparison.',
-      sinceThen: null,
+      trajectory,
+      confidence: totalSignals >= 3 ? 'moderate' : 'low',
+      summary: positiveSignals > negativeSignals
+        ? `${positiveSignals} positive signal${positiveSignals > 1 ? 's' : ''} in recent months — execution tracking well.`
+        : negativeSignals > 0
+        ? `Mixed signals — ${negativeSignals} concerning indicator${negativeSignals > 1 ? 's' : ''} worth watching.`
+        : 'Neutral signals — limited data to assess momentum.',
+      sinceThen: `${totalSignals} observable signal${totalSignals > 1 ? 's' : ''} found across public sources.`,
       marketContext: null,
       comparedTo: null,
-      uncertainty: 'Insufficient data to assess trajectory confidently.',
+      uncertainty: totalSignals < 2 ? 'Limited signal density — pull updates again or check back soon.' : null,
       assessedAt: new Date().toISOString()
     };
   };
