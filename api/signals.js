@@ -2,7 +2,7 @@
 // Proxies signal fetch to Anthropic API, keeping the API key server-side.
 // Deploy to Vercel: the ANTHROPIC_API_KEY env var is set in the Vercel dashboard.
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
