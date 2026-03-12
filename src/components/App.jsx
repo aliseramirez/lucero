@@ -2494,26 +2494,7 @@ const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) 
     const activities = [];
     
     portfolioDeals.forEach(deal => {
-      // Add milestones as activities
-      if (deal.milestones) {
-        deal.milestones.forEach(m => {
-          activities.push({
-            id: `${deal.id}-${m.id}`,
-            companyId: deal.id,
-            companyName: deal.companyName,
-            type: m.type,
-            title: m.title,
-            description: m.description,
-            date: m.date,
-            source: m.source || getSourceForType(m.type),
-            sourceUrl: m.sourceUrl || '#',
-            verified: m.verified !== false,
-            sentiment: getSentimentForType(m.type, m.title)
-          });
-        });
-      }
-
-      // Add fetched real signals
+      // Only add fetched live signals - no hardcoded milestones
       const signals = fetchedSignals[deal.id] || [];
       signals.forEach((s, i) => {
         activities.push({
@@ -2534,25 +2515,6 @@ const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) 
     });
     
     return activities.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  };
-  
-  const getSourceForType = (type) => {
-    const sources = {
-      fundraising: 'Crunchbase',
-      hiring: 'LinkedIn',
-      growth: 'Company Update',
-      product: 'Product Hunt',
-      partnership: 'Press Release',
-      press: 'TechCrunch'
-    };
-    return sources[type] || 'News';
-  };
-  
-  const getSentimentForType = (type, title) => {
-    const lower = title.toLowerCase();
-    if (lower.includes('layoff') || lower.includes('shut down') || lower.includes('failed')) return 'negative';
-    if (lower.includes('raised') || lower.includes('grew') || lower.includes('hired') || lower.includes('launch') || lower.includes('partnership')) return 'positive';
-    return 'neutral';
   };
   
   const getTypeIcon = (type) => {
