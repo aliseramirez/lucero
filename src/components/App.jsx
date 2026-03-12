@@ -2471,7 +2471,7 @@ const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) 
     try {
       const results = [];
       for (let i = 0; i < portfolioDeals.length; i++) {
-        if (i > 0) await new Promise(r => setTimeout(r, 2000)); // 2s between requests
+        if (i > 0) await new Promise(r => setTimeout(r, 4000)); // 4s between requests
         const deal = portfolioDeals[i];
         const signals = await fetchSignalsForCompany(deal);
         results.push({ dealId: deal.id, signals });
