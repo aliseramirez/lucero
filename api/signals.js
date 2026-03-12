@@ -36,7 +36,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 500,
+        max_tokens: 800,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
         system: `Return ONLY a JSON array of 2-3 recent news signals about the company. No preamble, no markdown. Each object: {"title":"","description":"","type":"fundraising|hiring|product|partnership|press|growth","source":"","sourceUrl":"","date":"","sentiment":"positive|neutral|negative"}. If nothing found, return [].`,
         messages: [{
@@ -64,11 +64,18 @@ export default async function handler(req, res) {
 
     let signals = [];
     try {
-      signals = JSON.parse(raw);
-      if (!Array.isArray(signals)) signals = [];
+      // First try direct parse
+      const parsed = JSON.parse(raw);
+      signals = Array.isArray(parsed) ? parsed : [];
     } catch {
-      console.error('Failed to parse signals JSON:', raw);
-      signals = [];
+      // If truncated, extract complete objects manually
+      try {
+        const matches = raw.match(/\{[^{}]*"title"[^{}]*"sentiment"[^{}]*\}/gs) || [];
+        signals = matches.map(m => { try { return JSON.parse(m); } catch { return null; } }).filter(Boolean);
+      } catch {
+        console.error('Failed to parse signals JSON:', raw.slice(0, 200));
+        signals = [];
+      }
     }
 
     return res.status(200).json({ signals });
