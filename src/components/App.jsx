@@ -1,791 +1,5 @@
-import React, { useState, useEffect, createContext, useContext, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
 
-// ============================================================================
-// CONFIGURATION
-// ============================================================================
-
-const CONFIG = {
-  // OAuth providers - replace with your actual client IDs in production
-  oauth: {
-    google: {
-      clientId: 'demo-google-client-id',
-      redirectUri: `${window.location.origin}/auth/callback/google`,
-      scope: 'openid email profile'
-    },
-    angellist: {
-      clientId: 'demo-angellist-client-id',
-      redirectUri: `${window.location.origin}/auth/callback/angellist`,
-      scope: 'email'
-    },
-    carta: {
-      clientId: 'demo-carta-client-id',
-      redirectUri: `${window.location.origin}/auth/callback/carta`,
-      scope: 'read:user read:portfolio'
-    }
-  },
-  api: {
-    baseUrl: '/api',
-    timeout: 30000
-  },
-  telemetry: {
-    enabled: false, // Disabled for demo
-    sampleRate: 1.0,
-    endpoint: '/api/telemetry'
-  }
-};
-
-// ============================================================================
-// TELEMETRY & OBSERVABILITY
-// ============================================================================
-
-const TelemetryContext = createContext(null);
-
-class TelemetryService {
-  constructor() {
-    this.buffer = [];
-    this.flushInterval = 10000; // 10 seconds
-    this.maxBufferSize = 50;
-    this.sessionId = this.generateSessionId();
-    this.userId = null;
-    
-    // Start flush interval
-    if (CONFIG.telemetry.enabled) {
-      setInterval(() => this.flush(), this.flushInterval);
-      window.addEventListener('beforeunload', () => this.flush());
-      window.addEventListener('error', (e) => this.trackError(e.error, { source: 'window' }));
-      window.addEventListener('unhandledrejection', (e) => this.trackError(e.reason, { source: 'promise' }));
-    }
-  }
-  
-  generateSessionId() {
-    return `sess_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  }
-  
-  setUserId(userId) {
-    this.userId = userId;
-  }
-  
-  track(eventName, properties = {}) {
-    if (!CONFIG.telemetry.enabled && Math.random() > CONFIG.telemetry.sampleRate) return;
-    
-    const event = {
-      event: eventName,
-      timestamp: new Date().toISOString(),
-      sessionId: this.sessionId,
-      userId: this.userId,
-      properties: {
-        ...properties,
-        url: window.location.pathname,
-        userAgent: navigator.userAgent,
-        screenSize: `${window.innerWidth}x${window.innerHeight}`
-      }
-    };
-    
-    this.buffer.push(event);
-    
-    if (this.buffer.length >= this.maxBufferSize) {
-      this.flush();
-    }
-    
-    // Also log to console in development
-    console.log(`[Telemetry] ${eventName}`, properties);
-  }
-  
-  trackError(error, context = {}) {
-    const errorData = {
-      message: error?.message || String(error),
-      stack: error?.stack,
-      name: error?.name,
-      ...context
-    };
-    
-    this.track('error', errorData);
-    
-    // Always log errors to console
-    console.error('[Telemetry Error]', errorData);
-  }
-  
-  trackPageView(pageName) {
-    this.track('page_view', { page: pageName });
-  }
-  
-  trackUserAction(action, details = {}) {
-    this.track('user_action', { action, ...details });
-  }
-  
-  trackApiCall(method, endpoint, duration, status, error = null) {
-    this.track('api_call', {
-      method,
-      endpoint,
-      duration,
-      status,
-      error: error?.message
-    });
-  }
-  
-  async flush() {
-    if (this.buffer.length === 0) return;
-    
-    const events = [...this.buffer];
-    this.buffer = [];
-    
-    try {
-      // In production, send to telemetry endpoint
-      if (CONFIG.telemetry.enabled) {
-        await fetch(CONFIG.telemetry.endpoint, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ events }),
-          keepalive: true
-        });
-      }
-    } catch (e) {
-      // Re-add failed events to buffer (with limit)
-      this.buffer = [...events.slice(-25), ...this.buffer].slice(0, this.maxBufferSize);
-      console.warn('[Telemetry] Failed to flush events', e);
-    }
-  }
-}
-
-const telemetry = new TelemetryService();
-
-// ============================================================================
-// BACKEND API SERVICE
-// ============================================================================
-
-class ApiService {
-  constructor(telemetry) {
-    this.telemetry = telemetry;
-    this.authToken = null;
-  }
-  
-  setAuthToken(token) {
-    this.authToken = token;
-  }
-  
-  async request(method, endpoint, data = null, options = {}) {
-    const startTime = Date.now();
-    const url = `${CONFIG.api.baseUrl}${endpoint}`;
-    
-    const headers = {
-      'Content-Type': 'application/json',
-      ...(this.authToken && { 'Authorization': `Bearer ${this.authToken}` }),
-      ...options.headers
-    };
-    
-    try {
-      const response = await fetch(url, {
-        method,
-        headers,
-        body: data ? JSON.stringify(data) : null,
-        signal: AbortSignal.timeout(CONFIG.api.timeout)
-      });
-      
-      const duration = Date.now() - startTime;
-      this.telemetry.trackApiCall(method, endpoint, duration, response.status);
-      
-      if (!response.ok) {
-        const error = await response.json().catch(() => ({ message: 'Request failed' }));
-        throw new ApiError(error.message || 'Request failed', response.status, error);
-      }
-      
-      return await response.json();
-    } catch (error) {
-      const duration = Date.now() - startTime;
-      this.telemetry.trackApiCall(method, endpoint, duration, error.status || 0, error);
-      throw error;
-    }
-  }
-  
-  // Auth endpoints
-  async login(provider, code) {
-    return this.request('POST', '/auth/login', { provider, code });
-  }
-  
-  async logout() {
-    return this.request('POST', '/auth/logout');
-  }
-  
-  async getUser() {
-    return this.request('GET', '/auth/user');
-  }
-  
-  async refreshToken() {
-    return this.request('POST', '/auth/refresh');
-  }
-  
-  // User data endpoints (isolated per user)
-  async getDeals() {
-    return this.request('GET', '/deals');
-  }
-  
-  async saveDeal(deal) {
-    return this.request('POST', '/deals', deal);
-  }
-  
-  async updateDeal(dealId, updates) {
-    return this.request('PATCH', `/deals/${dealId}`, updates);
-  }
-  
-  async deleteDeal(dealId) {
-    return this.request('DELETE', `/deals/${dealId}`);
-  }
-  
-  async syncDeals(deals) {
-    return this.request('POST', '/deals/sync', { deals });
-  }
-  
-  async getSettings() {
-    return this.request('GET', '/settings');
-  }
-  
-  async saveSettings(settings) {
-    return this.request('PUT', '/settings', settings);
-  }
-}
-
-class ApiError extends Error {
-  constructor(message, status, data) {
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-    this.data = data;
-  }
-}
-
-const api = new ApiService(telemetry);
-
-// ============================================================================
-// AUTHENTICATION CONTEXT
-// ============================================================================
-
-const AuthContext = createContext(null);
-
-const useAuth = () => {
-  const context = useContext(AuthContext);
-  // Return safe defaults if not in provider
-  if (!context) {
-    return {
-      user: null,
-      isLoading: false,
-      error: null,
-      isAuthenticated: false,
-      loginWithProvider: () => {},
-      handleOAuthCallback: () => {},
-      logout: () => {}
-    };
-  }
-  return context;
-};
-
-const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [isLoading, setIsLoading] = useState(false); // Start as false for immediate render
-  const [error, setError] = useState(null);
-  const [authChecked, setAuthChecked] = useState(false);
-  
-  // Check for existing session on mount
-  useEffect(() => {
-    if (authChecked) return;
-    
-    const checkAuth = async () => {
-      try {
-        const token = localStorage.getItem('authToken');
-        if (token) {
-          api.setAuthToken(token);
-          const storedUser = localStorage.getItem('user');
-          if (storedUser) {
-            const userData = JSON.parse(storedUser);
-            setUser(userData);
-            telemetry.setUserId(userData.id);
-            telemetry.track('session_restored', { provider: userData.provider });
-          }
-        }
-      } catch (e) {
-        console.error('Failed to restore session', e);
-        localStorage.removeItem('authToken');
-        localStorage.removeItem('user');
-      }
-      setAuthChecked(true);
-    };
-    
-    checkAuth();
-  }, [authChecked]);
-  
-  const loginWithProvider = useCallback(async (provider) => {
-    setError(null);
-    telemetry.track('login_started', { provider });
-    
-    // Build OAuth URL based on provider
-    let authUrl;
-    const state = Math.random().toString(36).substr(2, 16);
-    sessionStorage.setItem('oauth_state', state);
-    
-    switch (provider) {
-      case 'google':
-        authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-          `client_id=${CONFIG.oauth.google.clientId}&` +
-          `redirect_uri=${encodeURIComponent(CONFIG.oauth.google.redirectUri)}&` +
-          `response_type=code&` +
-          `scope=${encodeURIComponent(CONFIG.oauth.google.scope)}&` +
-          `state=${state}&` +
-          `prompt=consent`;
-        break;
-      case 'angellist':
-        authUrl = `https://angel.co/api/oauth/authorize?` +
-          `client_id=${CONFIG.oauth.angellist.clientId}&` +
-          `redirect_uri=${encodeURIComponent(CONFIG.oauth.angellist.redirectUri)}&` +
-          `response_type=code&` +
-          `scope=${encodeURIComponent(CONFIG.oauth.angellist.scope)}&` +
-          `state=${state}`;
-        break;
-      case 'carta':
-        authUrl = `https://login.carta.com/oauth/authorize?` +
-          `client_id=${CONFIG.oauth.carta.clientId}&` +
-          `redirect_uri=${encodeURIComponent(CONFIG.oauth.carta.redirectUri)}&` +
-          `response_type=code&` +
-          `scope=${encodeURIComponent(CONFIG.oauth.carta.scope)}&` +
-          `state=${state}`;
-        break;
-      default:
-        throw new Error(`Unknown provider: ${provider}`);
-    }
-    
-    // For demo purposes, simulate OAuth flow
-    // In production, redirect to authUrl
-    // Simulate successful OAuth
-    await simulateOAuthLogin(provider);
-  }, []);
-  
-  const simulateOAuthLogin = async (provider) => {
-    setIsLoading(true); // Show loading state
-    // Simulate network delay
-    await new Promise(r => setTimeout(r, 1500));
-    
-    // Create mock user based on provider
-    const mockUser = {
-      id: `user_${Math.random().toString(36).substr(2, 9)}`,
-      email: `demo@${provider}.example.com`,
-      name: 'Demo User',
-      avatar: `https://ui-avatars.com/api/?name=Demo+User&background=5B6DC4&color=fff`,
-      provider,
-      createdAt: new Date().toISOString()
-    };
-    
-    // Mock token
-    const mockToken = `mock_token_${Date.now()}`;
-    
-    // Save to localStorage
-    localStorage.setItem('authToken', mockToken);
-    localStorage.setItem('user', JSON.stringify(mockUser));
-    
-    api.setAuthToken(mockToken);
-    setUser(mockUser);
-    setIsLoading(false);
-    telemetry.setUserId(mockUser.id);
-    telemetry.track('login_success', { provider });
-  };
-  
-  const handleOAuthCallback = useCallback(async (provider, code, state) => {
-    setIsLoading(true);
-    setError(null);
-    
-    try {
-      // Verify state
-      const savedState = sessionStorage.getItem('oauth_state');
-      if (state !== savedState) {
-        throw new Error('Invalid OAuth state');
-      }
-      sessionStorage.removeItem('oauth_state');
-      
-      // Exchange code for token
-      const { user: userData, token } = await api.login(provider, code);
-      
-      localStorage.setItem('authToken', token);
-      localStorage.setItem('user', JSON.stringify(userData));
-      
-      api.setAuthToken(token);
-      setUser(userData);
-      telemetry.setUserId(userData.id);
-      telemetry.track('login_success', { provider });
-    } catch (e) {
-      setError(e.message);
-      telemetry.trackError(e, { context: 'oauth_callback', provider });
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-  
-  const logout = useCallback(async () => {
-    telemetry.track('logout');
-    
-    try {
-      await api.logout();
-    } catch (e) {
-      // Ignore logout errors
-    }
-    
-    localStorage.removeItem('authToken');
-    localStorage.removeItem('user');
-    api.setAuthToken(null);
-    setUser(null);
-    telemetry.setUserId(null);
-  }, []);
-  
-  const value = {
-    user,
-    isLoading,
-    error,
-    isAuthenticated: !!user,
-    loginWithProvider,
-    handleOAuthCallback,
-    logout,
-    telemetry
-  };
-  
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
-};
-
-// ============================================================================
-// DATA PERSISTENCE SERVICE (User-Isolated)
-// ============================================================================
-
-const useUserData = () => {
-  const { user, isAuthenticated } = useAuth();
-  const [isLoading, setIsLoading] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [lastSync, setLastSync] = useState(null);
-  
-  // Get storage key for current user
-  const getStorageKey = useCallback((key) => {
-    if (!user?.id) return null;
-    return `convex_${user.id}_${key}`;
-  }, [user?.id]);
-  
-  // Load data from localStorage (user-isolated)
-  const loadData = useCallback((key, defaultValue = null) => {
-    const storageKey = getStorageKey(key);
-    if (!storageKey) return defaultValue;
-    
-    try {
-      const stored = localStorage.getItem(storageKey);
-      return stored ? JSON.parse(stored) : defaultValue;
-    } catch (e) {
-      telemetry.trackError(e, { context: 'load_data', key });
-      return defaultValue;
-    }
-  }, [getStorageKey]);
-  
-  // Save data to localStorage (user-isolated)
-  const saveData = useCallback((key, data) => {
-    const storageKey = getStorageKey(key);
-    if (!storageKey) return false;
-    
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(data));
-      telemetry.track('data_saved', { key, size: JSON.stringify(data).length });
-      return true;
-    } catch (e) {
-      telemetry.trackError(e, { context: 'save_data', key });
-      return false;
-    }
-  }, [getStorageKey]);
-  
-  // Sync with backend (when available)
-  const syncWithBackend = useCallback(async (deals) => {
-    if (!isAuthenticated) return;
-    
-    setIsSyncing(true);
-    try {
-      // In production, this would sync with the backend
-      // await api.syncDeals(deals);
-      setLastSync(new Date().toISOString());
-      telemetry.track('sync_success', { dealCount: deals.length });
-    } catch (e) {
-      telemetry.trackError(e, { context: 'sync' });
-    } finally {
-      setIsSyncing(false);
-    }
-  }, [isAuthenticated]);
-  
-  return {
-    loadData,
-    saveData,
-    syncWithBackend,
-    isLoading,
-    isSyncing,
-    lastSync,
-    isAuthenticated
-  };
-};
-
-// ============================================================================
-// LOGIN PAGE COMPONENT
-// ============================================================================
-
-const LoginPage = () => {
-  const { loginWithProvider, isLoading, error } = useAuth();
-  const [selectedProvider, setSelectedProvider] = useState(null);
-  
-  const providers = [
-    {
-      id: 'google',
-      name: 'Google',
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24">
-          <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-        </svg>
-      ),
-      bgColor: 'bg-white hover:bg-gray-50',
-      textColor: 'text-gray-700',
-      borderColor: 'border-gray-300'
-    },
-    {
-      id: 'angellist',
-      name: 'AngelList',
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1.41 16.09V16c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5V9c0-.55.45-1 1-1h.82c.55 0 1 .45 1 1v2h1.18c.55 0 1 .45 1 1v.82c0 .55-.45 1-1 1h-1.18v2.27c1.64-.42 2.86-1.9 2.86-3.68 0-2.07-1.68-3.75-3.75-3.75s-3.75 1.68-3.75 3.75c0 1.78 1.22 3.26 2.86 3.68z"/>
-        </svg>
-      ),
-      bgColor: 'bg-black hover:bg-gray-900',
-      textColor: 'text-white',
-      borderColor: 'border-black'
-    },
-    {
-      id: 'carta',
-      name: 'Carta',
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-        </svg>
-      ),
-      bgColor: 'bg-[#0066FF] hover:bg-[#0052CC]',
-      textColor: 'text-white',
-      borderColor: 'border-[#0066FF]'
-    }
-  ];
-  
-  const handleLogin = async (providerId) => {
-    setSelectedProvider(providerId);
-    try {
-      await loginWithProvider(providerId);
-    } catch (e) {
-      setSelectedProvider(null);
-    }
-  };
-  
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-stone-50 to-stone-100 dark:from-stone-900 dark:to-stone-800 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        {/* Logo and Title */}
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-[#5B6DC4] rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-            </svg>
-          </div>
-          <h1 className="text-2xl font-bold text-stone-900 dark:text-white mb-2">Convex</h1>
-          <p className="text-stone-500 dark:text-stone-400">Track your angel investments with clarity</p>
-        </div>
-        
-        {/* Login Card */}
-        <div className="bg-white dark:bg-stone-800 rounded-2xl shadow-xl p-8 border border-stone-200 dark:border-stone-700">
-          <h2 className="text-lg font-semibold text-stone-900 dark:text-white mb-6 text-center">
-            Sign in to continue
-          </h2>
-          
-          {error && (
-            <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
-              <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-            </div>
-          )}
-          
-          <div className="space-y-3">
-            {providers.map((provider) => (
-              <button
-                key={provider.id}
-                onClick={() => handleLogin(provider.id)}
-                disabled={isLoading}
-                className={`w-full flex items-center justify-center gap-3 px-4 py-3 rounded-xl border ${provider.borderColor} ${provider.bgColor} ${provider.textColor} font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed`}
-              >
-                {selectedProvider === provider.id && isLoading ? (
-                  <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
-                  </svg>
-                ) : (
-                  provider.icon
-                )}
-                <span>Continue with {provider.name}</span>
-              </button>
-            ))}
-          </div>
-          
-          <div className="mt-6 pt-6 border-t border-stone-200 dark:border-stone-700">
-            <p className="text-xs text-stone-400 dark:text-stone-500 text-center">
-              By signing in, you agree to our{' '}
-              <a href="#" className="text-[#5B6DC4] hover:underline">Terms of Service</a>
-              {' '}and{' '}
-              <a href="#" className="text-[#5B6DC4] hover:underline">Privacy Policy</a>
-            </p>
-          </div>
-        </div>
-        
-        {/* Features */}
-        <div className="mt-8 grid grid-cols-3 gap-4 text-center">
-          <div>
-            <div className="w-10 h-10 bg-emerald-100 dark:bg-emerald-900/30 rounded-xl flex items-center justify-center mx-auto mb-2">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2">
-                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-              </svg>
-            </div>
-            <p className="text-xs text-stone-500 dark:text-stone-400">Secure & Private</p>
-          </div>
-          <div>
-            <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-xl flex items-center justify-center mx-auto mb-2">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3B82F6" strokeWidth="2">
-                <rect x="2" y="3" width="20" height="14" rx="2"/>
-                <path d="M8 21h8M12 17v4"/>
-              </svg>
-            </div>
-            <p className="text-xs text-stone-500 dark:text-stone-400">Sync Anywhere</p>
-          </div>
-          <div>
-            <div className="w-10 h-10 bg-violet-100 dark:bg-violet-900/30 rounded-xl flex items-center justify-center mx-auto mb-2">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" strokeWidth="2">
-                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-              </svg>
-            </div>
-            <p className="text-xs text-stone-500 dark:text-stone-400">Portfolio Insights</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// ============================================================================
-// USER MENU COMPONENT
-// ============================================================================
-
-const UserMenu = () => {
-  const { user, logout } = useAuth();
-  const [isOpen, setIsOpen] = useState(false);
-  const menuRef = useRef(null);
-  
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (menuRef.current && !menuRef.current.contains(e.target)) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-  
-  if (!user) return null;
-  
-  return (
-    <div className="relative" ref={menuRef}>
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 p-1.5 rounded-full hover:bg-stone-100 dark:hover:bg-stone-700 transition-colors"
-      >
-        <img
-          src={user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name || user.email)}&background=5B6DC4&color=fff`}
-          alt={user.name || user.email}
-          className="w-8 h-8 rounded-full"
-        />
-      </button>
-      
-      {isOpen && (
-        <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-stone-800 rounded-xl shadow-xl border border-stone-200 dark:border-stone-700 py-2 z-50">
-          <div className="px-4 py-3 border-b border-stone-200 dark:border-stone-700">
-            <p className="font-medium text-stone-900 dark:text-white truncate">{user.name || 'User'}</p>
-            <p className="text-sm text-stone-500 dark:text-stone-400 truncate">{user.email}</p>
-            <div className="flex items-center gap-1 mt-1">
-              <span className="text-xs text-stone-400 capitalize">via {user.provider}</span>
-            </div>
-          </div>
-          
-          <div className="py-1">
-            <button
-              onClick={() => {
-                setIsOpen(false);
-                // Navigate to settings
-              }}
-              className="w-full px-4 py-2 text-left text-sm text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-700 flex items-center gap-2"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="3"/>
-                <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
-              </svg>
-              Settings
-            </button>
-            
-            <button
-              onClick={() => {
-                setIsOpen(false);
-                logout();
-              }}
-              className="w-full px-4 py-2 text-left text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/>
-                <polyline points="16 17 21 12 16 7"/>
-                <line x1="21" y1="12" x2="9" y2="12"/>
-              </svg>
-              Sign out
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-// ============================================================================
-// SYNC STATUS INDICATOR
-// ============================================================================
-
-const SyncStatus = ({ isSyncing, lastSync }) => {
-  if (!lastSync && !isSyncing) return null;
-  
-  return (
-    <div className="flex items-center gap-1.5 text-xs text-stone-400">
-      {isSyncing ? (
-        <>
-          <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"/>
-          </svg>
-          <span>Syncing...</span>
-        </>
-      ) : (
-        <>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <polyline points="20 6 9 17 4 12"/>
-          </svg>
-          <span>Saved</span>
-        </>
-      )}
-    </div>
-  );
-};
-
-// ============================================================================
-// ORIGINAL APP CODE CONTINUES BELOW
-// ============================================================================
-
-// Theme Context
 const ThemeContext = createContext({ theme: 'light', setTheme: () => {} });
 const useTheme = () => useContext(ThemeContext);
 
@@ -805,6 +19,577 @@ const formatRelativeTime = (d) => {
   return `${Math.floor(days / 365)}y ago`;
 };
 
+// Returns the effective cost basis for any investment object.
+// Falls back to amount if costBasis is not explicitly set — works for all existing and future deals.
+const getEffectiveCostBasis = (inv = {}) => {
+  if (inv.costBasis && inv.costBasis > 0) return inv.costBasis;
+  return inv.amount || 0;
+};
+
+// Returns true only when cost basis meaningfully differs from amount (>$1 to avoid float noise).
+// When false, the UI stays clean — no extra row shown.
+const hasSeparateCostBasis = (inv = {}) => {
+  if (!inv.costBasis || inv.costBasis <= 0) return false;
+  return Math.abs(inv.costBasis - (inv.amount || 0)) > 1;
+};
+
+// ── VALUATION ENGINE ─────────────────────────────────────────────────────────
+// Climate/deep tech maturity is defined by hardware readiness, not ARR.
+// Stages map to TRL (Technology Readiness Level) bands, not revenue multiples.
+const STAGE_MATURITY = {
+  'pre-seed': 'lab',       // TRL 1–3: bench science, proof-of-concept
+  'seed':     'pilot',     // TRL 4–6: pilot plant, field demo, first offtake
+  'series-a': 'scale',     // TRL 7–8: commercial scale, first revenue
+  'series-b': 'scale',
+  'series-c': 'deploy',    // TRL 9: full deployment, project finance, offtake secured
+  'series-e': 'deploy',
+  'growth':   'deploy',
+  'lp-fund':  'fund',
+};
+
+// Climate/deep tech valuation methods by TRL band:
+// - lab/pilot: mark-at-cost — no revenue comp exists, DCF meaningless pre-demonstration
+// - scale: last-round — priced rounds exist but comps are thin; use sparingly
+// - deploy: last-round with project finance haircut if applicable
+// - fund: LP NAV
+const getValuationMethod = (deal) => {
+  const inv = deal.investment || {};
+  if (inv.valuationMethod) return inv.valuationMethod;
+  const maturity = STAGE_MATURITY[deal.stage] || 'lab';
+  if (maturity === 'lab' || maturity === 'pilot') return 'mark-at-cost';
+  if (maturity === 'fund') return 'nav-lp';
+  return 'last-round';
+};
+
+const calcImpliedValue = (deal) => {
+  const inv = deal.investment || {};
+  const method = getValuationMethod(deal);
+  const costBasis = getEffectiveCostBasis(inv);
+  if (method === 'mark-at-cost') return costBasis;
+  if (inv.impliedValue && inv.impliedValue > 0) return inv.impliedValue;
+  if (inv.ownershipPercent && inv.impliedValuation) {
+    return Math.round((inv.ownershipPercent / 100) * inv.impliedValuation);
+  }
+  if (deal.terms?.cap && inv.impliedValuation) {
+    return Math.round(costBasis * Math.min(inv.impliedValuation / deal.terms.cap, 3));
+  }
+  if (method === 'nav-lp') {
+    const nav = deal.fundData?.currentNAV || 0;
+    const lpPct = deal.fundData?.lpOwnershipPercent || 0;
+    return Math.round(nav * (lpPct / 100));
+  }
+  return costBasis;
+};
+
+const calcMOIC = (deal) => {
+  const inv = deal.investment || {};
+  const costBasis = getEffectiveCostBasis(inv);
+  if (!costBasis) return null;
+  return calcImpliedValue(deal) / costBasis;
+};
+
+const getValuationLabel = (method) => ({
+  'mark-at-cost': 'Mark at cost', 'last-round': 'Last round',
+  'safe-cap': 'SAFE cap', 'nav-lp': 'Fund NAV', 'comparables': 'Comparables',
+}[method] || method);
+
+const getMarkStaleness = (deal) => {
+  const date = deal.investment?.lastValuationDate;
+  if (!date) return 'unknown';
+  const days = daysAgo(date);
+  if (days < 90) return 'fresh'; if (days < 180) return 'ok';
+  if (days < 365) return 'stale'; return 'very-stale';
+};
+
+// ── CLIMATE/DEEP TECH HEALTH SCORING ENGINE ───────────────────────────────────
+//
+// SaaS health = MoM ARR, churn, CAC/LTV. That framework is useless here.
+// Climate/deep tech health = proof that physics works at scale, capital is
+// available to get there, policy isn't a headwind, and the team can execute
+// on a 10–15 year commercialization timeline.
+//
+// Signal taxonomy by TRL band:
+//
+// LAB (pre-seed/seed, TRL 1–3):
+//   Positive: breakthrough publication / patent, top-tier lab validation,
+//             government R&D grant (DOE ARPA-E, DARPA, SBIR), strategic hire
+//             from national lab or industry, pilot MOU signed
+//   Negative: PI departure, key IP dispute, replication failure reported,
+//             fundamental physics challenge surfaced publicly
+//   Neutral/expected: slow cadence is NORMAL — science takes time
+//   Valuation: mark at cost; MOIC is irrelevant pre-demonstration
+//
+// PILOT (seed/A, TRL 4–6):
+//   Positive: pilot plant operational, performance at or above spec,
+//             first LOI or offtake letter, DOE loan guarantee application,
+//             strategic partner / corporate co-investor, IRA/CHIPS incentive qualified,
+//             cost curve improvement demonstrated
+//   Negative: pilot underperformance vs. published spec, cost overrun >2x,
+//             key customer LOI not converting, regulatory obstacle,
+//             competing technology reaches same milestone faster
+//   Watch: pilot silence >90d after announced, founder team turnover,
+//          fundraise taking >12mo
+//
+// SCALE (Series A/B, TRL 7–8):
+//   Positive: commercial-scale unit operating, first paying customer,
+//             project finance commitment, utility or industrial offtake signed,
+//             federal funding (IRA 45Q/48C/45V credits locked), Series close
+//   Negative: cost-per-unit not tracking to target, capacity factor underperformance,
+//             supply chain constraint (critical minerals), financing round struggling,
+//             key utility partner pulling back
+//   MOIC matters here: last-round mark with staleness penalty
+//
+// DEPLOY (Series C+, TRL 9):
+//   Positive: GW/GWh or kt deployed, project pipeline >3x current capacity,
+//             investment grade credit rating, replication in second geography,
+//             M&A interest / strategic acquirer
+//   Negative: project cancellation, permitting delays >18mo, policy reversal
+//             (ITC/PTC removal), commodity input price shock
+//   MOIC + staleness both matter
+//
+// FUND (LP position):
+//   Health = DPI progress, portfolio construction quality, GP access to next fund,
+//            vintage/sector alignment with current deal flow
+//
+// POLICY RISK is a cross-cutting dimension unique to climate tech:
+//   Any signal containing keywords about IRA rollback, EPA rule reversal,
+//   tariff on critical minerals, or utility rate case loss gets a flag
+
+// Signal keyword classifiers for climate/deep tech context
+const CLIMATE_SIGNAL_CLASSIFIERS = {
+  hardware_milestone: ['pilot', 'commissioning', 'operational', 'plant', 'trl', 'demonstration', 'kilowatt', 'megawatt', 'gigawatt', 'mwh', 'gwh', 'tonne', 'metric ton', 'capacity factor', 'efficiency record'],
+  policy_positive: ['ira', 'inflation reduction act', 'doe loan', 'arpa-e', 'doe grant', 'sbir', '45q', '45v', '48c', 'investment tax credit', 'production tax credit', 'doe conditional commitment', 'doe guarantee'],
+  policy_risk: ['rollback', 'repeal', 'tariff', 'trade war', 'ira repeal', 'tax credit elimination', 'epa reversal', 'permit denied', 'environmental review', 'nepa delay', 'utility rate case', 'stranded asset'],
+  offtake: ['offtake', 'power purchase agreement', 'ppa', 'supply agreement', 'loi', 'letter of intent', 'mou', 'memorandum of understanding', 'term sheet', 'anchor customer', 'anchor tenant'],
+  project_finance: ['project finance', 'debt financing', 'green bond', 'tax equity', 'doe loan guarantee', 'investment grade', 'credit rating', 'financial close', 'construction financing'],
+  competing_tech: ['competing', 'competitor', 'rival technology', 'alternative approach', 'cost parity', 'cheaper than', 'beats on cost'],
+  team_risk: ['ceo departure', 'cto left', 'co-founder left', 'founder resigned', 'executive turnover', 'layoffs', 'rif', 'headcount reduction'],
+  funding_signal: ['series a', 'series b', 'series c', 'seed round', 'raised', 'closed funding', 'oversubscribed', 'strategic investment', 'corporate venture'],
+};
+
+// ── EXTRACT HEALTH SIGNALS FROM INVESTOR NOTES / FOUNDER UPDATES ──────────────
+// Parses free-text update notes (founder emails pasted in, investor observations)
+// and extracts structured signals that feed into calcDealHealth.
+// This bridges the gap when external agent signals are sparse for early-stage cos.
+
+const UPDATE_SIGNAL_PATTERNS = {
+  // Positive signals
+  runway_good:     { pattern: /runway.{0,30}(\d+)\s*(month|mo|yr|year)/i, sentiment: 'positive', type: 'funding_signal', label: 'Runway reported from update' },
+  raised:          { pattern: /raised|closed.{0,15}round|new.{0,10}funding|investment.{0,10}closed/i, sentiment: 'positive', type: 'funding_signal', label: 'Funding event mentioned' },
+  customer_win:    { pattern: /customer|client|contract|signed|offtake|ppa|loi|mou/i, sentiment: 'positive', type: 'offtake', label: 'Customer or offtake signal' },
+  milestone_hit:   { pattern: /launched|shipped|deployed|operational|commission|on.track|ahead.of/i, sentiment: 'positive', type: 'hardware_milestone', label: 'Milestone progress reported' },
+  grant_award:     { pattern: /grant|award|doe|arpa|sbir|nsf|funded.by/i, sentiment: 'positive', type: 'policy_positive', label: 'Grant or public funding mentioned' },
+  hiring:          { pattern: /hired|new.{0,10}(cto|cfo|vp|head|chief)|joined.the.team/i, sentiment: 'positive', type: 'funding_signal', label: 'Key hire mentioned' },
+  // Negative / warning signals
+  runway_low:      { pattern: /runway.{0,30}(3|4|5|6).{0,10}month|burn.{0,15}high|need.{0,10}bridge|running.{0,10}low/i, sentiment: 'negative', type: 'team_risk', label: 'Low runway signal in update' },
+  pivot:           { pattern: /pivot|change.{0,10}direction|shift.{0,10}focus|new.{0,10}model/i, sentiment: 'negative', type: 'risk', label: 'Pivot or direction change mentioned' },
+  delay:           { pattern: /delay|behind.{0,10}schedule|slower.than|push.{0,10}back|not.{0,10}on.track/i, sentiment: 'negative', type: 'risk', label: 'Delay or setback mentioned' },
+  team_issue:      { pattern: /left.{0,10}(company|team)|resigned|departed|co-founder.{0,10}(left|out)/i, sentiment: 'negative', type: 'team_risk', label: 'Team departure mentioned' },
+  regulatory:      { pattern: /permit|denied|rejected|regulatory.{0,15}issue|epa|blocked/i, sentiment: 'negative', type: 'policy_risk', label: 'Regulatory issue mentioned' },
+  // Neutral but important
+  fundraising:     { pattern: /raising|fundrais|looking.for.{0,15}(round|invest)|in.{0,10}market/i, sentiment: 'positive', type: 'funding_signal', label: 'Active fundraise mentioned' },
+  cost_issue:      { pattern: /cost.{0,20}(over|above|higher)|over.budget|more.expensive.than/i, sentiment: 'negative', type: 'risk', label: 'Cost overrun signal' },
+};
+
+const parseUpdateForSignals = (text, date) => {
+  if (!text || text.trim().length < 20) return [];
+  const signals = [];
+  const seen = new Set();
+  for (const [key, { pattern, sentiment, type, label }] of Object.entries(UPDATE_SIGNAL_PATTERNS)) {
+    if (pattern.test(text) && !seen.has(type + sentiment)) {
+      seen.add(type + sentiment);
+      signals.push({
+        type,
+        title: label,
+        description: text.slice(0, 120) + (text.length > 120 ? '…' : ''),
+        sentiment,
+        source: 'Investor note',
+        sourceUrl: null,
+        date: date || new Date().toISOString(),
+        urgency: sentiment === 'negative' ? 'high' : 'low',
+        fromUpdate: true,
+      });
+    }
+  }
+  return signals;
+};
+
+// Extract all signals from a deal's update log
+const getUpdateLogSignals = (deal) => {
+  const updates = (deal.milestones || []).filter(m => m.type === 'update' || m.type === 'investor-update');
+  // Only use updates from the last 180 days — older notes are less relevant to current health
+  const recent = updates.filter(m => daysAgo(m.date) < 180);
+  return recent.flatMap(m => parseUpdateForSignals(m.description, m.date));
+};
+
+
+const classifySignal = (signal) => {
+  const text = `${signal.title} ${signal.description}`.toLowerCase();
+  const tags = [];
+  for (const [tag, keywords] of Object.entries(CLIMATE_SIGNAL_CLASSIFIERS)) {
+    if (keywords.some(kw => text.includes(kw))) tags.push(tag);
+  }
+  return tags;
+};
+
+const calcDealHealth = (deal, signals = []) => {
+  const inv = deal.investment || {};
+  const maturity = STAGE_MATURITY[deal.stage] || 'lab';
+  // Merge external signals with signals extracted from the investor's own update log.
+  // Update log signals fill the gap when the agent finds nothing for early-stage companies.
+  const updateLogSignals = getUpdateLogSignals(deal);
+  const allSignals = [...signals, ...updateLogSignals];
+  // Use allSignals from here on — replace references to signals in classifier loop
+  const signalsToClassify = allSignals;
+  const costBasis = getEffectiveCostBasis(inv);
+  const implied = calcImpliedValue(deal);
+  const moic = costBasis > 0 ? implied / costBasis : null;
+  const method = getValuationMethod(deal);
+
+  let score = 50;
+  const factors = [];
+  let shouldCheckIn = false;
+  let checkInReason = null;
+
+  // ── 1. FOUNDER COMMUNICATION ─────────────────────────────────────────────
+  // Climate/deep tech founders are often in the lab or at pilot sites.
+  // Silence is more normal than in SaaS — so thresholds are longer.
+  const lastUpdate = inv.lastUpdateReceived || deal.lastUpdateReceived;
+  const nextExpected = inv.nextUpdateExpected || deal.nextUpdateExpected;
+  const daysSinceUpdate = lastUpdate ? daysAgo(lastUpdate) : 999;
+  const daysUntilNextUpdate = nextExpected ? daysUntil(nextExpected) : null;
+  // Overdue threshold: 30d for pilot/scale (more active), 60d for lab (science time)
+  const overdueThreshold = (maturity === 'lab') ? 60 : 30;
+  const updateOverdue = daysUntilNextUpdate !== null && daysUntilNextUpdate < -overdueThreshold;
+  const longSilence = daysSinceUpdate > (maturity === 'lab' ? 180 : 90);
+
+  if (updateOverdue) {
+    score -= 12; shouldCheckIn = true;
+    checkInReason = `Update ${Math.abs(daysUntilNextUpdate)}d overdue`;
+    factors.push({ label: 'Update overdue', impact: -12, type: 'warning' });
+  } else if (daysSinceUpdate < 45) {
+    score += 8; factors.push({ label: 'Recent founder update', impact: 8, type: 'positive' });
+  }
+  if (longSilence) {
+    score -= 8;
+    factors.push({ label: `${Math.round(daysSinceUpdate/30)}mo communication silence`, impact: -8, type: 'warning' });
+    if (!shouldCheckIn) { shouldCheckIn = true; checkInReason = 'Extended silence'; }
+  }
+
+  // ── 2. CLASSIFY & WEIGHT EXTERNAL SIGNALS ─────────────────────────────────
+  // Not all signals are equal. A DOE loan guarantee is 10x more meaningful
+  // than a press mention. Hardware milestones prove the science works.
+  // Policy risks are existential for IRA-dependent business models.
+  const classifiedSignals = signalsToClassify.map(s => ({ ...s, tags: classifySignal(s) }));
+
+  classifiedSignals.forEach(s => {
+    const isPositive = s.sentiment === 'positive';
+    const isNegative = s.sentiment === 'negative';
+
+    if (s.tags.includes('hardware_milestone')) {
+      const impact = isPositive ? 15 : -18;
+      score += impact;
+      factors.push({ label: isPositive ? 'Hardware milestone confirmed' : 'Hardware milestone setback', impact, type: isPositive ? 'positive' : 'negative' });
+      if (isNegative) { shouldCheckIn = true; checkInReason = checkInReason || 'Hardware setback reported'; }
+    }
+    if (s.tags.includes('policy_positive') && isPositive) {
+      score += 12;
+      factors.push({ label: 'Federal funding / policy tailwind', impact: 12, type: 'positive' });
+    }
+    if (s.tags.includes('policy_risk')) {
+      score -= 15; shouldCheckIn = true;
+      checkInReason = checkInReason || 'Policy risk detected';
+      factors.push({ label: 'Policy / regulatory risk signal', impact: -15, type: 'negative' });
+    }
+    if (s.tags.includes('offtake') && isPositive) {
+      score += 14;
+      factors.push({ label: 'Offtake / customer signal', impact: 14, type: 'positive' });
+    }
+    if (s.tags.includes('project_finance') && isPositive) {
+      score += 12;
+      factors.push({ label: 'Project finance signal', impact: 12, type: 'positive' });
+    }
+    if (s.tags.includes('team_risk')) {
+      score -= 14; shouldCheckIn = true;
+      checkInReason = checkInReason || 'Team risk signal';
+      factors.push({ label: 'Team / leadership risk', impact: -14, type: 'negative' });
+    }
+    if (s.tags.includes('funding_signal') && isPositive) {
+      score += 10;
+      factors.push({ label: 'New funding round signal', impact: 10, type: 'positive' });
+    }
+    if (s.tags.includes('competing_tech') && isNegative) {
+      score -= 8;
+      factors.push({ label: 'Competing technology gaining ground', impact: -8, type: 'warning' });
+    }
+    // Generic sentiment for unclassified signals (lower weight)
+    if (s.tags.length === 0) {
+      const impact = isPositive ? 5 : isNegative ? -7 : 0;
+      if (impact !== 0) {
+        score += impact;
+        factors.push({ label: isPositive ? 'Positive press signal' : 'Negative press signal', impact, type: isPositive ? 'positive' : 'negative' });
+      }
+    }
+  });
+
+  // ── 3. TRL-BAND SPECIFIC LOGIC ────────────────────────────────────────────
+
+  if (maturity === 'lab') {
+    // Lab stage: prove the science. Milestones are publications, grants, patents.
+    // Long timelines are expected — don't penalize for slow progress unless silent.
+    const scienceMilestones = (deal.milestones || []).filter(m =>
+      daysAgo(m.date) < 180 && ['product', 'partnership', 'fundraising'].includes(m.type)
+    ).length;
+    if (scienceMilestones >= 1) { score += 10; factors.push({ label: 'Recent technical milestone', impact: 10, type: 'positive' }); }
+    factors.push({ label: 'Lab stage — marked at cost, TRL 1–3', impact: 0, type: 'info' });
+  }
+
+  if (maturity === 'pilot') {
+    // Pilot stage: the hard part. Most deep tech companies die here.
+    // Key signals: pilot plant status, cost vs. spec, regulatory progress.
+    const pilotMilestones = (deal.milestones || []).filter(m =>
+      daysAgo(m.date) < 180 && m.type !== 'update'
+    ).length;
+    if (pilotMilestones >= 2) { score += 12; factors.push({ label: 'Active pilot cadence', impact: 12, type: 'positive' }); }
+    else if (pilotMilestones === 0 && daysSinceUpdate > 120) {
+      score -= 12; shouldCheckIn = true;
+      checkInReason = checkInReason || 'Pilot progress unclear';
+      factors.push({ label: 'No pilot progress signals in 4mo', impact: -12, type: 'warning' });
+    }
+    factors.push({ label: 'Pilot stage — SAFE/cap mark, TRL 4–6', impact: 0, type: 'info' });
+  }
+
+  if (maturity === 'scale') {
+    // Scale stage: does the unit economics work at commercial scale?
+    // MOIC starts to matter here — there's a market price to compare against.
+    if (moic !== null) {
+      if (moic >= 2.0) { score += 18; factors.push({ label: `${moic.toFixed(1)}x on last-round mark`, impact: 18, type: 'positive' }); }
+      else if (moic >= 1.3) { score += 8; factors.push({ label: `${moic.toFixed(1)}x on last-round mark`, impact: 8, type: 'positive' }); }
+      else if (moic < 0.8) {
+        score -= 18; shouldCheckIn = true;
+        checkInReason = checkInReason || 'Mark below cost basis';
+        factors.push({ label: `${moic.toFixed(1)}x — marked below cost`, impact: -18, type: 'negative' });
+      } else {
+        factors.push({ label: `${moic.toFixed(1)}x on last-round mark`, impact: 0, type: 'info' });
+      }
+    }
+    const staleness = getMarkStaleness(deal);
+    if (staleness === 'stale') { score -= 5; factors.push({ label: 'Valuation mark 6–12mo old', impact: -5, type: 'warning' }); }
+    if (staleness === 'very-stale') { score -= 10; factors.push({ label: 'Valuation mark 12mo+ old', impact: -10, type: 'warning' }); }
+  }
+
+  if (maturity === 'deploy') {
+    // Deploy stage: project pipeline, GW deployed, financing in place.
+    if (moic !== null) {
+      if (moic >= 3.0) { score += 22; factors.push({ label: `${moic.toFixed(1)}x — deployment premium`, impact: 22, type: 'positive' }); }
+      else if (moic >= 1.5) { score += 12; factors.push({ label: `${moic.toFixed(1)}x on last-round mark`, impact: 12, type: 'positive' }); }
+      else if (moic < 1.0) {
+        score -= 20; shouldCheckIn = true;
+        checkInReason = checkInReason || 'Mark below cost basis at deploy stage';
+        factors.push({ label: `${moic.toFixed(1)}x — late-stage mark below cost is serious`, impact: -20, type: 'negative' });
+      } else {
+        factors.push({ label: `${moic.toFixed(1)}x on last-round mark`, impact: 0, type: 'info' });
+      }
+    }
+    const staleness = getMarkStaleness(deal);
+    if (staleness === 'stale') { score -= 8; factors.push({ label: 'Late-stage mark 6–12mo old', impact: -8, type: 'warning' }); }
+    if (staleness === 'very-stale') { score -= 15; shouldCheckIn = true; checkInReason = checkInReason || 'Stale mark at deploy stage'; factors.push({ label: 'Late-stage mark 12mo+ old — refresh needed', impact: -15, type: 'negative' }); }
+  }
+
+  if (maturity === 'fund') {
+    // LP fund: DPI, TVPI, vintage alignment, GP quality signals
+    if (moic !== null) {
+      if (moic >= 1.5) { score += 15; factors.push({ label: `${moic.toFixed(1)}x fund NAV mark`, impact: 15, type: 'positive' }); }
+      else if (moic >= 1.0) { score += 5; factors.push({ label: `${moic.toFixed(1)}x fund NAV mark`, impact: 5, type: 'info' }); }
+    }
+    // LP funds: silence is fine, quarterly reporting is standard
+    factors.push({ label: 'LP fund — quarterly NAV cadence normal', impact: 0, type: 'info' });
+  }
+
+  // ── 4. SELF-REPORTED MONITORING ───────────────────────────────────────────
+  const ms = deal.monitoring || {};
+  if (ms.healthStatus === 'thriving') { score += 8; factors.push({ label: 'Founder reports on track', impact: 8, type: 'positive' }); }
+  if (ms.healthStatus === 'struggling') {
+    score -= 15; shouldCheckIn = true;
+    checkInReason = checkInReason || 'Self-reported struggling';
+    factors.push({ label: 'Self-reported struggling', impact: -15, type: 'negative' });
+  }
+  if (ms.fundraisingStatus === 'exploring') { score += 6; factors.push({ label: 'Next round in progress', impact: 6, type: 'positive' }); }
+  if (ms.runwayMonths && ms.runwayMonths < 9) {
+    score -= 12; shouldCheckIn = true;
+    checkInReason = checkInReason || `${ms.runwayMonths}mo runway`;
+    factors.push({ label: `${ms.runwayMonths}mo runway — bridge needed`, impact: -12, type: 'negative' });
+  }
+
+  score = Math.max(0, Math.min(100, score));
+
+  // Climate/deep tech health labels reflect the domain — not generic startup health
+  const label = score >= 80 ? 'On Track' : score >= 62 ? 'Steady' : score >= 42 ? 'Investigate' : 'Critical';
+  const color = score >= 80 ? '#10b981' : score >= 62 ? '#5B6DC4' : score >= 42 ? '#f59e0b' : '#ef4444';
+  const bg = score >= 80 ? 'bg-emerald-50 dark:bg-emerald-900/20' : score >= 62 ? 'bg-indigo-50 dark:bg-indigo-900/20' : score >= 42 ? 'bg-amber-50 dark:bg-amber-900/20' : 'bg-red-50 dark:bg-red-900/20';
+
+  // Deduplicate factors (same label can appear from multiple signal loops)
+  const seen = new Set();
+  const dedupedFactors = factors.filter(f => { const k = f.label; if (seen.has(k)) return false; seen.add(k); return true; });
+
+  return { score, label, color, bg, factors: dedupedFactors, shouldCheckIn, checkInReason, maturity, moic, implied, method };
+};
+
+const calcPortfolioHealth = (deals, signalsByDeal = {}) => {
+  const invested = deals.filter(d => d.status === 'invested');
+  if (!invested.length) return { score: 0, label: 'No data', color: '#78716c', dealScores: [], urgent: [] };
+  const dealScores = invested.map(d => ({ id: d.id, name: d.companyName, ...calcDealHealth(d, signalsByDeal[d.id] || []) }));
+  // Weight by cost basis — larger positions drive portfolio health
+  const totalBasis = dealScores.reduce((sum, ds) => {
+    const inv = deals.find(d => d.id === ds.id)?.investment || {};
+    return sum + getEffectiveCostBasis(inv);
+  }, 0);
+  const weightedScore = dealScores.reduce((sum, ds) => {
+    const inv = deals.find(d => d.id === ds.id)?.investment || {};
+    const weight = totalBasis > 0 ? getEffectiveCostBasis(inv) / totalBasis : 1 / dealScores.length;
+    return sum + ds.score * weight;
+  }, 0);
+  const score = Math.round(weightedScore);
+  const label = score >= 80 ? 'On Track' : score >= 62 ? 'Steady' : score >= 42 ? 'Investigate' : 'Critical';
+  const color = score >= 80 ? '#10b981' : score >= 62 ? '#5B6DC4' : score >= 42 ? '#f59e0b' : '#ef4444';
+  return { score, label, color, dealScores, urgent: dealScores.filter(ds => ds.shouldCheckIn) };
+};
+
+// ── AUTONOMOUS MONITORING AGENT ────────────────────────────────────────────────
+const AGENT_CACHE_KEY = 'convex_agent_signals_v2';
+const getAgentCache = () => {
+  try { return JSON.parse(localStorage.getItem(AGENT_CACHE_KEY) || '{}'); } catch { return {}; }
+};
+
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const AGENT_SCHEDULE_KEY = 'convex_agent_next_run';
+
+const loadAgentCache = () => { try { return JSON.parse(localStorage.getItem(AGENT_CACHE_KEY) || '{}'); } catch { return {}; } };
+const saveAgentCache = (cache) => { try { localStorage.setItem(AGENT_CACHE_KEY, JSON.stringify(cache)); } catch {} };
+const getNextRunTime = () => { try { return parseInt(localStorage.getItem(AGENT_SCHEDULE_KEY) || '0', 10); } catch { return 0; } };
+const setNextRunTime = (ms) => { try { localStorage.setItem(AGENT_SCHEDULE_KEY, String(Date.now() + ms)); } catch {} };
+
+const fetchSignalForDeal = async (deal) => {
+  const maturity = STAGE_MATURITY[deal.stage] || 'lab';
+
+  // Signal priorities are different by TRL band — tell the agent what to look for
+  const maturityContext = {
+    lab:    'This is a lab-stage deep tech company (TRL 1–3). Prioritize: scientific publications, patent filings, government grants (DOE ARPA-E, SBIR, DARPA), national lab partnerships, key technical hires, proof-of-concept validations. Do NOT penalize for slow commercial progress — that is expected.',
+    pilot:  'This is a pilot-stage climate/deep tech company (TRL 4–6). Prioritize: pilot plant status and performance vs. spec, cost curve progress, regulatory milestones, LOI/MOU/offtake letters, IRA or DOE incentive qualification, strategic corporate co-investors. Flag any pilot underperformance, cost overruns, or founder departures.',
+    scale:  'This is a commercial-scale climate tech company (TRL 7–8). Prioritize: first commercial customers, offtake agreements, project finance commitments, IRA tax credit eligibility (45Q, 45V, 48C), unit economics vs. targets, next funding round signals. Flag supply chain issues, cost-per-unit misses, or utility partner pullbacks.',
+    deploy: 'This is a deployment-stage climate tech company (TRL 9). Prioritize: GW/GWh/kt deployed, project pipeline, project finance closes, M&A interest, replication in new geographies, investment-grade signals. Flag project cancellations, permitting delays, policy reversal risks (ITC/PTC), commodity input shocks.',
+    fund:   'This is a climate/deep tech LP fund. Prioritize: portfolio company milestones, new fund close signals, GP thought leadership, DPI/TVPI updates, notable exits or writedowns, fund strategy shifts.',
+  }[maturity] || '';
+
+  const systemPrompt = `You are a climate and deep tech investment intelligence agent. Your job is to surface signals that matter for a hardware-intensive, long-timeline climate technology investment — NOT SaaS metrics like ARR or churn.
+
+${maturityContext}
+
+Signal type taxonomy for this domain:
+- "hardware_milestone": pilot plant, demonstration, performance record, TRL advance
+- "policy": IRA credits, DOE loan guarantee, EPA rule, permit, regulatory decision
+- "offtake": PPA, supply agreement, LOI, MOU, anchor customer
+- "project_finance": debt financing, tax equity, green bond, financial close
+- "fundraising": venture round, strategic investment, grant award
+- "team": executive hire, departure, org change
+- "risk": cost overrun, technical setback, policy reversal, supply chain, competition
+- "press": general coverage, awards, conference
+
+For sentiment: positive/neutral/negative. For urgency: high (act within 2 weeks), medium (worth noting), low (FYI).
+
+Return ONLY valid JSON, no markdown, no preamble:
+{"signals":[{"type":"hardware_milestone|policy|offtake|project_finance|fundraising|team|risk|press","title":"string","description":"1-2 sentences","sentiment":"positive|neutral|negative","source":"source name","sourceUrl":"url or null","date":"ISO date string","urgency":"high|medium|low"}],"summary":"2-sentence assessment of company trajectory based on what you found","checkInRecommended":true|false,"checkInReason":"specific reason or null"}
+Return at most 6 signals, prioritized by relevance to the TRL stage above. If nothing found: {"signals":[],"summary":"No recent public signals found. This is common for early-stage deep tech companies.","checkInRecommended":false,"checkInReason":null}`;
+
+  const userPrompt = `Company: ${deal.companyName}
+Industry: ${deal.industry}
+Stage: ${deal.stage} (maturity band: ${maturity})
+Website: ${deal.website || 'unknown'}
+Search for signals in the last 6 months. Focus on what matters for a ${maturity}-stage climate/deep tech company: ${
+    maturity === 'lab' ? 'scientific validation, grants, technical hires' :
+    maturity === 'pilot' ? 'pilot performance, offtake letters, cost progress' :
+    maturity === 'scale' ? 'commercial customers, project finance, IRA credits' :
+    maturity === 'deploy' ? 'deployment scale, project pipeline, financing closes' :
+    'portfolio performance, fund news'
+  }.`;
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514', max_tokens: 1000,
+      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }]
+    })
+  });
+  if (!response.ok) throw new Error(`API ${response.status}`);
+  const data = await response.json();
+  const textBlock = data.content.filter(b => b.type === 'text').pop();
+  if (!textBlock?.text) return { signals: [], summary: 'No data.', checkInRecommended: false };
+  return JSON.parse(textBlock.text.replace(/```json|```/g, '').trim());
+};
+
+const useMonitoringAgent = (deals) => {
+  const [agentData, setAgentData] = useState(() => loadAgentCache());
+  const [agentStatus, setAgentStatus] = useState('idle');
+  const [lastRun, setLastRun] = useState(null);
+  const [nextRun, setNextRunState] = useState(null);
+  const [runLog, setRunLog] = useState([]);
+  const runningRef = useRef(false);
+  const portfolioDeals = deals.filter(d => d.status === 'invested');
+
+  const runAgent = useCallback(async (force = false) => {
+    if (runningRef.current) return;
+    const cache = loadAgentCache();
+    const now = Date.now();
+    const toFetch = portfolioDeals.filter(deal => {
+      if (force) return true;
+      const cached = cache[deal.id];
+      return !cached || (now - new Date(cached.fetchedAt).getTime()) > CACHE_TTL_MS;
+    });
+    if (toFetch.length === 0) { setAgentStatus('done'); setLastRun(new Date()); return; }
+    runningRef.current = true;
+    setAgentStatus('running');
+    setRunLog(toFetch.map(d => ({ id: d.id, name: d.companyName, status: 'pending' })));
+    const updated = { ...cache };
+    for (let i = 0; i < toFetch.length; i++) {
+      const deal = toFetch[i];
+      setRunLog(prev => prev.map(l => l.id === deal.id ? { ...l, status: 'fetching' } : l));
+      try {
+        if (i > 0) await new Promise(r => setTimeout(r, 3000));
+        const result = await fetchSignalForDeal(deal);
+        updated[deal.id] = { ...result, fetchedAt: new Date().toISOString(), dealName: deal.companyName };
+        setRunLog(prev => prev.map(l => l.id === deal.id ? { ...l, status: 'done', count: result.signals?.length || 0 } : l));
+      } catch (e) {
+        updated[deal.id] = updated[deal.id] || { signals: [], summary: 'Fetch failed.', checkInRecommended: false, fetchedAt: new Date().toISOString(), dealName: deal.companyName };
+        setRunLog(prev => prev.map(l => l.id === deal.id ? { ...l, status: 'error' } : l));
+      }
+    }
+    saveAgentCache(updated);
+    setAgentData(updated);
+    setNextRunTime(CACHE_TTL_MS);
+    setNextRunState(new Date(Date.now() + CACHE_TTL_MS));
+    setLastRun(new Date());
+    setAgentStatus('done');
+    runningRef.current = false;
+  }, [portfolioDeals.map(d => d.id).join(',')]);
+
+  useEffect(() => {
+    const check = () => { if (Date.now() >= getNextRunTime()) runAgent(); else setNextRunState(new Date(getNextRunTime())); };
+    check();
+    const iv = setInterval(check, 30 * 60 * 1000);
+    return () => clearInterval(iv);
+  }, [runAgent]);
+
+  const signalsByDeal = Object.fromEntries(Object.entries(agentData).map(([id, d]) => [id, d.signals || []]));
+  const urgentFeed = Object.entries(agentData)
+    .flatMap(([dealId, d]) => (d.signals || []).filter(s => s.urgency === 'high' || s.sentiment === 'negative').map(s => ({ ...s, dealId, dealName: d.dealName })))
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  return { agentData, signalsByDeal, agentStatus, lastRun, nextRun, runLog, urgentFeed, triggerRun: () => runAgent(true) };
+};
+
+
 // Default settings
 const DEFAULT_SETTINGS = {
   profile: { name: '', email: '', timezone: 'America/New_York' },
@@ -813,9 +598,11 @@ const DEFAULT_SETTINGS = {
   appearance: 'light'
 };
 
-// Portfolio statuses: Invested = active portfolio. Deferred = watching. Passed = archived.
+// Portfolio statuses
 const STATUS_CONFIG = {
   'invested': { label: 'Invested', color: 'bg-emerald-500', light: 'bg-emerald-50 text-emerald-600 border border-emerald-200', question: 'Capital deployed' },
+  'watching': { label: 'Watching', color: 'bg-stone-400',   light: 'bg-stone-100 text-stone-500 border border-stone-200',   question: 'Tracking, not yet invested' },
+  'passed':   { label: 'Passed',   color: 'bg-stone-300',   light: 'bg-stone-50 text-stone-400 border border-stone-200',    question: 'Decided not to invest' },
 };
 
 // Demo Data
@@ -833,8 +620,8 @@ const createDemoDeals = () => [
     createdAt: new Date(Date.now() - 400*86400000).toISOString(),
     overview: 'Iron-air battery technology enabling multi-day energy storage at 1/10th the cost of lithium-ion. Critical infrastructure for a fully renewable grid.',
     founders: [
-      { name: 'Mateo Jaramillo', role: 'CEO', background: 'Ex-Tesla VP of Energy Products, Tesla Powerwall & Megapack creator', yearsExperience: 20 },
-      { name: 'Yet-Ming Chiang', role: 'Co-Founder', background: 'MIT Materials Science professor, battery chemistry pioneer', yearsExperience: 30 }
+      { name: 'Mateo Jaramillo', role: 'CEO', background: 'Ex-Tesla VP of Energy Products, Tesla Powerwall & Megapack creator' },
+      { name: 'Yet-Ming Chiang', role: 'Co-Founder', background: 'MIT Materials Science professor, battery chemistry pioneer' }
     ],
     terms: { instrument: 'Equity', proRata: false, notes: 'Series E participation' },
     documents: [
@@ -843,13 +630,21 @@ const createDemoDeals = () => [
     ],
     attachments: [],
     investment: {
-      amount: 25000, vehicle: 'Equity', date: new Date(Date.now() - 365*86400000).toISOString(),
+      amount: 25000, costBasis: 25000, vehicle: 'Equity', date: new Date(Date.now() - 365*86400000).toISOString(),
       ownershipPercent: 0.01,
-      whyYes: 'Multi-day storage is the missing piece of the renewable grid puzzle. Iron-air chemistry is the only credible path to sub-$20/kWh at scale. Mateo built Powerwall — he knows how to ship hardware.',
+      impliedValuation: 1500000000, impliedValue: 45000, lastValuationDate: new Date(Date.now() - 90*86400000).toISOString(), valuationMethod: 'last-round',
       updateFrequency: 'quarterly', metricsToWatch: ['GWh capacity installed', 'Cost per kWh', 'Utility offtake contracts'],
       nextUpdateExpected: new Date(Date.now() + 20*86400000).toISOString()
     },
-    monitoring: { healthStatus: 'thriving', fundraisingStatus: 'not-raising', runwayMonths: 24, wouldInvestAgain: true, wouldIntro: true, followOns: [] },
+    healthHistory: [
+      { date: new Date(Date.now() - 300*86400000).toISOString(), score: 72, label: 'Steady' },
+      { date: new Date(Date.now() - 240*86400000).toISOString(), score: 78, label: 'Steady' },
+      { date: new Date(Date.now() - 180*86400000).toISOString(), score: 82, label: 'On Track' },
+      { date: new Date(Date.now() - 120*86400000).toISOString(), score: 85, label: 'On Track' },
+      { date: new Date(Date.now() - 60*86400000).toISOString(), score: 80, label: 'On Track' },
+      { date: new Date(Date.now() - 14*86400000).toISOString(), score: 74, label: 'Steady' },
+    ],
+    monitoring: { healthStatus: 'thriving', fundraisingStatus: 'not-raising', runwayMonths: 24, followOns: [] },
     milestones: [
       { id: 'm1', type: 'fundraising', title: 'Series E — $450M', description: 'Led by ArcelorMittal and GIC. Total raised over $1B.', date: new Date(Date.now() - 300*86400000).toISOString() },
       { id: 'm2', type: 'partnership', title: 'Georgia Power offtake', description: 'First utility-scale deployment agreement for multi-day storage', date: new Date(Date.now() - 180*86400000).toISOString() },
@@ -869,7 +664,7 @@ const createDemoDeals = () => [
     createdAt: new Date(Date.now() - 220*86400000).toISOString(),
     overview: 'Modular solar thermal energy storage systems purpose-built for AI data centers. Delivers firm, low-cost power without grid dependency.',
     founders: [
-      { name: 'Joey Kline', role: 'CEO', background: 'Ex-SpaceX, energy infrastructure focus', yearsExperience: 10 },
+      { name: 'Joey Kline', role: 'CEO', background: 'Ex-SpaceX, energy infrastructure focus' },
     ],
     terms: { instrument: 'SAFE', cap: 85000000, proRata: true, mfn: false },
     documents: [
@@ -877,13 +672,20 @@ const createDemoDeals = () => [
     ],
     attachments: [],
     investment: {
-      amount: 10000, vehicle: 'SAFE', date: new Date(Date.now() - 200*86400000).toISOString(),
+      amount: 10000, costBasis: 10000, vehicle: 'SAFE', date: new Date(Date.now() - 200*86400000).toISOString(),
       ownershipPercent: 0.02,
-      whyYes: 'AI data centers are the fastest-growing power load on the planet and the grid cannot keep up. Exowatt\'s modular solar thermal sidesteps interconnection queues entirely. SpaceX-trained hardware team gives real credibility on delivery.',
+      impliedValuation: 85000000, impliedValue: 11800, lastValuationDate: new Date(Date.now() - 190*86400000).toISOString(), valuationMethod: 'safe-cap',
       updateFrequency: 'quarterly', metricsToWatch: ['MW contracted', 'Data center pilots', 'Cost per MWh firm'],
       nextUpdateExpected: new Date(Date.now() - 10*86400000).toISOString() // overdue - shows nudge
     },
-    monitoring: { healthStatus: 'stable', fundraisingStatus: 'exploring', runwayMonths: 18, wouldInvestAgain: true, wouldIntro: true, followOns: [] },
+    healthHistory: [
+      { date: new Date(Date.now() - 200*86400000).toISOString(), score: 58, label: 'Steady' },
+      { date: new Date(Date.now() - 150*86400000).toISOString(), score: 62, label: 'Steady' },
+      { date: new Date(Date.now() - 100*86400000).toISOString(), score: 60, label: 'Steady' },
+      { date: new Date(Date.now() - 50*86400000).toISOString(), score: 52, label: 'Investigate' },
+      { date: new Date(Date.now() - 20*86400000).toISOString(), score: 46, label: 'Investigate' },
+    ],
+    monitoring: { healthStatus: 'stable', fundraisingStatus: 'exploring', runwayMonths: 18, followOns: [] },
     milestones: [
       { id: 'm1', type: 'fundraising', title: 'Seed — $20M', description: 'Led by a16z with participation from Sam Altman', date: new Date(Date.now() - 190*86400000).toISOString() },
       { id: 'm2', type: 'partnership', title: 'Meta pilot announced', description: 'First hyperscaler agreement for off-grid AI compute power', date: new Date(Date.now() - 100*86400000).toISOString() },
@@ -901,7 +703,7 @@ const createDemoDeals = () => [
     createdAt: new Date(Date.now() - 170*86400000).toISOString(),
     overview: 'Electrochemical green ammonia production at the point of use. Eliminates Haber-Bosch entirely — no pipeline, no shipping, fertilizer made on-farm from air, water, and renewable electricity.',
     founders: [
-      { name: 'Travis Sherck', role: 'CEO', background: 'Chemical engineering, electrosynthesis R&D', yearsExperience: 12 },
+      { name: 'Travis Sherck', role: 'CEO', background: 'Chemical engineering, electrosynthesis R&D' },
     ],
     terms: { instrument: 'SAFE', cap: 20000000, proRata: true, mfn: true },
     documents: [
@@ -909,17 +711,46 @@ const createDemoDeals = () => [
     ],
     attachments: [],
     investment: {
-      amount: 10000, vehicle: 'SAFE', date: new Date(Date.now() - 150*86400000).toISOString(),
+      amount: 10000, costBasis: 10000, vehicle: 'SAFE', date: new Date(Date.now() - 150*86400000).toISOString(),
       ownershipPercent: 0.05,
-      whyYes: 'Ammonia is the world\'s second most-produced chemical and agriculture\'s largest emissions source. Distributed electrochemical production breaks the Haber-Bosch stranglehold. Massive TAM, hard science moat, and early traction with co-ops.',
+      impliedValuation: null, impliedValue: null, lastValuationDate: null, valuationMethod: 'mark-at-cost',
       updateFrequency: 'quarterly', metricsToWatch: ['kg NH3 per kWh', 'Pilot farm deployments', 'Cost vs. conventional'],
       nextUpdateExpected: new Date(Date.now() + 45*86400000).toISOString()
     },
-    monitoring: { healthStatus: 'stable', fundraisingStatus: 'not-raising', runwayMonths: 20, wouldInvestAgain: true, wouldIntro: true, followOns: [] },
+    healthHistory: [
+      { date: new Date(Date.now() - 150*86400000).toISOString(), score: 55, label: 'Steady' },
+      { date: new Date(Date.now() - 100*86400000).toISOString(), score: 60, label: 'Steady' },
+      { date: new Date(Date.now() - 45*86400000).toISOString(), score: 63, label: 'Steady' },
+      { date: new Date(Date.now() - 20*86400000).toISOString(), score: 65, label: 'Steady' },
+    ],
+    monitoring: { healthStatus: 'stable', fundraisingStatus: 'not-raising', runwayMonths: 20, followOns: [] },
     milestones: [
       { id: 'm1', type: 'product', title: 'Bench-scale demo', description: 'Achieved target energy efficiency at lab scale — 8.5 MWh/tonne NH3', date: new Date(Date.now() - 120*86400000).toISOString() },
       { id: 'm2', type: 'partnership', title: 'Iowa co-op pilot', description: 'First on-farm deployment with 300-acre corn operation', date: new Date(Date.now() - 45*86400000).toISOString() },
       { id: 'm3', type: 'update', title: 'Founder update', description: 'Pilot running well. Yield 12% above projection. Starting conversations with two more co-ops.', date: new Date(Date.now() - 30*86400000).toISOString() }
+    ]
+  },
+  {
+    id: '4', companyName: 'Rondo Energy', logoUrl: 'https://ui-avatars.com/api/?name=RE&background=78716c&color=fff&size=64&bold=true',
+    status: 'watching', engagement: 'active', industry: 'Industrial Heat Decarbonization', stage: 'series-b',
+    website: 'https://rondoenergy.com',
+    source: { type: 'network', name: 'LaFamilia' },
+    lastAssessedAt: new Date(Date.now() - 12*86400000).toISOString(),
+    statusEnteredAt: new Date(Date.now() - 60*86400000).toISOString(),
+    lastActivity: new Date(Date.now() - 12*86400000).toISOString(),
+    createdAt: new Date(Date.now() - 65*86400000).toISOString(),
+    overview: 'Electric thermal energy storage (ETES) that converts renewable electricity into industrial heat at 1500°C. Targets the 20% of global emissions from industrial processes that cannot be electrified directly.',
+    founders: [
+      { name: "John O'Donnell", role: 'CEO', background: 'Ex-Alphabet/Google X, energy storage pioneer' },
+    ],
+    terms: {},
+    documents: [],
+    attachments: [],
+    watchingNotes: 'Strong team and real industrial demand. Watching Series B close — if IRA manufacturing credits get locked in for their heat blocks, the unit economics get dramatically better. Want to see one more customer win before committing.',
+    monitoring: { healthStatus: 'stable', fundraisingStatus: 'raising', runwayMonths: null, followOns: [] },
+    milestones: [
+      { id: 'm1', type: 'fundraising', title: 'Series B — raising $100M', description: 'Microsoft and Rio Tinto as strategic investors. Round not yet closed.', date: new Date(Date.now() - 30*86400000).toISOString() },
+      { id: 'm2', type: 'partnership', title: 'Woodside Energy partnership', description: 'First industrial deployment at LNG facility — heat block system replacing gas burners', date: new Date(Date.now() - 50*86400000).toISOString() },
     ]
   }
 ];
@@ -954,106 +785,7 @@ const Card = ({ children, className = '', onClick }) => (
 );
 
 // Reminder Button Component
-const ReminderButton = ({ reminder, onSet, compact = false }) => {
-  const [showPicker, setShowPicker] = useState(false);
-  const presets = [
-    { label: '1 week', days: 7 },
-    { label: '2 weeks', days: 14 },
-    { label: '30 days', days: 30 },
-    { label: '60 days', days: 60 },
-  ];
-
-  const hasReminder = reminder && new Date(reminder) > new Date();
-  const daysLeft = hasReminder ? daysUntil(reminder) : null;
-
-  if (compact) {
-    return (
-      <div className="relative">
-        <button 
-          onClick={() => setShowPicker(!showPicker)}
-          className={`p-1.5 rounded-lg transition-colors ${hasReminder ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' : 'text-stone-400 hover:text-stone-600 hover:bg-stone-100 dark:hover:bg-stone-700'}`}
-          title={hasReminder ? `Reminder in ${daysLeft}d` : 'Set reminder'}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-            {hasReminder && <circle cx="18" cy="5" r="3" fill="currentColor" stroke="none"/>}
-          </svg>
-        </button>
-        {showPicker && (
-          <div className="absolute right-0 top-full mt-1 bg-white dark:bg-stone-800 rounded-xl shadow-lg border border-stone-200 dark:border-stone-700 p-2 z-50 min-w-[140px]">
-            {presets.map(p => (
-              <button
-                key={p.days}
-                onClick={() => { onSet(new Date(Date.now() + p.days * 86400000).toISOString()); setShowPicker(false); }}
-                className="w-full text-left px-3 py-1.5 text-sm text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-700 rounded-lg"
-              >
-                {p.label}
-              </button>
-            ))}
-            {hasReminder && (
-              <button
-                onClick={() => { onSet(null); setShowPicker(false); }}
-                className="w-full text-left px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg mt-1 border-t border-stone-100 dark:border-stone-700 pt-2"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex items-center gap-2">
-      <button 
-        onClick={() => setShowPicker(!showPicker)}
-        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs transition-colors ${
-          hasReminder 
-            ? 'bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' 
-            : 'text-stone-400 hover:text-stone-600 hover:bg-stone-100 dark:hover:bg-stone-700'
-        }`}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-        </svg>
-        {hasReminder ? `${daysLeft}d` : 'Remind me'}
-      </button>
-      {showPicker && (
-        <div className="flex gap-1">
-          {presets.slice(0, 3).map(p => (
-            <button
-              key={p.days}
-              onClick={() => { onSet(new Date(Date.now() + p.days * 86400000).toISOString()); setShowPicker(false); }}
-              className="px-2 py-1 text-xs bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-300 rounded hover:bg-stone-200 dark:hover:bg-stone-600"
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
 // Signal Icons for Monitoring
-const SignalIcon = ({ type, active }) => {
-  const icons = {
-    website: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>,
-    hiring: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>,
-    fundraising: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>,
-    press: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/></svg>,
-    communication: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>,
-  };
-  return (
-    <span className={`p-1.5 rounded-lg transition-colors ${active ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-stone-100 text-stone-400 dark:bg-stone-700 dark:text-stone-500'}`}>
-      {icons[type]}
-    </span>
-  );
-};
-
 const SettingsPage = ({ settings, onUpdate, onClose }) => {
   const [localSettings, setLocalSettings] = useState(settings);
   const [activeSection, setActiveSection] = useState('profile');
@@ -1405,282 +1137,9 @@ const SettingsPage = ({ settings, onUpdate, onClose }) => {
 };
 
 // Attachments Component
-const AttachmentsSection = ({ attachments = [], onAdd }) => {
-  const typeIcons = { deck: '📊', financials: '📈', legal: '📄', update: '📬', other: '📎' };
-  const typeColors = { deck: 'bg-blue-50 text-blue-700', financials: 'bg-emerald-50 text-emerald-700', legal: 'bg-amber-50 text-amber-700', update: 'bg-violet-50 text-violet-700', other: 'bg-stone-100 text-stone-600' };
-  
-  return (
-    <Card>
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-medium text-stone-900">Attachments ({attachments.length})</h3>
-        <button onClick={onAdd} className="text-xs text-[#5B6DC4] hover:underline">+ Add file</button>
-      </div>
-      {attachments.length === 0 ? (
-        <p className="text-sm text-stone-400">No attachments yet</p>
-      ) : (
-        <div className="space-y-2">
-          {attachments.map(att => (
-            <div key={att.id} className="flex items-center justify-between p-2 bg-stone-50 rounded-lg">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm ${typeColors[att.type] || typeColors.other}`}>
-                  {typeIcons[att.type] || typeIcons.other}
-                </span>
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-stone-900 truncate">{att.name}</p>
-                  <p className="text-xs text-stone-500">{att.size}</p>
-                </div>
-              </div>
-              <button className="p-1 text-stone-400 hover:text-stone-600">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-    </Card>
-  );
-};
-
 // Founders Section Component - Editable
-const FoundersSection = ({ founders = [], onUpdate }) => {
-  const [expanded, setExpanded] = useState(null);
-  const [showAddFounder, setShowAddFounder] = useState(false);
-  const [newFounder, setNewFounder] = useState({ name: '', role: 'CEO', email: '', linkedIn: '', background: '' });
-  
-  const addFounder = () => {
-    if (newFounder.name.trim()) {
-      onUpdate([...founders, { ...newFounder, name: newFounder.name.trim() }]);
-      setNewFounder({ name: '', role: 'CEO', email: '', linkedIn: '', background: '' });
-      setShowAddFounder(false);
-    }
-  };
-
-  const updateFounder = (idx, field, value) => {
-    const updated = [...founders];
-    updated[idx] = { ...updated[idx], [field]: value };
-    onUpdate(updated);
-  };
-
-  const removeFounder = (idx) => {
-    onUpdate(founders.filter((_, i) => i !== idx));
-  };
-  
-  return (
-    <Card>
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-medium text-stone-900">Founders ({founders.length})</h3>
-        <button onClick={() => setShowAddFounder(true)} className="text-xs text-[#5B6DC4] hover:underline">+ Add founder</button>
-      </div>
-      
-      {showAddFounder && (
-        <div className="mb-3 p-3 bg-stone-50 rounded-xl space-y-2">
-          <input type="text" placeholder="Name *" value={newFounder.name} onChange={e => setNewFounder({...newFounder, name: e.target.value})} className="w-full p-2 border border-stone-200 rounded-lg text-sm text-stone-900 bg-white" />
-          <div className="grid grid-cols-2 gap-2">
-            <input type="text" placeholder="Role" value={newFounder.role} onChange={e => setNewFounder({...newFounder, role: e.target.value})} className="p-2 border border-stone-200 rounded-lg text-sm text-stone-900 bg-white" />
-            <input type="email" placeholder="Email" value={newFounder.email} onChange={e => setNewFounder({...newFounder, email: e.target.value})} className="p-2 border border-stone-200 rounded-lg text-sm text-stone-900 bg-white" />
-          </div>
-          <input type="text" placeholder="LinkedIn URL" value={newFounder.linkedIn} onChange={e => setNewFounder({...newFounder, linkedIn: e.target.value})} className="w-full p-2 border border-stone-200 rounded-lg text-sm text-stone-900 bg-white" />
-          <input type="text" placeholder="Background (e.g., Ex-Google, Stanford)" value={newFounder.background} onChange={e => setNewFounder({...newFounder, background: e.target.value})} className="w-full p-2 border border-stone-200 rounded-lg text-sm text-stone-900 bg-white" />
-          <div className="flex gap-2">
-            <button onClick={addFounder} className="flex-1 py-2 bg-[#5B6DC4] text-white text-sm rounded-lg">Add</button>
-            <button onClick={() => setShowAddFounder(false)} className="px-4 py-2 bg-stone-100 text-stone-600 text-sm rounded-lg">Cancel</button>
-          </div>
-        </div>
-      )}
-
-      {founders.length === 0 && !showAddFounder ? (
-        <p className="text-sm text-stone-400">No founders added yet</p>
-      ) : (
-        <div className="space-y-2">
-          {founders.map((founder, idx) => (
-            <div key={idx} className="border border-stone-100 rounded-xl overflow-hidden">
-              <button 
-                onClick={() => setExpanded(expanded === idx ? null : idx)}
-                className="w-full flex items-center justify-between p-3 hover:bg-stone-50"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-stone-300 to-stone-400 flex items-center justify-center text-white font-semibold text-sm">
-                    {founder.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
-                  </div>
-                  <div className="text-left">
-                    <p className="font-medium text-stone-900 text-sm">{founder.name}</p>
-                    <p className="text-xs text-stone-500">{founder.role}</p>
-                  </div>
-                </div>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`text-stone-400 transition-transform ${expanded === idx ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9"/></svg>
-              </button>
-              {expanded === idx && (
-                <div className="px-3 pb-3 pt-1 border-t border-stone-100 bg-stone-50 space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-xs text-stone-500">Name</label>
-                      <input type="text" value={founder.name} onChange={e => updateFounder(idx, 'name', e.target.value)} className="w-full p-2 border border-stone-200 rounded-lg text-sm text-stone-900 bg-white" />
-                    </div>
-                    <div>
-                      <label className="text-xs text-stone-500">Role</label>
-                      <input type="text" value={founder.role || ''} onChange={e => updateFounder(idx, 'role', e.target.value)} className="w-full p-2 border border-stone-200 rounded-lg text-sm text-stone-900 bg-white" />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-xs text-stone-500">Email</label>
-                    <input type="email" value={founder.email || ''} onChange={e => updateFounder(idx, 'email', e.target.value)} className="w-full p-2 border border-stone-200 rounded-lg text-sm text-stone-900 bg-white" />
-                  </div>
-                  <div>
-                    <label className="text-xs text-stone-500">LinkedIn</label>
-                    <input type="text" value={founder.linkedIn || ''} onChange={e => updateFounder(idx, 'linkedIn', e.target.value)} className="w-full p-2 border border-stone-200 rounded-lg text-sm text-stone-900 bg-white" />
-                  </div>
-                  <div>
-                    <label className="text-xs text-stone-500">Background</label>
-                    <input type="text" value={founder.background || ''} onChange={e => updateFounder(idx, 'background', e.target.value)} className="w-full p-2 border border-stone-200 rounded-lg text-sm text-stone-900 bg-white" />
-                  </div>
-                  <button onClick={() => removeFounder(idx)} className="text-xs text-red-600 hover:underline">Remove founder</button>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </Card>
-  );
-};
-
 // Deal Terms Component - Editable
-const DealTermsSection = ({ terms = {}, onUpdate }) => {
-  const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState(terms);
-
-  const saveTerms = () => {
-    onUpdate(form);
-    setEditing(false);
-  };
-
-  if (editing) {
-    return (
-      <Card>
-        <h3 className="text-sm font-medium text-stone-900 mb-3">Deal Terms</h3>
-        <div className="space-y-3">
-          <div className="relative">
-            <label className="text-xs text-stone-500">Instrument</label>
-            <select value={form.instrument || ''} onChange={e => setForm({...form, instrument: e.target.value})} className="w-full mt-1 p-2 pr-10 border border-stone-200 rounded-lg text-sm text-stone-900 bg-white appearance-none cursor-pointer">
-              <option value="">Select...</option>
-              <option value="SAFE">SAFE</option>
-              <option value="Convertible Note">Convertible Note</option>
-              <option value="Equity">Equity</option>
-              <option value="Other">Other</option>
-            </select>
-            <svg className="absolute right-3 top-[30px] pointer-events-none text-stone-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-stone-500">Cap</label>
-              <input type="number" placeholder="12000000" value={form.cap || ''} onChange={e => setForm({...form, cap: e.target.value ? Number(e.target.value) : null})} className="w-full mt-1 p-2 border border-stone-200 rounded-lg text-sm text-stone-900 bg-white" />
-            </div>
-            <div>
-              <label className="text-xs text-stone-500">Valuation</label>
-              <input type="number" placeholder="10000000" value={form.valuation || ''} onChange={e => setForm({...form, valuation: e.target.value ? Number(e.target.value) : null})} className="w-full mt-1 p-2 border border-stone-200 rounded-lg text-sm text-stone-900 bg-white" />
-            </div>
-          </div>
-          <div>
-            <label className="text-xs text-stone-500">Discount %</label>
-            <input type="number" placeholder="20" value={form.discount || ''} onChange={e => setForm({...form, discount: e.target.value ? Number(e.target.value) : null})} className="w-full mt-1 p-2 border border-stone-200 rounded-lg text-sm text-stone-900 bg-white" />
-          </div>
-          <div className="flex flex-wrap gap-3 pt-2">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={form.proRata || false} onChange={e => setForm({...form, proRata: e.target.checked})} className="w-4 h-4 rounded" />
-              <span className="text-sm text-stone-700">Pro-rata rights</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={form.mfn || false} onChange={e => setForm({...form, mfn: e.target.checked})} className="w-4 h-4 rounded" />
-              <span className="text-sm text-stone-700">MFN</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={form.boardSeat || false} onChange={e => setForm({...form, boardSeat: e.target.checked})} className="w-4 h-4 rounded" />
-              <span className="text-sm text-stone-700">Board seat</span>
-            </label>
-          </div>
-          <div>
-            <label className="text-xs text-stone-500">Notes</label>
-            <input type="text" placeholder="Additional notes..." value={form.notes || ''} onChange={e => setForm({...form, notes: e.target.value})} className="w-full mt-1 p-2 border border-stone-200 rounded-lg text-sm text-stone-900 bg-white" />
-          </div>
-          <div className="flex gap-2 pt-2">
-            <button onClick={saveTerms} className="flex-1 py-2 bg-[#5B6DC4] text-white text-sm rounded-lg">Save</button>
-            <button onClick={() => { setForm(terms); setEditing(false); }} className="px-4 py-2 bg-stone-100 text-stone-600 text-sm rounded-lg">Cancel</button>
-          </div>
-        </div>
-      </Card>
-    );
-  }
-  
-  const hasTerms = terms.instrument || terms.cap || terms.valuation || terms.discount;
-  
-  return (
-    <Card>
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-medium text-stone-900">Deal Terms</h3>
-        <button onClick={() => { setForm(terms); setEditing(true); }} className="text-xs text-[#5B6DC4] hover:underline">{hasTerms ? 'Edit' : '+ Add terms'}</button>
-      </div>
-      {!hasTerms ? (
-        <p className="text-sm text-stone-400">No terms entered yet</p>
-      ) : (
-        <>
-          <div className="grid grid-cols-2 gap-3">
-            {terms.instrument && <div><p className="text-xs text-stone-500">Instrument</p><p className="text-sm font-medium text-stone-900">{terms.instrument}</p></div>}
-            {terms.cap && <div><p className="text-xs text-stone-500">Cap</p><p className="text-sm font-medium text-stone-900">{formatCurrency(terms.cap)}</p></div>}
-            {terms.valuation && <div><p className="text-xs text-stone-500">Valuation</p><p className="text-sm font-medium text-stone-900">{formatCurrency(terms.valuation)}</p></div>}
-            {terms.discount && <div><p className="text-xs text-stone-500">Discount</p><p className="text-sm font-medium text-stone-900">{terms.discount}%</p></div>}
-          </div>
-          {(terms.proRata || terms.mfn || terms.boardSeat) && (
-            <div className="flex gap-2 mt-3 pt-3 border-t border-stone-100">
-              {terms.proRata && <span className="px-2 py-1 bg-emerald-50 text-emerald-700 text-xs rounded">Pro-rata</span>}
-              {terms.mfn && <span className="px-2 py-1 bg-blue-50 text-blue-700 text-xs rounded">MFN</span>}
-              {terms.boardSeat && <span className="px-2 py-1 bg-violet-50 text-violet-700 text-xs rounded">Board seat</span>}
-            </div>
-          )}
-          {terms.notes && <p className="text-xs text-stone-500 mt-2">{terms.notes}</p>}
-        </>
-      )}
-    </Card>
-  );
-};
-
 // Milestones Timeline Component
-const MilestonesTimeline = ({ milestones = [], onAdd }) => {
-  const typeIcons = { fundraising: '💰', hiring: '👥', growth: '📈', product: '🚀', partnership: '🤝', other: '📌' };
-  const typeColors = { fundraising: 'bg-emerald-500', hiring: 'bg-blue-500', growth: 'bg-violet-500', product: 'bg-amber-500', partnership: 'bg-pink-500', other: 'bg-stone-400' };
-  
-  const sorted = [...milestones].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  
-  return (
-    <Card>
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-medium text-stone-900">Milestones ({milestones.length})</h3>
-        <button onClick={onAdd} className="text-xs text-[#5B6DC4] hover:underline">+ Add milestone</button>
-      </div>
-      {sorted.length === 0 ? (
-        <p className="text-sm text-stone-400">No milestones recorded</p>
-      ) : (
-        <div className="relative">
-          <div className="absolute left-4 top-2 bottom-2 w-0.5 bg-stone-200"></div>
-          <div className="space-y-4">
-            {sorted.map((m, idx) => (
-              <div key={m.id} className="flex gap-3 relative">
-                <div className={`w-8 h-8 rounded-full ${typeColors[m.type] || typeColors.other} flex items-center justify-center text-sm z-10 flex-shrink-0`}>
-                  {typeIcons[m.type] || typeIcons.other}
-                </div>
-                <div className="flex-1 min-w-0 pb-1">
-                  <p className="text-sm font-medium text-stone-900">{m.title}</p>
-                  <p className="text-xs text-stone-600">{m.description}</p>
-                  <p className="text-xs text-stone-400 mt-1">{formatDate(m.date)}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </Card>
-  );
-};
-
 // Add Company Modal - supports all statuses
 const AddPortfolioModal = ({ onClose, onAdd }) => {
   const [form, setForm] = useState({
@@ -1691,8 +1150,12 @@ const AddPortfolioModal = ({ onClose, onAdd }) => {
     engagement: 'active',
     // Investment fields
     investmentAmount: '',
+    costBasis: '',
     investmentDate: '',
     vehicle: 'SAFE',
+    // Watching fields
+    watchingReasoning: '',
+    revisitDate: '',
     // Common fields
     founderName: '',
     founderRole: 'CEO',
@@ -1701,7 +1164,9 @@ const AddPortfolioModal = ({ onClose, onAdd }) => {
   });
 
   const statusOptions = [
-    { value: 'invested', label: 'Invested', description: 'Portfolio company', color: '#10b981' }
+    { value: 'invested', label: 'Invested', description: 'Capital deployed', color: '#10b981' },
+    { value: 'watching', label: 'Watching', description: 'Tracking, not yet invested', color: '#78716c' },
+    { value: 'passed',   label: 'Passed',   description: 'Decided not to invest', color: '#a8a29e' },
   ];
 
   const handleSubmit = () => {
@@ -1727,10 +1192,22 @@ const AddPortfolioModal = ({ onClose, onAdd }) => {
         email: form.founderEmail || undefined
       }] : [],
       attachments: [],
-      screening: { thesis: '', signals: [] }
+      screening: { signals: [] }
     };
 
     let newDeal = { ...baseFields };
+
+    // Add watching/passed fields
+    if (form.companyStatus === 'watching' || form.companyStatus === 'passed') {
+      newDeal = {
+        ...newDeal,
+        decisionReasoning: form.watchingReasoning || '',
+        revisitDate: form.revisitDate || '',
+        watchingNotes: form.watchingReasoning || '',
+        decisionLogUpdatedAt: now,
+        milestones: [],
+      };
+    }
 
     // Add investment fields
     if (form.companyStatus === 'invested') {
@@ -1739,6 +1216,7 @@ const AddPortfolioModal = ({ onClose, onAdd }) => {
         terms: { instrument: form.vehicle },
         investment: {
           amount: Number(form.investmentAmount),
+          costBasis: Number(form.costBasis) || Number(form.investmentAmount),
           vehicle: form.vehicle,
           date: form.investmentDate || now,
           updateFrequency: 'quarterly',
@@ -1746,8 +1224,6 @@ const AddPortfolioModal = ({ onClose, onAdd }) => {
         },
         monitoring: {
           healthStatus: 'stable',
-          wouldInvestAgain: null,
-          wouldIntro: null,
           followOns: []
         },
         milestones: []
@@ -1887,6 +1363,34 @@ const AddPortfolioModal = ({ onClose, onAdd }) => {
             </div>
           </div>
 
+          {/* Watching / Passed fields — shown when not investing */}
+          {(form.companyStatus === 'watching' || form.companyStatus === 'passed') && (
+            <div className="border-t border-stone-200 dark:border-stone-700 pt-4">
+              <p className="text-xs font-medium text-stone-600 dark:text-stone-400 uppercase tracking-wide mb-1">
+                {form.companyStatus === 'passed' ? 'Why did you pass?' : 'Why are you watching?'}
+              </p>
+              <p className="text-xs text-stone-400 mb-2">Required — you'll thank yourself later.</p>
+              <textarea
+                value={form.watchingReasoning}
+                onChange={e => setForm({...form, watchingReasoning: e.target.value})}
+                placeholder={form.companyStatus === 'passed'
+                  ? "e.g. Strong team but market timing feels early. Would reconsider if a major utility signs an offtake agreement."
+                  : "e.g. Compelling technology but waiting for pilot plant data. If efficiency holds at target in field conditions, strong yes."}
+                rows={3}
+                className="w-full mt-1 p-3 border border-stone-200 dark:border-stone-700 rounded-xl text-sm text-stone-900 dark:text-stone-100 bg-white dark:bg-stone-900 placeholder-stone-400 resize-none focus:outline-none focus:border-[#5B6DC4]"
+              />
+              <div className="mt-3">
+                <label className="text-xs text-stone-500 dark:text-stone-400">Revisit by (optional)</label>
+                <input
+                  type="date"
+                  value={form.revisitDate}
+                  onChange={e => setForm({...form, revisitDate: e.target.value})}
+                  className="mt-1 p-2.5 border border-stone-200 dark:border-stone-700 rounded-lg text-sm text-stone-900 dark:text-stone-100 bg-white dark:bg-stone-900 focus:outline-none focus:border-[#5B6DC4]"
+                />
+              </div>
+            </div>
+          )}
+
           {/* Conditional Investment Fields */}
           {form.companyStatus === 'invested' && (
             <div className="border-t border-stone-200 dark:border-stone-700 pt-4">
@@ -1916,6 +1420,19 @@ const AddPortfolioModal = ({ onClose, onAdd }) => {
                     </select>
                     <svg className="absolute right-3 top-[34px] pointer-events-none text-stone-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
                   </div>
+                </div>
+                <div>
+                  <label className="text-xs text-stone-500 dark:text-stone-400">
+                    Cost basis ($) <span className="font-normal text-stone-400 dark:text-stone-500">optional</span>
+                  </label>
+                  <input
+                    type="number"
+                    value={form.costBasis}
+                    onChange={e => setForm({...form, costBasis: e.target.value})}
+                    placeholder="Same as amount"
+                    className="w-full mt-1 p-3 border border-stone-200 dark:border-stone-700 rounded-xl text-sm text-stone-900 dark:text-stone-100 bg-white dark:bg-stone-900 placeholder-stone-400"
+                  />
+                  <p className="text-xs text-stone-400 dark:text-stone-500 mt-1">Leave blank if same as amount. Use if secondary purchase or adjusted entry.</p>
                 </div>
                 <div>
                   <label className="text-xs text-stone-500 dark:text-stone-400">Investment Date</label>
@@ -1964,7 +1481,7 @@ const AddPortfolioModal = ({ onClose, onAdd }) => {
         <div className="sticky bottom-0 bg-white dark:bg-stone-800 px-4 py-3 border-t border-stone-200 dark:border-stone-700">
           <button 
             onClick={handleSubmit} 
-            disabled={!form.companyName || (form.companyStatus === 'invested' && !form.investmentAmount)} 
+            disabled={!form.companyName || (form.companyStatus === 'invested' && !form.investmentAmount) || (['watching','passed'].includes(form.companyStatus) && !form.watchingReasoning.trim())} 
             style={{ backgroundColor: currentStatus?.color || '#5B6DC4' }}
             className="w-full py-3 text-white rounded-xl text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:opacity-90"
           >
@@ -2046,133 +1563,436 @@ const DOC_TYPES = [
   { value: 'update', label: 'Investor Update', icon: '📬', color: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' },
   { value: 'other', label: 'Other', icon: '🔗', color: 'bg-stone-100 text-stone-600 dark:bg-stone-700 dark:text-stone-400' },
 ];
+// Invested View - Clean confirmation design
+const WatchingView = ({ deal, onUpdate, setToast }) => {
+  const [showDecisionLog, setShowDecisionLog] = useState(true);
+  const [editingDecision, setEditingDecision] = useState(false);
+  const [decisionForm, setDecisionForm] = useState({
+    reasoning: deal.decisionReasoning || '',
+    revisitDate: deal.revisitDate || '',
+    triggers: deal.investmentTriggers || ['', '', ''],
+    currentStatus: deal.watchingNotes || '',
+  });
 
-const DocumentLinksSection = ({ docs = [], onUpdate }) => {
-  const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState({ label: '', url: '', type: 'safe' });
-  const [error, setError] = useState('');
+  const agentCache = getAgentCache();
+  const signals = agentCache[deal.id]?.signals || [];
+  const agentSummary = agentCache[deal.id]?.summary || null;
+  const agentFetchedAt = agentCache[deal.id]?.fetchedAt || null;
 
-  const handleAdd = () => {
-    if (!form.label.trim()) { setError('Name is required'); return; }
-    if (!form.url.trim()) { setError('URL is required'); return; }
-    const url = form.url.trim().startsWith('http') ? form.url.trim() : `https://${form.url.trim()}`;
-    const newDoc = { id: Date.now().toString(), label: form.label.trim(), url, type: form.type, addedAt: new Date().toISOString() };
-    onUpdate([...docs, newDoc]);
-    setForm({ label: '', url: '', type: 'safe' });
-    setError('');
-    setShowAdd(false);
+  const saveDecision = () => {
+    const updated = {
+      ...deal,
+      decisionReasoning: decisionForm.reasoning,
+      revisitDate: decisionForm.revisitDate,
+      investmentTriggers: decisionForm.triggers.filter(t => t.trim()),
+      watchingNotes: decisionForm.currentStatus,
+      decisionLogUpdatedAt: new Date().toISOString(),
+    };
+    onUpdate(updated);
+    setEditingDecision(false);
+    if (setToast) setToast({ message: 'Decision log saved', type: 'success' });
   };
 
-  const handleRemove = (id) => onUpdate(docs.filter(d => d.id !== id));
+  const daysUntilRevisit = deal.revisitDate ? Math.ceil((new Date(deal.revisitDate) - Date.now()) / 86400000) : null;
+  const revisitOverdue = daysUntilRevisit !== null && daysUntilRevisit < 0;
 
   return (
-    <div className="bg-white dark:bg-stone-800 rounded-2xl overflow-hidden">
-      <div className="px-5 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2">
-            <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/>
-          </svg>
-          <h3 className="text-sm font-medium text-stone-900 dark:text-white">Documents</h3>
-          {docs.length > 0 && <span className="text-xs text-stone-400">({docs.length})</span>}
+    <div className="space-y-4">
+      {/* Company header */}
+      <div className="bg-white dark:bg-stone-800 rounded-2xl p-5">
+        <div className="flex items-start justify-between">
+          <div className="flex items-start gap-4">
+            <div className="w-14 h-14 rounded-xl flex items-center justify-center text-xl font-bold bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400 flex-shrink-0">
+              {deal.companyName?.charAt(0)?.toUpperCase()}
+            </div>
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <h2 className="text-xl font-bold text-stone-900 dark:text-white">{deal.companyName}</h2>
+                {deal.website && (
+                  <a href={deal.website} target="_blank" rel="noopener noreferrer" className="text-stone-400 hover:text-stone-600">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                  </a>
+                )}
+              </div>
+              <p className="text-sm text-stone-500 dark:text-stone-400">{deal.stage} · {deal.industry}</p>
+              {deal.founders?.[0] && <p className="text-xs text-stone-400 mt-0.5">{deal.founders[0].name} · {deal.founders[0].role}</p>}
+            </div>
+          </div>
+          <div className="flex flex-col items-end gap-1.5">
+            <span className="text-xs px-2 py-1 rounded-full bg-stone-100 dark:bg-stone-700 text-stone-500 font-medium">
+              {deal.status === 'passed' ? 'Passed' : 'Watching'}
+            </span>
+            {deal.monitoring?.fundraisingStatus === 'raising' && (
+              <span className="text-xs px-2 py-1 rounded-full bg-blue-50 text-blue-600 font-medium dark:bg-blue-900/30 dark:text-blue-400">Raising now</span>
+            )}
+          </div>
         </div>
-        <button
-          onClick={() => { setShowAdd(!showAdd); setError(''); }}
-          className="text-xs font-medium text-[#5B6DC4] hover:text-[#4a5ba8] transition-colors"
-        >
-          {showAdd ? 'Cancel' : '+ Add link'}
-        </button>
+        {deal.overview && <p className="mt-4 text-sm text-stone-600 dark:text-stone-300 leading-relaxed">{deal.overview}</p>}
       </div>
 
-      {/* Add form */}
-      {showAdd && (
-        <div className="mx-5 mb-4 p-4 bg-stone-50 dark:bg-stone-700/50 rounded-xl space-y-3">
-          <div className="grid grid-cols-2 gap-2">
-            {DOC_TYPES.map(t => (
-              <button
-                key={t.value}
-                onClick={() => setForm(f => ({ ...f, type: t.value }))}
-                className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all border ${
-                  form.type === t.value
-                    ? 'border-[#5B6DC4] bg-[#5B6DC4]/10 text-[#5B6DC4]'
-                    : 'border-stone-200 dark:border-stone-600 text-stone-500 dark:text-stone-400 hover:border-stone-300'
-                }`}
-              >
-                <span>{t.icon}</span> {t.label}
-              </button>
-            ))}
-          </div>
-          <input
-            type="text"
-            placeholder="Label (e.g. SAFE Agreement, K-1 2023)"
-            value={form.label}
-            onChange={e => { setForm(f => ({ ...f, label: e.target.value })); setError(''); }}
-            className="w-full p-2.5 text-sm border border-stone-200 dark:border-stone-600 rounded-lg bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100 placeholder-stone-400 focus:outline-none focus:border-[#5B6DC4]"
-          />
-          <input
-            type="url"
-            placeholder="https://drive.google.com/..."
-            value={form.url}
-            onChange={e => { setForm(f => ({ ...f, url: e.target.value })); setError(''); }}
-            className="w-full p-2.5 text-sm border border-stone-200 dark:border-stone-600 rounded-lg bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100 placeholder-stone-400 focus:outline-none focus:border-[#5B6DC4]"
-          />
-          {error && <p className="text-xs text-red-500">{error}</p>}
-          <button
-            onClick={handleAdd}
-            className="w-full py-2 text-sm font-medium text-white rounded-lg transition-colors"
-            style={{ backgroundColor: '#5B6DC4' }}
-          >
-            Add document
-          </button>
+      {/* Revisit banner if overdue */}
+      {revisitOverdue && (
+        <div className="rounded-xl px-4 py-3 flex items-center gap-3" style={{ backgroundColor: '#fef3c7', border: '1px solid #fde68a' }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <p className="text-sm text-amber-800 font-medium">
+            Revisit date was {Math.abs(daysUntilRevisit)}d ago — time to update your view on {deal.companyName}.
+          </p>
+        </div>
+      )}
+      {daysUntilRevisit !== null && !revisitOverdue && daysUntilRevisit <= 14 && (
+        <div className="rounded-xl px-4 py-3 flex items-center gap-3" style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <p className="text-sm text-emerald-800">Revisit scheduled in {daysUntilRevisit} day{daysUntilRevisit !== 1 ? 's' : ''}</p>
         </div>
       )}
 
-      {/* Document list */}
-      {docs.length === 0 && !showAdd ? (
-        <div className="px-5 pb-5 text-center">
-          <p className="text-sm text-stone-400 dark:text-stone-500">No documents yet</p>
-          <p className="text-xs text-stone-300 dark:text-stone-600 mt-1">Add links to your SAFE, tax forms, cap table, and updates</p>
-        </div>
-      ) : (
-        <div className="px-5 pb-5 space-y-2">
-          {docs.map(doc => {
-            const docType = DOC_TYPES.find(t => t.value === doc.type) || DOC_TYPES[5];
-            return (
-              <div key={doc.id} className="flex items-center gap-3 p-3 bg-stone-50 dark:bg-stone-700/50 rounded-xl group">
-                <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm flex-shrink-0 ${docType.color}`}>
-                  {docType.icon}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <a
-                    href={doc.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm font-medium text-stone-900 dark:text-stone-100 hover:text-[#5B6DC4] dark:hover:text-[#8b9ff4] transition-colors truncate block"
-                  >
-                    {doc.label}
-                    <svg className="inline ml-1 mb-0.5 opacity-50" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
-                    </svg>
-                  </a>
-                  <p className="text-xs text-stone-400 dark:text-stone-500">{docType.label}</p>
+      {/* Decision log — the core of the watching view */}
+      <div className="bg-white dark:bg-stone-800 rounded-2xl overflow-hidden">
+        <button
+          onClick={() => setShowDecisionLog(!showDecisionLog)}
+          className="w-full px-5 py-4 flex items-center justify-between hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+            <span className="text-sm font-semibold text-stone-700 dark:text-stone-300">Decision log</span>
+            {deal.decisionLogUpdatedAt && (
+              <span className="text-xs text-stone-400">· updated {formatRelativeTime(deal.decisionLogUpdatedAt)}</span>
+            )}
+            {!deal.decisionReasoning && !deal.investmentTriggers?.length && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">Empty — add your reasoning</span>
+            )}
+          </div>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a8a29e" strokeWidth="2" className={`transition-transform ${showDecisionLog ? 'rotate-180' : ''}`}><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+
+        {showDecisionLog && (
+          <div className="px-5 pb-5 border-t border-stone-100 dark:border-stone-700">
+            {editingDecision ? (
+              <div className="pt-4 space-y-4">
+                <div>
+                  <label className="text-xs font-semibold text-stone-500 uppercase tracking-wide">
+                    Why are you watching / why did you pass?
+                  </label>
+                  <p className="text-xs text-stone-400 mt-0.5 mb-2">Be specific. You'll read this in 18 months.</p>
+                  <textarea
+                    value={decisionForm.reasoning}
+                    onChange={e => setDecisionForm(f => ({ ...f, reasoning: e.target.value }))}
+                    placeholder={deal.status === 'passed'
+                      ? "e.g. Team is strong but the market timing feels early — industrial customers aren't ready to pay for this yet. Would reconsider if a major utility signs an offtake."
+                      : "e.g. Compelling technology but waiting for the pilot plant data before committing. If efficiency holds at 8+ MWh/tonne in field conditions, this is a strong yes."}
+                    rows={4}
+                    className="w-full p-3 text-sm border border-stone-200 dark:border-stone-600 rounded-xl bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 placeholder-stone-400 focus:outline-none focus:border-[#5B6DC4] resize-none"
+                    autoFocus
+                  />
                 </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-stone-500 uppercase tracking-wide">
+                    What would change your mind?
+                  </label>
+                  <p className="text-xs text-stone-400 mt-0.5 mb-2">Specific triggers that would move this to invested (or permanently pass).</p>
+                  <div className="space-y-2">
+                    {decisionForm.triggers.map((t, i) => (
+                      <input
+                        key={i}
+                        type="text"
+                        value={t}
+                        onChange={e => {
+                          const updated = [...decisionForm.triggers];
+                          updated[i] = e.target.value;
+                          setDecisionForm(f => ({ ...f, triggers: updated }));
+                        }}
+                        placeholder={[
+                          'e.g. Pilot plant achieves target efficiency',
+                          'e.g. Tier-1 climate fund leads Series A',
+                          'e.g. First paying customer signs',
+                        ][i] || 'Add another trigger...'}
+                        className="w-full p-2.5 text-sm border border-stone-200 dark:border-stone-600 rounded-lg bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 placeholder-stone-400 focus:outline-none focus:border-[#5B6DC4]"
+                      />
+                    ))}
+                    {decisionForm.triggers.length < 5 && (
+                      <button
+                        onClick={() => setDecisionForm(f => ({ ...f, triggers: [...f.triggers, ''] }))}
+                        className="text-xs text-[#5B6DC4] hover:underline"
+                      >+ Add trigger</button>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold text-stone-500 uppercase tracking-wide">Revisit date</label>
+                  <p className="text-xs text-stone-400 mt-0.5 mb-2">When should you re-evaluate this decision?</p>
+                  <input
+                    type="date"
+                    value={decisionForm.revisitDate}
+                    onChange={e => setDecisionForm(f => ({ ...f, revisitDate: e.target.value }))}
+                    className="p-2.5 text-sm border border-stone-200 dark:border-stone-600 rounded-lg bg-white dark:bg-stone-900 text-stone-900 dark:text-stone-100 focus:outline-none focus:border-[#5B6DC4]"
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-1">
+                  <button onClick={saveDecision} className="flex-1 py-2.5 text-sm font-semibold text-white rounded-xl" style={{ backgroundColor: '#5B6DC4' }}>Save decision log</button>
+                  <button onClick={() => setEditingDecision(false)} className="px-4 py-2.5 text-sm text-stone-500 hover:text-stone-700 transition-colors">Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div className="pt-4 space-y-4">
+                {deal.decisionReasoning ? (
+                  <div>
+                    <p className="text-xs text-stone-400 uppercase tracking-wide font-semibold mb-2">Your reasoning</p>
+                    <p className="text-sm text-stone-700 dark:text-stone-300 leading-relaxed">{deal.decisionReasoning}</p>
+                  </div>
+                ) : (
+                  <p className="text-sm text-stone-400 italic">No reasoning logged yet. Add it while it's fresh.</p>
+                )}
+
+                {deal.investmentTriggers?.filter(t => t).length > 0 && (
+                  <div>
+                    <p className="text-xs text-stone-400 uppercase tracking-wide font-semibold mb-2">What would change your mind</p>
+                    <div className="space-y-1.5">
+                      {deal.investmentTriggers.filter(t => t).map((trigger, i) => {
+                        // Check if any agent signal might relate to this trigger
+                        const triggerLower = trigger.toLowerCase();
+                        const matched = signals.some(s =>
+                          s.sentiment === 'positive' &&
+                          (triggerLower.split(' ').filter(w => w.length > 4).some(w => (s.title + s.description).toLowerCase().includes(w)))
+                        );
+                        return (
+                          <div key={i} className={`flex items-start gap-2 px-3 py-2 rounded-lg ${matched ? 'bg-emerald-50 dark:bg-emerald-900/20' : 'bg-stone-50 dark:bg-stone-700/50'}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${matched ? 'bg-emerald-500' : 'bg-stone-300'}`}/>
+                            <span className={`text-sm ${matched ? 'text-emerald-800 dark:text-emerald-300 font-medium' : 'text-stone-600 dark:text-stone-400'}`}>{trigger}</span>
+                            {matched && <span className="ml-auto text-xs text-emerald-600 font-semibold flex-shrink-0">Signal detected ↑</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {deal.revisitDate && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                    <span className="text-stone-500">Revisit by {new Date(deal.revisitDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</span>
+                    {daysUntilRevisit !== null && (
+                      <span className={`text-xs font-medium ${revisitOverdue ? 'text-red-500' : 'text-stone-400'}`}>
+                        ({revisitOverdue ? `${Math.abs(daysUntilRevisit)}d overdue` : `in ${daysUntilRevisit}d`})
+                      </span>
+                    )}
+                  </div>
+                )}
+
                 <button
-                  onClick={() => handleRemove(doc.id)}
-                  className="opacity-0 group-hover:opacity-100 p-1 text-stone-300 hover:text-red-400 transition-all"
+                  onClick={() => {
+                    setDecisionForm({
+                      reasoning: deal.decisionReasoning || '',
+                      revisitDate: deal.revisitDate || '',
+                      triggers: deal.investmentTriggers?.length ? [...deal.investmentTriggers, '', ''].slice(0, 3) : ['', '', ''],
+                      currentStatus: deal.watchingNotes || '',
+                    });
+                    setEditingDecision(true);
+                  }}
+                  className="text-sm text-[#5B6DC4] hover:text-[#4a5ba8] transition-colors"
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M3 6h18M19 6l-1 14H6L5 6M10 11v6M14 11v6M9 6V4h6v2"/>
-                  </svg>
+                  {deal.decisionReasoning ? 'Edit decision log' : '+ Add your reasoning'}
                 </button>
               </div>
-            );
-          })}
+            )}
+          </div>
+        )}
+      </div>
+
+
+      {/* Conviction tracker — manual history, builds calibration dataset */}
+      {(() => {
+        const convictionLog = deal.convictionLog || [];
+        const current = convictionLog[convictionLog.length - 1];
+        const LEVELS = [
+          { value: 'low',    label: 'Low',    color: '#78716c', bg: 'bg-stone-100 dark:bg-stone-700' },
+          { value: 'medium', label: 'Medium', color: '#5B6DC4', bg: 'bg-indigo-50 dark:bg-indigo-900/20' },
+          { value: 'high',   label: 'High',   color: '#10b981', bg: 'bg-emerald-50 dark:bg-emerald-900/20' },
+        ];
+        const updateConviction = (level) => {
+          const entry = { date: new Date().toISOString(), level };
+          const updated = {
+            ...deal,
+            convictionLog: [...convictionLog, entry].slice(-12),
+          };
+          onUpdate(updated);
+        };
+        return (
+          <div className="bg-white dark:bg-stone-800 rounded-2xl p-5">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                <h3 className="text-sm font-semibold text-stone-700 dark:text-stone-300">Conviction</h3>
+              </div>
+              {current && (
+                <span className="text-xs text-stone-400">updated {formatRelativeTime(current.date)}</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 mb-3">
+              {LEVELS.map(lv => (
+                <button
+                  key={lv.value}
+                  onClick={() => updateConviction(lv.value)}
+                  className={`flex-1 py-2 rounded-xl text-sm font-semibold transition-all border-2 ${
+                    current?.level === lv.value
+                      ? 'border-current text-white'
+                      : 'border-transparent bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400 hover:opacity-80'
+                  }`}
+                  style={current?.level === lv.value ? { backgroundColor: lv.color, borderColor: lv.color, color: 'white' } : {}}
+                >
+                  {lv.label}
+                </button>
+              ))}
+            </div>
+            {convictionLog.length >= 2 && (() => {
+              // Mini conviction sparkline
+              const W2 = 200; const H2 = 28; const PAD2 = 3;
+              const levelToNum = { low: 1, medium: 2, high: 3 };
+              const pts2 = convictionLog.map((e, i) => {
+                const x = PAD2 + (i / (convictionLog.length - 1)) * (W2 - PAD2 * 2);
+                const y = PAD2 + ((3 - levelToNum[e.level]) / 2) * (H2 - PAD2 * 2);
+                return [x, y, e.level];
+              });
+              const poly2 = pts2.map(([x, y]) => `${x},${y}`).join(' ');
+              const currentColor = LEVELS.find(l => l.value === current?.level)?.color || '#78716c';
+              const first = convictionLog[0];
+              const last = convictionLog[convictionLog.length - 1];
+              const changed = first.level !== last.level;
+              return (
+                <div>
+                  <svg width="100%" viewBox={`0 0 ${W2} ${H2}`} style={{ maxHeight: '28px' }}>
+                    {['low','medium','high'].map((lv, i) => {
+                      const ly = PAD2 + ((2 - i) / 2) * (H2 - PAD2 * 2);
+                      return <line key={lv} x1={PAD2} y1={ly} x2={W2-PAD2} y2={ly} stroke="#f5f5f4" strokeWidth="1"/>;
+                    })}
+                    <polyline points={poly2} fill="none" stroke={currentColor} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/>
+                    <circle cx={pts2[pts2.length-1][0]} cy={pts2[pts2.length-1][1]} r="2.5" fill={currentColor}/>
+                  </svg>
+                  <p className="text-xs text-stone-400 mt-1">
+                    {convictionLog.length} update{convictionLog.length > 1 ? 's' : ''}
+                    {changed ? ` · ${first.level} → ${last.level}` : ' · unchanged'}
+                    {' · '}{new Date(first.date).toLocaleDateString('en-US', { month: 'short', year: '2-digit' })} – now
+                  </p>
+                </div>
+              );
+            })()}
+            {convictionLog.length < 2 && (
+              <p className="text-xs text-stone-400">Set your conviction level above each time you revisit — this builds a record of how your view changes over time.</p>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* External signals from agent */}
+      {(signals.length > 0 || agentSummary) && (
+        <div className="bg-white dark:bg-stone-800 rounded-2xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <h3 className="text-sm font-semibold text-stone-700 dark:text-stone-300">Latest signals</h3>
+            </div>
+            {agentFetchedAt && <span className="text-xs text-stone-400">{formatRelativeTime(agentFetchedAt)}</span>}
+          </div>
+          {agentSummary && <p className="text-sm text-stone-600 dark:text-stone-400 mb-3 leading-relaxed">{agentSummary}</p>}
+          <div className="space-y-2">
+            {signals.slice(0, 4).map((s, i) => (
+              <div key={i} className={`flex items-start gap-2.5 p-2.5 rounded-lg ${s.sentiment === 'positive' ? 'bg-emerald-50 dark:bg-emerald-900/20' : s.sentiment === 'negative' ? 'bg-red-50 dark:bg-red-900/20' : 'bg-stone-50 dark:bg-stone-700/50'}`}>
+                <span className={`w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0 ${s.sentiment === 'positive' ? 'bg-emerald-500' : s.sentiment === 'negative' ? 'bg-red-500' : 'bg-stone-400'}`}/>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-stone-800 dark:text-stone-200">{s.title}</p>
+                  <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">{s.description}</p>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
   );
 };
 
-// Invested View - Clean confirmation design
+
+// ── HEALTH TREND SPARKLINE ─────────────────────────────────────────────────
+// Pure SVG — no charting library needed. Shows health score over time.
+const HealthTrendChart = ({ healthHistory = [], currentScore, currentLabel, color }) => {
+  if (healthHistory.length < 2) {
+    return (
+      <div className="flex items-center gap-2 py-2">
+        <svg width="80" height="24" className="opacity-30">
+          <line x1="0" y1="12" x2="80" y2="12" stroke={color} strokeWidth="1.5" strokeDasharray="3,3"/>
+        </svg>
+        <span className="text-xs text-stone-400">Not enough history yet — add updates to build trend</span>
+      </div>
+    );
+  }
+
+  const all = [...healthHistory, { score: currentScore, date: new Date().toISOString() }];
+  const W = 220; const H = 52; const PAD_X = 4; const PAD_Y = 6; const LABEL_H = 14;
+  const chartH = H - LABEL_H;
+  const minS = Math.max(0, Math.min(...all.map(p => p.score)) - 8);
+  const maxS = Math.min(100, Math.max(...all.map(p => p.score)) + 8);
+  const range = maxS - minS || 1;
+
+  const pts = all.map((p, i) => {
+    const x = PAD_X + (i / (all.length - 1)) * (W - PAD_X * 2);
+    const y = PAD_Y + ((maxS - p.score) / range) * (chartH - PAD_Y * 2);
+    return [x, y, p.score, p.date];
+  });
+
+  const polyline = pts.map(([x, y]) => `${x},${y}`).join(' ');
+  const areaPath = `M${pts[0][0]},${chartH} ` + pts.map(([x, y]) => `L${x},${y}`).join(' ') + ` L${pts[pts.length-1][0]},${chartH} Z`;
+
+  const delta = all[all.length - 1].score - all[0].score;
+  const trend = delta > 3 ? '↑' : delta < -3 ? '↓' : '→';
+  const trendColor = delta > 3 ? '#10b981' : delta < -3 ? '#ef4444' : '#78716c';
+
+  const fmtShort = (d) => new Date(d).toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+  const spanDays = Math.round((new Date(all[all.length-1].date) - new Date(all[0].date)) / 86400000);
+  const spanLabel = spanDays < 30 ? `${spanDays}d` : spanDays < 365 ? `${Math.round(spanDays/30)}mo` : `${(spanDays/365).toFixed(1)}yr`;
+
+  return (
+    <div className="w-full" style={{ maxWidth: '400px' }}>
+      <svg width="100%" viewBox={`0 0 ${W} ${H}`} className="overflow-visible">
+        <defs>
+          <linearGradient id={`grad-${color.replace('#','')}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity="0.2"/>
+            <stop offset="100%" stopColor={color} stopOpacity="0"/>
+          </linearGradient>
+        </defs>
+        {/* Threshold lines at 62 (Investigate) and 80 (On Track) */}
+        {[{ v: 62, label: 'Investigate' }, { v: 80, label: 'On Track' }].map(({ v, label }) => {
+          const ty = PAD_Y + ((maxS - v) / range) * (chartH - PAD_Y * 2);
+          return ty > 0 && ty < chartH ? (
+            <g key={v}>
+              <line x1={PAD_X} y1={ty} x2={W - PAD_X} y2={ty} stroke="#d6d3d1" strokeWidth="1" strokeDasharray="3,3"/>
+              <text x={W - PAD_X - 2} y={ty - 2} fontSize="7" fill="#a8a29e" textAnchor="end">{label}</text>
+            </g>
+          ) : null;
+        })}
+        <path d={areaPath} fill={`url(#grad-${color.replace('#','')})`}/>
+        <polyline points={polyline} fill="none" stroke={color} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
+        {/* First and last dots with dates */}
+        <circle cx={pts[0][0]} cy={pts[0][1]} r="2.5" fill={color} opacity="0.5"/>
+        <circle cx={pts[pts.length-1][0]} cy={pts[pts.length-1][1]} r="3" fill={color}/>
+        {/* X-axis date labels */}
+        <text x={PAD_X} y={H - 1} fontSize="8" fill="#a8a29e">{fmtShort(all[0].date)}</text>
+        <text x={W - PAD_X} y={H - 1} fontSize="8" fill="#a8a29e" textAnchor="end">Now</text>
+      </svg>
+      <div className="flex items-center justify-between mt-1">
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm font-semibold" style={{ color }}>{currentLabel}</span>
+          <span className="text-sm font-bold" style={{ color: trendColor }}>{trend}</span>
+          <span className="text-xs text-stone-400 ml-1">{Math.abs(delta) > 0 ? `${delta > 0 ? '+' : ''}${Math.round(delta)} pts` : 'stable'}</span>
+        </div>
+        <span className="text-[10px] text-stone-400">{spanLabel} of history · {all.length - 1} snapshot{all.length > 2 ? 's' : ''}</span>
+      </div>
+    </div>
+  );
+};
+
+
 const InvestedView = ({ deal, onUpdate, setToast }) => {
   const inv = deal.investment || {};
   const [showUpdateLog, setShowUpdateLog] = useState(false);
@@ -2194,25 +2014,43 @@ const InvestedView = ({ deal, onUpdate, setToast }) => {
 
   const handleAddUpdate = () => {
     if (!newUpdateNote.trim()) return;
+    const now = new Date().toISOString();
+    // Parse the note for health signals immediately — gives instant health feedback
+    const parsedSignals = parseUpdateForSignals(newUpdateNote.trim(), now);
+    const hasNegative = parsedSignals.some(s => s.sentiment === 'negative');
+    const hasPositive = parsedSignals.some(s => s.sentiment === 'positive');
+    // Snapshot current health score for trend tracking
+    const currentHealth = calcDealHealth(deal, getAgentCache()[deal.id]?.signals || []);
+    const healthSnapshot = { date: now, score: currentHealth.score, label: currentHealth.label };
     const updated = {
       ...deal,
       milestones: [...(deal.milestones || []), {
         id: `u-${Date.now()}`,
         type: 'update',
-        title: 'Founder update',
+        title: (() => {
+          const t = newUpdateNote.trim().toLowerCase();
+          if (/email|update from|founder said|called|spoke with|meeting/.test(t)) return 'Founder update';
+          if (/raised|funding|closed round|new round/.test(t)) return 'Funding event';
+          if (/customer|signed|offtake|loi|contract/.test(t)) return 'Customer signal';
+          if (/hired|new cto|new cfo|joined/.test(t)) return 'Team update';
+          return 'Investor note';
+        })(),
         description: newUpdateNote.trim(),
-        date: new Date().toISOString()
+        date: now,
+        parsedSignalCount: parsedSignals.length,
       }],
-      lastUpdateReceived: new Date().toISOString()
+      lastUpdateReceived: now,
+      // Append health snapshot to trend history
+      healthHistory: [...(deal.healthHistory || []), healthSnapshot].slice(-24), // keep last 24 snapshots
     };
     onUpdate(updated);
     setNewUpdateNote('');
     setShowAddUpdate(false);
-    if (setToast) setToast({ message: 'Update logged', type: 'success' });
-  };
-
-  const handleUpdateDocs = (newDocs) => {
-    onUpdate({ ...deal, documents: newDocs });
+    setShowUpdateLog(true); // auto-open so user sees what was just logged
+    const msg = parsedSignals.length > 0
+      ? `Update logged · ${parsedSignals.length} signal${parsedSignals.length > 1 ? 's' : ''} extracted${hasNegative ? ' — health flags updated' : ''}`
+      : 'Update logged';
+    if (setToast) setToast({ message: msg, type: hasNegative ? 'warning' : 'success' });
   };
 
   return (
@@ -2262,50 +2100,227 @@ const InvestedView = ({ deal, onUpdate, setToast }) => {
         )}
       </div>
 
-      {/* Investment Summary */}
-      <div className="bg-white dark:bg-stone-800 rounded-2xl p-5">
-        <div className="flex items-center gap-2 mb-4">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2">
-            <circle cx="12" cy="12" r="10"/><line x1="12" y1="6" x2="12" y2="18"/>
-            <path d="M15 9.5c0-1.5-1.5-2.5-3-2.5s-3 .5-3 2.5c0 1.5 1.5 2 3 2.5s3 1 3 2.5c0 1.5-1.5 2.5-3 2.5s-3-1-3-2.5"/>
-          </svg>
-          <h3 className="font-medium text-stone-900 dark:text-white">Investment</h3>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          {inv.amount && (
-            <div>
-              <p className="text-xs text-stone-400 uppercase tracking-wide mb-1">Amount</p>
-              <p className="text-lg font-semibold text-stone-900 dark:text-stone-100">${(inv.amount / 1000).toFixed(0)}K</p>
+      {/* Investment Summary + Valuation + Health */}
+      {(() => {
+        const method = getValuationMethod(deal);
+        const implied = calcImpliedValue(deal);
+        const moic = calcMOIC(deal);
+        // Read agent cache and merge with update log signals inside calcDealHealth
+        const agentCache = getAgentCache();
+        const health = calcDealHealth(deal, agentCache[deal.id]?.signals || []);
+        const staleness = getMarkStaleness(deal);
+        const stalenessColors = { fresh: '#10b981', ok: '#5B6DC4', stale: '#f59e0b', 'very-stale': '#ef4444', unknown: '#78716c' };
+        return (
+          <>
+            {/* Deal terms row */}
+            <div className="bg-white dark:bg-stone-800 rounded-2xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"/><line x1="12" y1="6" x2="12" y2="18"/>
+                    <path d="M15 9.5c0-1.5-1.5-2.5-3-2.5s-3 .5-3 2.5c0 1.5 1.5 2 3 2.5s3 1 3 2.5c0 1.5-1.5 2.5-3 2.5s-3-1-3-2.5"/>
+                  </svg>
+                  <h3 className="font-medium text-stone-900 dark:text-white">Investment</h3>
+                </div>
+                {/* Health badge */}
+                <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-semibold" style={{ backgroundColor: health.color + '18', color: health.color }} title={`Health score: ${health.score}/100`}>
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: health.color }}/>
+                  {health.label}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                {inv.amount && (
+                  <div>
+                    <p className="text-xs text-stone-400 uppercase tracking-wide mb-1">Amount in</p>
+                    <p className="text-lg font-semibold text-stone-900 dark:text-stone-100">{formatCurrency(inv.amount)}</p>
+                  </div>
+                )}
+                {hasSeparateCostBasis(inv) && (
+                  <div>
+                    <p className="text-xs text-stone-400 uppercase tracking-wide mb-1">Cost basis</p>
+                    <p className="text-lg font-semibold text-stone-900 dark:text-stone-100">{formatCurrency(getEffectiveCostBasis(inv))}</p>
+                  </div>
+                )}
+                {inv.vehicle && (
+                  <div>
+                    <p className="text-xs text-stone-400 uppercase tracking-wide mb-1">Vehicle</p>
+                    <p className="text-sm font-medium text-stone-900 dark:text-stone-100">{inv.vehicle}</p>
+                  </div>
+                )}
+                {inv.ownershipPercent && (
+                  <div>
+                    <p className="text-xs text-stone-400 uppercase tracking-wide mb-1">Ownership</p>
+                    <p className="text-sm font-medium text-stone-900 dark:text-stone-100">{inv.ownershipPercent}%</p>
+                  </div>
+                )}
+                {inv.date && (
+                  <div>
+                    <p className="text-xs text-stone-400 uppercase tracking-wide mb-1">Date</p>
+                    <p className="text-sm font-medium text-stone-900 dark:text-stone-100">{new Date(inv.date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</p>
+                  </div>
+                )}
+              </div>
+
             </div>
-          )}
-          {inv.vehicle && (
-            <div>
-              <p className="text-xs text-stone-400 uppercase tracking-wide mb-1">Vehicle</p>
-              <p className="text-sm font-medium text-stone-900 dark:text-stone-100">{inv.vehicle}</p>
+
+            {/* Health trend */}
+            <div className="bg-white dark:bg-stone-800 rounded-2xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                  <span className="text-sm font-medium text-stone-700 dark:text-stone-300">Health trend</span>
+                </div>
+                <span className="text-xs text-stone-400">since investment</span>
+              </div>
+              <HealthTrendChart
+                healthHistory={deal.healthHistory || []}
+                currentScore={health.score}
+                currentLabel={health.label}
+                color={health.color}
+              />
             </div>
-          )}
-          {inv.ownershipPercent && (
-            <div>
-              <p className="text-xs text-stone-400 uppercase tracking-wide mb-1">Ownership</p>
-              <p className="text-sm font-medium text-stone-900 dark:text-stone-100">{inv.ownershipPercent}%</p>
+
+            {/* Valuation card */}
+            <div className="bg-white dark:bg-stone-800 rounded-2xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+                  <h3 className="font-medium text-stone-900 dark:text-white">Valuation</h3>
+                </div>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400">{getValuationLabel(method)}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <p className="text-xs text-stone-400 uppercase tracking-wide mb-1">Cost basis</p>
+                  <p className="text-lg font-bold text-stone-900 dark:text-white">{formatCurrency(getEffectiveCostBasis(inv))}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-stone-400 uppercase tracking-wide mb-1">Implied value</p>
+                  {method === 'mark-at-cost' ? (
+                    <p className="text-lg font-bold text-stone-400 dark:text-stone-500">—</p>
+                  ) : (
+                    <p className="text-lg font-bold" style={{ color: implied >= getEffectiveCostBasis(inv) ? '#10b981' : '#ef4444' }}>{formatCurrency(implied)}</p>
+                  )}
+                </div>
+                <div>
+                  <p className="text-xs text-stone-400 uppercase tracking-wide mb-1">MOIC</p>
+                  {method === 'mark-at-cost' ? (
+                    <p className="text-lg font-bold text-stone-400 dark:text-stone-500">1.0x</p>
+                  ) : moic !== null ? (
+                    <p className="text-lg font-bold" style={{ color: moic >= 1.5 ? '#10b981' : moic >= 1.0 ? '#5B6DC4' : '#ef4444' }}>{moic.toFixed(2)}x</p>
+                  ) : (
+                    <p className="text-lg font-bold text-stone-400">—</p>
+                  )}
+                </div>
+              </div>
+              {method === 'mark-at-cost' && (
+                <div className="mt-3 pt-3 border-t border-stone-100 dark:border-stone-700">
+                  <p className="text-xs text-stone-400 dark:text-stone-500 italic mb-2">
+                    {health.maturity === 'lab' ? 'Lab/bench stage — marked at cost. MOIC is not meaningful pre-demonstration.' : 'Pilot stage — marked at cost until next priced round or valuation event.'}
+                  </p>
+                  {/* SAFE conversion context — only shown for unconverted SAFEs with a cap */}
+                  {inv.vehicle === 'SAFE' && deal.terms?.cap && (() => {
+                      const cap = deal.terms.cap;
+                      const invested = getEffectiveCostBasis(inv);
+                      const pct = cap > 0 ? ((invested / (cap + invested)) * 100) : null;
+                      const extras = [deal.terms?.discount ? `${deal.terms.discount}% discount` : null, deal.terms?.mfn ? 'MFN' : null].filter(Boolean);
+                      return (
+                        <div className="bg-stone-50 dark:bg-stone-700/50 rounded-xl px-4 py-3">
+                          <p className="text-sm text-stone-700 dark:text-stone-300">
+                            At your <span className="font-semibold">{formatCurrency(cap)}</span> cap, you'd own approximately{' '}
+                            <span className="font-semibold text-[#5B6DC4]">~{pct?.toFixed(2)}%</span> on conversion
+                            {extras.length > 0 && <span className="text-stone-500"> · {extras.join(', ')}</span>}.
+                          </p>
+                          <p className="text-xs text-stone-400 mt-1.5">Pre-dilution from option pool. Exact % confirmed at next priced round.</p>
+                        </div>
+                      );
+                  })()}
+                </div>
+              )}
+              {method !== 'mark-at-cost' && inv.lastValuationDate && (
+                <div className="mt-3 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: stalenessColors[staleness] }}/>
+                  <p className="text-xs" style={{ color: stalenessColors[staleness] }}>
+                    Mark from {new Date(inv.lastValuationDate).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+                    {staleness === 'stale' ? ' — consider refreshing' : staleness === 'very-stale' ? ' — mark is outdated' : ''}
+                  </p>
+                </div>
+              )}
             </div>
-          )}
-          {inv.date && (
-            <div>
-              <p className="text-xs text-stone-400 uppercase tracking-wide mb-1">Date</p>
-              <p className="text-sm font-medium text-stone-900 dark:text-stone-100">
-                {new Date(inv.date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
-              </p>
-            </div>
-          )}
-        </div>
-        {(inv.whyYes || deal.investReasoning) && (
-          <div className="mt-4 pt-4 border-t border-stone-100 dark:border-stone-700">
-            <p className="text-xs text-stone-400 uppercase tracking-wide mb-2">Your thesis</p>
-            <p className="text-sm text-stone-600 dark:text-stone-400 italic">"{inv.whyYes || deal.investReasoning}"</p>
-          </div>
-        )}
-      </div>
+
+            {/* Health breakdown — transparent, plain-language explanation */}
+            {(() => {
+              const topNegative = health.factors.find(f => f.type === 'negative');
+              const topWarning = health.factors.find(f => f.type === 'warning');
+              const topPositive = health.factors.find(f => f.type === 'positive');
+              const leadFactor = topNegative || topWarning || topPositive;
+              const trlLabel = {'lab': 'Lab · TRL 1–3', 'pilot': 'Pilot · TRL 4–6', 'scale': 'Commercial · TRL 7–8', 'deploy': 'Deploy · TRL 9', 'fund': 'LP Fund'}[health.maturity] || health.maturity;
+
+              // Plain-language summary of what this means for the investor
+              const actionSentence = health.label === 'Investigate'
+                ? `Something specific needs your attention — ${health.checkInReason || 'review the signals below'}.`
+                : health.label === 'Critical'
+                ? `Multiple compounding issues detected. This warrants a direct conversation with the founder soon.`
+                : health.label === 'On Track'
+                ? `Signals are positive. No action needed — just stay informed.`
+                : `No urgent issues. Keep monitoring on schedule.`;
+
+              return (
+                <div className={`rounded-2xl overflow-hidden ${health.bg}`}>
+                  {/* Header with plain-language verdict */}
+                  <div className="px-5 pt-5 pb-3">
+                    <div className="flex items-start justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={health.color} strokeWidth="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                        <span className="text-sm font-semibold text-stone-800 dark:text-stone-200">Why {health.label}</span>
+                      </div>
+                      <span className="text-xs text-stone-400 dark:text-stone-500">{trlLabel}</span>
+                    </div>
+                    <p className="text-sm text-stone-700 dark:text-stone-300 leading-relaxed">{actionSentence}</p>
+                  </div>
+
+                  {/* Factor breakdown */}
+                  <div className="px-5 pb-4 space-y-2 border-t border-stone-200/40 dark:border-stone-600/40 pt-3">
+                    {health.factors.filter(f => f.type !== 'info').map((f, i) => (
+                      <div key={i} className="flex items-start gap-2.5">
+                        <span className={`w-2 h-2 rounded-full mt-1 flex-shrink-0 ${
+                          f.type === 'positive' ? 'bg-emerald-500' :
+                          f.type === 'negative' ? 'bg-red-500' :
+                          f.type === 'warning' ? 'bg-amber-500' : 'bg-stone-300'
+                        }`}/>
+                        <span className="text-sm text-stone-600 dark:text-stone-400 flex-1 leading-snug">{f.label}</span>
+                        <span className={`text-xs font-semibold flex-shrink-0 ${
+                          f.impact > 0 ? 'text-emerald-600 dark:text-emerald-400' :
+                          f.impact < 0 ? 'text-red-500' : 'text-stone-400'
+                        }`}>
+                          {f.impact > 0 ? '+' : ''}{f.impact !== 0 ? f.impact : ''}
+                        </span>
+                      </div>
+                    ))}
+                    {health.factors.filter(f => f.type === 'info').map((f, i) => (
+                      <div key={'info-'+i} className="flex items-center gap-2 opacity-60">
+                        <span className="w-2 h-2 rounded-full bg-stone-300 flex-shrink-0"/>
+                        <span className="text-xs text-stone-500 dark:text-stone-500">{f.label}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Check-in CTA — only when action is needed */}
+                  {health.shouldCheckIn && (
+                    <div className="mx-5 mb-4 px-4 py-3 rounded-xl flex items-center gap-3" style={{ backgroundColor: 'rgba(255,255,255,0.6)', border: `1px solid ${health.color}30` }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={health.color} strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                      <div>
+                        <p className="text-xs font-semibold" style={{ color: health.color }}>Suggested action</p>
+                        <p className="text-xs text-stone-600 dark:text-stone-400 mt-0.5">{health.checkInReason} — reach out to the founder for an update.</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </>
+        );
+      })()}
 
       {/* Update Log */}
       <div className="bg-white dark:bg-stone-800 rounded-2xl overflow-hidden">
@@ -2361,32 +2376,62 @@ const InvestedView = ({ deal, onUpdate, setToast }) => {
               {updateEntries.length === 0 && !showAddUpdate && (
                 <p className="text-sm text-stone-400 dark:text-stone-500 text-center py-2">No updates logged yet</p>
               )}
-              {updateEntries.map(entry => (
-                <div key={entry.id} className="flex gap-3">
-                  <div className="w-1.5 h-1.5 rounded-full bg-stone-300 dark:bg-stone-600 mt-2 flex-shrink-0" />
-                  <div>
-                    <p className="text-sm text-stone-700 dark:text-stone-300">{entry.description}</p>
-                    <p className="text-xs text-stone-400 mt-0.5">
-                      {new Date(entry.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                    </p>
+              {updateEntries.map(entry => {
+                const entrySignals = parseUpdateForSignals(entry.description, entry.date);
+                const hasNeg = entrySignals.some(s => s.sentiment === 'negative');
+                const hasPos = entrySignals.some(s => s.sentiment === 'positive');
+                return (
+                  <div key={entry.id} className="flex gap-3">
+                    <div className={`w-1.5 h-1.5 rounded-full mt-2 flex-shrink-0 ${hasNeg ? 'bg-amber-400' : hasPos ? 'bg-emerald-400' : 'bg-stone-300 dark:bg-stone-600'}`} />
+                    <div className="flex-1">
+                      <p className="text-sm text-stone-700 dark:text-stone-300">{entry.description}</p>
+                      <div className="flex items-center gap-2 mt-1 flex-wrap">
+                        <p className="text-xs text-stone-400">
+                          {new Date(entry.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </p>
+                        {entrySignals.length > 0 && (
+                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${hasNeg ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                            {entrySignals.length} signal{entrySignals.length > 1 ? 's' : ''} extracted
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
 
               {showAddUpdate ? (
                 <div className="space-y-2 pt-1">
                   <textarea
                     value={newUpdateNote}
                     onChange={e => setNewUpdateNote(e.target.value)}
-                    placeholder="What did you hear from the founder? Revenue milestone, new hire, next round timing..."
-                    rows={3}
+                    placeholder="Paste a founder email, or write what you observed. e.g. 'Joey called — runway is 14 months, raising Series A in Q3. Meta pilot still on track, second data center customer in LOI stage.'"
+                    rows={4}
                     className="w-full p-3 text-sm border border-stone-200 dark:border-stone-600 rounded-xl bg-white dark:bg-stone-800 text-stone-900 dark:text-stone-100 placeholder-stone-400 focus:outline-none focus:border-[#5B6DC4] resize-none"
                     autoFocus
                   />
+                  {/* Live signal preview — shows what will be extracted before saving */}
+                  {newUpdateNote.length > 20 && (() => {
+                    const preview = parseUpdateForSignals(newUpdateNote, new Date().toISOString());
+                    if (preview.length === 0) return null;
+                    const hasNeg = preview.some(s => s.sentiment === 'negative');
+                    return (
+                      <div className={`px-3 py-2 rounded-lg text-xs ${hasNeg ? 'bg-amber-50 border border-amber-200' : 'bg-emerald-50 border border-emerald-200'}`}>
+                        <span className={`font-semibold ${hasNeg ? 'text-amber-700' : 'text-emerald-700'}`}>
+                          {preview.length} signal{preview.length > 1 ? 's' : ''} detected:
+                        </span>
+                        <span className={`ml-1 ${hasNeg ? 'text-amber-600' : 'text-emerald-600'}`}>
+                          {preview.map(s => s.title).join(' · ')}
+                        </span>
+                        <span className="text-stone-400 ml-1">— will update health score</span>
+                      </div>
+                    );
+                  })()}
                   <div className="flex gap-2">
                     <button
                       onClick={handleAddUpdate}
-                      className="flex-1 py-2 text-sm font-medium text-white rounded-lg"
+                      disabled={newUpdateNote.trim().length < 10}
+                      className="flex-1 py-2 text-sm font-semibold text-white rounded-lg disabled:opacity-40 transition-all"
                       style={{ backgroundColor: '#5B6DC4' }}
                     >
                       Log update
@@ -2412,11 +2457,7 @@ const InvestedView = ({ deal, onUpdate, setToast }) => {
         )}
       </div>
 
-      {/* Document Links */}
-      <DocumentLinksSection
-        docs={deal.documents || []}
-        onUpdate={handleUpdateDocs}
-      />
+
 
     </div>
   );
@@ -2426,719 +2467,106 @@ const InvestedView = ({ deal, onUpdate, setToast }) => {
 // Passed View
 
 // Portfolio Monitor Page - Health tracking and news feed for invested companies
-const PortfolioMonitorPage = ({ deals, onBack, onSelectCompany, selectedDeal }) => {
-  const [selectedFilter, setSelectedFilter] = useState(selectedDeal?.id || 'all');
-  const [expandedTimeline, setExpandedTimeline] = useState({});
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [lastRefreshed, setLastRefreshed] = useState(null);
-  const [shareModalSignal, setShareModalSignal] = useState(null);
-  const [copiedLink, setCopiedLink] = useState(false);
-  
-  // Get only invested companies
-  const portfolioDeals = deals.filter(d => d.status === 'invested').sort((a, b) => 
-    new Date(b.investment?.date || b.statusEnteredAt).getTime() - new Date(a.investment?.date || a.statusEnteredAt).getTime()
-  );
-  
-  // Generate activity feed from all portfolio companies
-  const [fetchedSignals, setFetchedSignals] = useState({});
-  const [signalError, setSignalError] = useState(null);
-
-  // Fetch real signals via Claude API with web search
-  const fetchSignalsForCompany = async (deal) => {
-    try {
-      const response = await fetch("/api/signals", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          companyName: deal.companyName,
-          industry: deal.industry,
-          website: deal.website || null
-        })
-      });
-
-      const data = await response.json();
-      const signals = Array.isArray(data.signals) ? data.signals : [];
-      return signals;
-    } catch (e) {
-      console.error(`Signal fetch failed for ${deal.companyName}:`, e);
-      return [];
-    }
-  };
-
-  const fetchAllSignals = async () => {
-    setIsRefreshing(true);
-    setSignalError(null);
-    try {
-      const results = [];
-      for (let i = 0; i < portfolioDeals.length; i++) {
-        if (i > 0) await new Promise(r => setTimeout(r, 4000)); // 4s between requests
-        const deal = portfolioDeals[i];
-        const signals = await fetchSignalsForCompany(deal);
-        results.push({ dealId: deal.id, signals });
-      }
-      const byDeal = {};
-      results.forEach(r => { byDeal[r.dealId] = r.signals; });
-      setFetchedSignals(byDeal);
-      setLastRefreshed(new Date());
-    } catch (e) {
-      setSignalError('Could not fetch signals. Showing milestones only.');
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-
-  // Fetch on mount
-  useEffect(() => { fetchAllSignals(); }, []);
-
-  const generateActivityFeed = () => {
-    const activities = [];
-    
-    portfolioDeals.forEach(deal => {
-      // Only add fetched live signals - no hardcoded milestones
-      const signals = fetchedSignals[deal.id] || [];
-      signals.forEach((s, i) => {
-        activities.push({
-          id: `${deal.id}-fetched-${i}`,
-          companyId: deal.id,
-          companyName: deal.companyName,
-          type: s.type || 'press',
-          title: s.title,
-          description: s.description,
-          date: s.date || new Date().toISOString(),
-          source: s.source || 'Web',
-          sourceUrl: s.sourceUrl || null,
-          verified: true,
-          sentiment: s.sentiment || 'neutral',
-          isLive: true
-        });
-      });
-    });
-    
-    return activities.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  };
-  
-  const getTypeIcon = (type) => {
-    const icons = {
-      fundraising: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>,
-      hiring: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>,
-      team: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
-      growth: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>,
-      product: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>,
-      partnership: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20.42 4.58a5.4 5.4 0 0 0-7.65 0l-.77.78-.77-.78a5.4 5.4 0 0 0-7.65 0C1.46 6.7 1.33 10.28 4 13l8 8 8-8c2.67-2.72 2.54-6.3.42-8.42z"/></svg>,
-      press: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/></svg>,
-      podcast: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
-    };
-    return icons[type] || <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/></svg>;
-  };
-  
-  const getTypeColor = (type) => {
-    const colors = {
-      fundraising: { bg: 'bg-emerald-50', text: 'text-emerald-600', border: 'border-emerald-200' },
-      hiring: { bg: 'bg-blue-50', text: 'text-blue-600', border: 'border-blue-200' },
-      team: { bg: 'bg-violet-50', text: 'text-violet-600', border: 'border-violet-200' },
-      growth: { bg: 'bg-emerald-50', text: 'text-emerald-600', border: 'border-emerald-200' },
-      product: { bg: 'bg-pink-50', text: 'text-pink-600', border: 'border-pink-200' },
-      partnership: { bg: 'bg-amber-50', text: 'text-amber-600', border: 'border-amber-200' },
-      press: { bg: 'bg-stone-50', text: 'text-stone-600', border: 'border-stone-200' },
-      podcast: { bg: 'bg-purple-50', text: 'text-purple-600', border: 'border-purple-200' }
-    };
-    return colors[type] || { bg: 'bg-stone-50', text: 'text-stone-600', border: 'border-stone-200' };
-  };
-  
-  const getSourceIcon = (source) => {
-    const lower = source.toLowerCase();
-    if (lower.includes('linkedin')) return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"/><rect x="2" y="9" width="4" height="12"/><circle cx="4" cy="4" r="2"/></svg>;
-    if (lower.includes('twitter') || lower.includes('x (')) return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 4s-.7 2.1-2 3.4c1.6 10-9.4 17.3-18 11.6 2.2.1 4.4-.6 6-2C3 15.5.5 9.6 3 5c2.2 2.6 5.6 4.1 9 4-.9-4.2 4-6.6 7-3.8 1.1 0 3-1.2 3-1.2z"/></svg>;
-    if (lower.includes('crunchbase')) return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>;
-    if (lower.includes('techcrunch')) return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/></svg>;
-    if (lower.includes('podcast')) return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/></svg>;
-    return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>;
-  };
-  
-  const activityFeed = generateActivityFeed();
-  
-  // Filter activities
-  const filteredActivities = selectedFilter === 'all' 
-    ? activityFeed 
-    : activityFeed.filter(a => a.companyId === selectedFilter);
-  
-  const formatRelativeDate = (date) => {
-    const days = daysAgo(date);
-    if (days === 0) return 'Today';
-    if (days === 1) return 'Yesterday';
-    if (days < 7) return `${days} days ago`;
-    if (days < 30) return `${Math.floor(days / 7)} weeks ago`;
-    return formatDate(date);
-  };
-  
-  // Generate trajectory assessment for each company
-  const getTrajectoryAssessment = (deal) => {
-    const companyActivities = activityFeed.filter(a => a.companyId === deal.id);
-    const positiveSignals = companyActivities.filter(a => a.sentiment === 'positive').length;
-    const negativeSignals = companyActivities.filter(a => a.sentiment === 'negative').length;
-    const totalSignals = companyActivities.length;
-    const recentSignals = companyActivities.filter(a => daysAgo(a.date) < 60).length;
-
-    if (totalSignals === 0) {
-      return {
-        trajectory: 'unclear',
-        confidence: 'low',
-        summary: 'No recent signals found yet.',
-        sinceThen: 'No observable changes since last assessment.',
-        marketContext: null,
-        comparedTo: null,
-        uncertainty: 'Signal gap — no updates in 30+ days. Could be heads-down execution or concerning silence.',
-        assessedAt: new Date().toISOString()
-      };
-    }
-
-    const trajectory = negativeSignals > positiveSignals ? 'declining'
-      : positiveSignals >= 2 && recentSignals >= 1 ? 'accelerating'
-      : positiveSignals >= 1 ? 'steady'
-      : 'unclear';
-
-    return {
-      trajectory,
-      confidence: totalSignals >= 3 ? 'moderate' : 'low',
-      summary: positiveSignals > negativeSignals
-        ? `${positiveSignals} positive signal${positiveSignals > 1 ? 's' : ''} in recent months — execution tracking well.`
-        : negativeSignals > 0
-        ? `Mixed signals — ${negativeSignals} concerning indicator${negativeSignals > 1 ? 's' : ''} worth watching.`
-        : 'Neutral signals — limited data to assess momentum.',
-      sinceThen: `${totalSignals} observable signal${totalSignals > 1 ? 's' : ''} found across public sources.`,
-      marketContext: null,
-      comparedTo: null,
-      uncertainty: totalSignals < 2 ? 'Limited signal density — pull updates again or check back soon.' : null,
-      assessedAt: new Date().toISOString()
-    };
-  };
-  
-  const trajectoryConfig = {
-    'accelerating': { 
-      label: 'Accelerating', 
-      color: '#10b981', 
-      bg: 'bg-emerald-50', 
-      icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
-    },
-    'steady': { 
-      label: 'Steady', 
-      color: '#5B6DC4', 
-      bg: 'bg-[#5B6DC4]/10',
-      icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
-    },
-    'plateauing': { 
-      label: 'Plateauing', 
-      color: '#f59e0b', 
-      bg: 'bg-amber-50',
-      icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="4" y1="12" x2="20" y2="12"/></svg>
-    },
-    'at-risk': { 
-      label: 'At Risk', 
-      color: '#ef4444', 
-      bg: 'bg-red-50',
-      icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-    },
-    'too-early': { 
-      label: 'Too Early to Tell', 
-      color: '#78716c', 
-      bg: 'bg-stone-100',
-      icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-    },
-    'unclear': { 
-      label: 'Unclear', 
-      color: '#78716c', 
-      bg: 'bg-stone-100',
-      icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="1" y1="1" x2="23" y2="23"/><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V9a3 3 0 0 0-5.94-.6"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-    }
-  };
-  
-  // Get comparison label
-  const getComparisonLabel = (comparedTo) => {
-    const labels = {
-      'peers': 'vs. similar companies',
-      'thesis': 'vs. your original thesis',
-      'baseline': 'vs. investment baseline',
-      'expectations': 'vs. expectations'
-    };
-    return labels[comparedTo] || null;
-  };
-  
-  // Format interpretation date
-  const formatInterpretationDate = (date) => {
-    return new Date(date).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-  };
-  
-  // Get the selected company for single-company view
-  const selectedCompany = selectedFilter !== 'all' ? portfolioDeals.find(d => d.id === selectedFilter) : null;
-  const selectedTrajectory = selectedCompany ? getTrajectoryAssessment(selectedCompany) : null;
-  
+// Main App (internal, wrapped by auth)
+// ── Deal list card components — defined at module level so React reconciler is stable ──
+const DealInvestedCard = ({ deal, onSelect }) => {
+  const agentCache = getAgentCache();
+  const founderName = deal.founders?.[0]?.name || '';
+  // Use agent signals only — update log signals are merged inside calcDealHealth automatically
+  const signals = agentCache[deal.id]?.signals || [];
+  const health = calcDealHealth(deal, signals);
+  const moic = calcMOIC(deal);
+  const method = getValuationMethod(deal);
+  const trlLabel = {'lab':'TRL 1–3','pilot':'TRL 4–6','scale':'TRL 7–8','deploy':'TRL 9','fund':'Fund'}[health.maturity] || health.maturity;
   return (
-    <div className="min-h-screen bg-stone-50 dark:bg-stone-900">
-      {/* Header */}
-      <header className="bg-white dark:bg-stone-800 border-b border-stone-200 dark:border-stone-700 sticky top-0 z-10">
-        <div className="px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <button onClick={onBack} className="flex items-center gap-2 text-stone-500 hover:text-stone-700">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
-                <span className="text-sm font-medium">Portfolio</span>
-              </button>
-              <div className="h-6 w-px bg-stone-200 dark:bg-stone-700"/>
-              <h1 className="text-lg font-semibold text-stone-900 dark:text-white">Portfolio Context</h1>
-            </div>
-            <div className="flex items-center gap-3">
-              <button 
-                onClick={fetchAllSignals}
-                disabled={isRefreshing}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors disabled:opacity-50"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={isRefreshing ? 'animate-spin' : ''}>
-                  <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-                </svg>
-                {isRefreshing ? 'Searching...' : 'Pull Updates'}
-              </button>
-              <span className="text-xs text-stone-400">{portfolioDeals.length} companies</span>
-            </div>
+    <div
+      onClick={onSelect}
+      className="bg-white dark:bg-stone-800 rounded-2xl border cursor-pointer transition-all hover:shadow-md"
+      style={{ borderColor: health.shouldCheckIn ? '#f59e0b60' : '#e7e5e4' }}
+    >
+      {health.shouldCheckIn && (
+        <div className="px-4 py-1.5 rounded-t-2xl flex items-center gap-2" style={{ backgroundColor: '#fef3c7', borderBottom: '1px solid #fde68a' }}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span className="text-xs font-medium text-amber-800">{health.checkInReason}</span>
+        </div>
+      )}
+      <div className="p-4 flex items-center gap-4">
+        <div className="w-11 h-11 rounded-xl flex items-center justify-center text-base font-bold text-white flex-shrink-0" style={{ backgroundColor: health.color }}>
+          {deal.companyName?.charAt(0)?.toUpperCase()}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-0.5">
+            <h3 className="font-semibold text-stone-900 dark:text-stone-100 text-sm">{deal.companyName}</h3>
+            <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400">{trlLabel}</span>
           </div>
-          <p className="text-sm text-stone-500 mt-1">
-            Signals and interpretation · not predictions
-            {lastRefreshed && <span className="ml-2 text-stone-400">· Last checked {formatRelativeDate(lastRefreshed)}</span>}
-          </p>
+          <p className="text-xs text-stone-500 dark:text-stone-400">{deal.industry} · {deal.stage}{founderName ? ` · ${founderName}` : ''}</p>
+          {health.factors.filter(f => f.type !== 'info').slice(0,1).map((f, i) => (
+            <div key={i} className="flex items-center gap-1 mt-1">
+              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${f.type === 'positive' ? 'bg-emerald-400' : f.type === 'negative' ? 'bg-red-400' : 'bg-amber-400'}`}/>
+              <span className="text-xs text-stone-400 dark:text-stone-500">{f.label}</span>
+            </div>
+          ))}
         </div>
-      </header>
-      
-      {/* Company Filter Pills */}
-      <div className="px-6 py-4 bg-white dark:bg-stone-800 border-b border-stone-200 dark:border-stone-700">
-        <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
-          <button
-            onClick={() => setSelectedFilter('all')}
-            className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${
-              selectedFilter === 'all'
-                ? 'bg-stone-900 text-white'
-                : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
-            }`}
-          >
-            All Companies
-          </button>
-          {portfolioDeals.map(deal => {
-            const trajectory = getTrajectoryAssessment(deal);
-            const config = trajectoryConfig[trajectory.trajectory];
-            return (
-              <button
-                key={deal.id}
-                onClick={() => setSelectedFilter(deal.id)}
-                className={`px-4 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-colors flex items-center gap-2 ${
-                  selectedFilter === deal.id
-                    ? 'bg-stone-900 text-white'
-                    : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
-                }`}
-              >
-                <span 
-                  className="w-2 h-2 rounded-full" 
-                  style={{ backgroundColor: config.color }}
-                  title={config.label}
-                />
-                {deal.companyName}
-              </button>
-            );
-          })}
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          <div className="flex items-center gap-1.5">
+            <div className="w-12 h-1.5 rounded-full bg-stone-100 dark:bg-stone-700 overflow-hidden">
+              <div className="h-full rounded-full" style={{ width: `${health.score}%`, backgroundColor: health.color }}/>
+            </div>
+            <span className="text-xs font-semibold" style={{ color: health.color }}>{health.label}</span>
+          </div>
+          <span className="text-sm font-semibold text-stone-800 dark:text-stone-200">{formatCurrency(getEffectiveCostBasis(deal.investment || {}))}</span>
+          {method !== 'mark-at-cost' && moic !== null
+            ? <span className="text-xs font-medium" style={{ color: moic >= 1.0 ? '#10b981' : '#ef4444' }}>{moic.toFixed(2)}x</span>
+            : <span className="text-xs text-stone-400">at cost</span>
+          }
         </div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a8a29e" strokeWidth="2" className="flex-shrink-0"><polyline points="9 18 15 12 9 6"/></svg>
       </div>
-      
-      {/* Trajectory Summary - Shows when single company selected */}
-      {selectedCompany && selectedTrajectory && (
-        <div className="px-6 py-4">
-          <div className={`rounded-2xl border p-5 ${trajectoryConfig[selectedTrajectory.trajectory].bg} border-stone-200 dark:border-stone-700`}>
-            {/* Company Header */}
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-white flex items-center justify-center text-lg font-bold text-stone-500 shadow-sm">
-                  {selectedCompany.companyName.charAt(0)}
-                </div>
-                <div>
-                  <h2 className="font-semibold text-stone-900">{selectedCompany.companyName}</h2>
-                  <p className="text-sm text-stone-500">{selectedCompany.industry} · Invested {formatDate(selectedCompany.investment?.date || selectedCompany.statusEnteredAt)}</p>
-                </div>
-              </div>
-              {/* Interpretation timestamp */}
-              <div className="text-right">
-                <p className="text-[10px] uppercase tracking-wide text-stone-400">Interpretation as of</p>
-                <p className="text-xs font-medium text-stone-500">{formatInterpretationDate(selectedTrajectory.assessedAt)}</p>
-              </div>
-            </div>
-            
-            {/* Trajectory Badge + Relative Summary */}
-            <div className="mb-4">
-              <div className="flex items-center gap-2 mb-2">
-                <span 
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
-                  style={{ backgroundColor: 'white', color: trajectoryConfig[selectedTrajectory.trajectory].color }}
-                >
-                  {trajectoryConfig[selectedTrajectory.trajectory].icon}
-                  {trajectoryConfig[selectedTrajectory.trajectory].label}
-                </span>
-                {selectedTrajectory.comparedTo && (
-                  <span className="text-xs text-stone-400 italic">
-                    {getComparisonLabel(selectedTrajectory.comparedTo)}
-                  </span>
-                )}
-              </div>
-              <p className="text-sm text-stone-700 leading-relaxed">
-                {selectedTrajectory.summary}
-              </p>
-            </div>
-            
-            {/* Since Investment - What changed */}
-            {selectedTrajectory.sinceThen && (
-              <div className="mb-4 p-3 rounded-lg bg-white/60 border border-stone-200/50">
-                <p className="text-xs text-stone-400 uppercase tracking-wide mb-1">Since you invested</p>
-                <p className="text-sm text-stone-600">{selectedTrajectory.sinceThen}</p>
-              </div>
-            )}
-            
-            {/* Market Context */}
-            {selectedTrajectory.marketContext && (
-              <div className="mb-4 pl-3 border-l-2 border-stone-300">
-                <p className="text-xs text-stone-500 uppercase tracking-wide mb-1">Market Context</p>
-                <p className="text-sm text-stone-600">{selectedTrajectory.marketContext}</p>
-              </div>
-            )}
-            
-            {/* Uncertainty Acknowledgment */}
-            {selectedTrajectory.uncertainty && (
-              <div className="flex items-start gap-2 p-3 rounded-lg bg-white/50 border border-stone-200">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2" className="mt-0.5 flex-shrink-0">
-                  <circle cx="12" cy="12" r="10"/>
-                  <line x1="12" y1="16" x2="12" y2="12"/>
-                  <line x1="12" y1="8" x2="12.01" y2="8"/>
-                </svg>
-                <p className="text-sm text-stone-500">{selectedTrajectory.uncertainty}</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-      
-      {/* Portfolio Overview - Shows when "All Companies" selected */}
-      {selectedFilter === 'all' && (
-        <div className="px-6 py-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {portfolioDeals.map(deal => {
-              const trajectory = getTrajectoryAssessment(deal);
-              const config = trajectoryConfig[trajectory.trajectory];
-              const recentActivity = activityFeed.filter(a => a.companyId === deal.id).slice(0, 1)[0];
-              
-              return (
-                <button
-                  key={deal.id}
-                  onClick={() => setSelectedFilter(deal.id)}
-                  className="bg-white dark:bg-stone-800 rounded-xl p-4 border border-stone-200 dark:border-stone-700 hover:border-stone-300 transition-all text-left"
-                >
-                  {/* Header */}
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-stone-100 flex items-center justify-center text-sm font-bold text-stone-500">
-                        {deal.companyName.charAt(0)}
-                      </div>
-                      <div>
-                        <h3 className="font-medium text-stone-900 dark:text-white">{deal.companyName}</h3>
-                        <p className="text-xs text-stone-400">{deal.industry}</p>
-                      </div>
-                    </div>
-                    <span 
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: config.color }}
-                      title={config.label}
-                    />
-                  </div>
-                  
-                  {/* Trajectory Summary */}
-                  <div className="mb-3">
-                    <div className="flex items-center gap-1.5 mb-1">
-                      <span style={{ color: config.color }}>{config.icon}</span>
-                      <span className="text-xs font-medium" style={{ color: config.color }}>{config.label}</span>
-                    </div>
-                    <p className="text-xs text-stone-500 line-clamp-2">{trajectory.summary}</p>
-                  </div>
-                  
-                  {/* Uncertainty flag if present */}
-                  {trajectory.uncertainty && (
-                    <div className="flex items-center gap-1.5 text-xs text-stone-400 mb-3">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <circle cx="12" cy="12" r="10"/>
-                        <line x1="12" y1="16" x2="12" y2="12"/>
-                        <line x1="12" y1="8" x2="12.01" y2="8"/>
-                      </svg>
-                      <span className="truncate">{trajectory.uncertainty.split('—')[0]}</span>
-                    </div>
-                  )}
-                  
-                  {/* Footer */}
-                  <div className="flex items-center justify-between pt-3 border-t border-stone-100 dark:border-stone-700">
-                    <span className="text-xs text-stone-400">
-                      {recentActivity ? formatRelativeDate(recentActivity.date) : 'No recent signals'}
-                    </span>
-                    <span className="text-xs text-[#5B6DC4]">View →</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-      
-      {/* Observable Signals - Separated from interpretation */}
-      <div className="px-6 py-6">
-        <div className="bg-white dark:bg-stone-800 rounded-2xl border border-stone-200 dark:border-stone-700 overflow-hidden">
-          <div className="p-4 border-b border-stone-100 dark:border-stone-700">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="font-semibold text-stone-900 dark:text-white flex items-center gap-2">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2">
-                    <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
-                  </svg>
-                  Observable Signals
-                </h2>
-                <p className="text-xs text-stone-400 mt-0.5">
-                  Facts from third-party sources · {selectedFilter === 'all' ? 'all companies' : selectedCompany?.companyName}
-                </p>
-              </div>
-              <span className="text-xs text-stone-400">{filteredActivities.length} signals</span>
-            </div>
-          </div>
-
-          {/* Error banner */}
-          {signalError && (
-            <div className="mx-4 mt-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-2">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-              <p className="text-xs text-amber-800">{signalError}</p>
-            </div>
-          )}
-          
-          <div className="divide-y divide-stone-100 dark:divide-stone-700">
-            {/* Loading skeleton */}
-            {isRefreshing && filteredActivities.length === 0 && (
-              <div className="p-4 space-y-4">
-                {[1,2,3].map(i => (
-                  <div key={i} className="flex gap-4 animate-pulse">
-                    <div className="w-2 h-2 rounded-full bg-stone-200 mt-1.5 flex-shrink-0"/>
-                    <div className="flex-1 space-y-2">
-                      <div className="flex gap-2">
-                        <div className="h-4 w-16 bg-stone-200 rounded-full"/>
-                        <div className="h-4 w-12 bg-stone-200 rounded-full"/>
-                      </div>
-                      <div className="h-4 w-3/4 bg-stone-200 rounded"/>
-                      <div className="h-3 w-1/2 bg-stone-100 rounded"/>
-                    </div>
-                  </div>
-                ))}
-                <p className="text-xs text-stone-400 text-center pt-2">Searching web for latest signals…</p>
-              </div>
-            )}
-            {!isRefreshing && filteredActivities.length === 0 ? (
-              <div className="p-8 text-center">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#d6d3d1" strokeWidth="1.5" className="mx-auto mb-3">
-                  <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
-                </svg>
-                <p className="text-stone-500 font-medium mb-1">No signals yet</p>
-                <p className="text-sm text-stone-400">Observable facts will appear here as we track public sources</p>
-              </div>
-            ) : (
-              filteredActivities.map((activity, idx) => {
-                const typeColor = getTypeColor(activity.type);
-                const isExpanded = expandedTimeline[activity.id];
-                
-                return (
-                  <div key={activity.id} className="p-4 hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors">
-                    <div className="flex gap-4">
-                      {/* Timeline indicator */}
-                      <div className="flex flex-col items-center">
-                        <div className={`w-2 h-2 rounded-full ${activity.sentiment === 'positive' ? 'bg-emerald-400' : activity.sentiment === 'negative' ? 'bg-red-400' : 'bg-stone-300'}`} />
-                        {idx < filteredActivities.length - 1 && (
-                          <div className="w-px flex-1 bg-stone-200 dark:bg-stone-700 mt-2" />
-                        )}
-                      </div>
-                      
-                      {/* Content */}
-                      <div className="flex-1 min-w-0">
-                        {/* Company + Type + Date row */}
-                        <div className="flex items-center gap-2 mb-2 flex-wrap">
-                          {selectedFilter === 'all' && (
-                            <button
-                              onClick={() => {
-                                const deal = portfolioDeals.find(d => d.id === activity.companyId);
-                                if (deal) onSelectCompany(deal);
-                              }}
-                              className="text-xs font-medium px-2 py-0.5 rounded bg-stone-100 text-stone-600 hover:bg-stone-200 transition-colors"
-                            >
-                              {activity.companyName}
-                            </button>
-                          )}
-                          <span className={`text-xs px-2 py-0.5 rounded-full ${typeColor.bg} ${typeColor.text} flex items-center gap-1`}>
-                            {getTypeIcon(activity.type)}
-                            {activity.type}
-                          </span>
-                          {activity.isLive && (
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 flex items-center gap-1">
-                              <svg width="8" height="8" viewBox="0 0 10 10"><circle cx="5" cy="5" r="5" fill="#3b82f6"/></svg>
-                              Live
-                            </span>
-                          )}
-                          {activity.verified && !activity.isLive && (
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 flex items-center gap-1">
-                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
-                              Verified
-                            </span>
-                          )}
-                          <span className="text-xs text-stone-400 ml-auto flex items-center gap-1">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                            {formatRelativeDate(activity.date)}
-                          </span>
-                        </div>
-                        
-                        {/* Title */}
-                        <h3 className="font-medium text-stone-900 dark:text-white mb-1 flex items-center gap-2">
-                          {activity.title}
-                          {activity.sentiment === 'positive' && (
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2">
-                              <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
-                            </svg>
-                          )}
-                        </h3>
-                        
-                        {/* Description */}
-                        <p className="text-sm text-stone-500 dark:text-stone-400 mb-2">{activity.description}</p>
-                        
-                        {/* Source + Share */}
-                        <div className="flex items-center justify-between">
-                          <a 
-                            href={activity.sourceUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1.5 text-xs text-stone-400 hover:text-[#5B6DC4] transition-colors"
-                          >
-                            {getSourceIcon(activity.source)}
-                            {activity.source}
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
-                              <polyline points="15 3 21 3 21 9"/>
-                              <line x1="10" y1="14" x2="21" y2="3"/>
-                            </svg>
-                          </a>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setShareModalSignal(activity);
-                            }}
-                            className="flex items-center gap-1.5 text-xs text-stone-400 hover:text-[#5B6DC4] transition-colors px-2 py-1 rounded hover:bg-stone-100 dark:hover:bg-stone-700"
-                          >
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
-                              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
-                            </svg>
-                            Share
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
-      </div>
-      
-      {/* Share Signal Modal */}
-      {shareModalSignal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setShareModalSignal(null)}>
-          <div className="bg-white dark:bg-stone-800 rounded-2xl shadow-xl max-w-md w-full" onClick={e => e.stopPropagation()}>
-            <div className="p-6 border-b border-stone-200 dark:border-stone-700">
-              <h2 className="text-lg font-semibold text-stone-900 dark:text-white">Share Signal</h2>
-              <p className="text-sm text-stone-500 mt-1">Share this update with co-investors or advisors</p>
-            </div>
-            
-            <div className="p-6">
-              {/* Signal Preview */}
-              <div className="bg-stone-50 dark:bg-stone-700/50 rounded-xl p-4 mb-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-xs font-medium text-stone-600 dark:text-stone-300">{shareModalSignal.companyName}</span>
-                  <span className="text-xs text-stone-400">·</span>
-                  <span className="text-xs text-stone-400">{shareModalSignal.type}</span>
-                </div>
-                <p className="font-medium text-stone-900 dark:text-white text-sm">{shareModalSignal.title}</p>
-                <p className="text-xs text-stone-500 mt-1">{shareModalSignal.description}</p>
-              </div>
-              
-              {/* Share Options */}
-              <div className="space-y-3">
-                <button
-                  onClick={() => {
-                    const text = `${shareModalSignal.companyName} update: ${shareModalSignal.title}\n\n${shareModalSignal.description}\n\nSource: ${shareModalSignal.source}`;
-                    navigator.clipboard.writeText(text);
-                    setCopiedLink(true);
-                    setTimeout(() => setCopiedLink(false), 2000);
-                  }}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors"
-                >
-                  <div className="w-10 h-10 rounded-full bg-stone-200 dark:bg-stone-600 flex items-center justify-center">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2">
-                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                    </svg>
-                  </div>
-                  <div className="flex-1 text-left">
-                    <p className="font-medium text-stone-900 dark:text-white text-sm">{copiedLink ? 'Copied!' : 'Copy to Clipboard'}</p>
-                    <p className="text-xs text-stone-500">Share via email, Slack, or text</p>
-                  </div>
-                </button>
-                
-                <button
-                  onClick={() => {
-                    const text = encodeURIComponent(`${shareModalSignal.companyName}: ${shareModalSignal.title}`);
-                    const url = encodeURIComponent(shareModalSignal.sourceUrl || '');
-                    window.open(`mailto:?subject=${text}&body=${encodeURIComponent(shareModalSignal.description)}%0A%0ASource: ${url}`, '_blank');
-                  }}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors"
-                >
-                  <div className="w-10 h-10 rounded-full bg-stone-200 dark:bg-stone-600 flex items-center justify-center">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#78716c" strokeWidth="2">
-                      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-                      <polyline points="22,6 12,13 2,6"/>
-                    </svg>
-                  </div>
-                  <div className="flex-1 text-left">
-                    <p className="font-medium text-stone-900 dark:text-white text-sm">Email</p>
-                    <p className="text-xs text-stone-500">Open in your email client</p>
-                  </div>
-                </button>
-              </div>
-            </div>
-            
-            <div className="p-4 border-t border-stone-200 dark:border-stone-700 flex justify-end">
-              <button
-                onClick={() => setShareModalSignal(null)}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-stone-600 hover:bg-stone-100 dark:text-stone-300 dark:hover:bg-stone-700 transition-colors"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
 
-// Main App (internal, wrapped by auth)
+const DealWatchingCard = ({ deal, onSelect }) => {
+  const founderName = deal.founders?.[0]?.name || '';
+  return (
+    <div
+      onClick={onSelect}
+      className="bg-white dark:bg-stone-800 rounded-2xl border border-stone-200 dark:border-stone-700 cursor-pointer transition-all hover:shadow-md"
+    >
+      <div className="p-4 flex items-center gap-4">
+        <div className="w-11 h-11 rounded-xl flex items-center justify-center text-base font-bold bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400 flex-shrink-0">
+          {deal.companyName?.charAt(0)?.toUpperCase()}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-0.5">
+            <h3 className="font-semibold text-stone-700 dark:text-stone-300 text-sm">{deal.companyName}</h3>
+            <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-stone-100 dark:bg-stone-700 text-stone-400">{deal.status === 'passed' ? 'Passed' : 'Watching'}</span>
+          </div>
+          <p className="text-xs text-stone-400 dark:text-stone-500">{deal.industry} · {deal.stage}{founderName ? ` · ${founderName}` : ''}</p>
+          {deal.watchingNotes && (
+            <p className="text-xs text-stone-400 dark:text-stone-500 mt-1 line-clamp-1 italic">"{deal.watchingNotes}"</p>
+          )}
+        </div>
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          {deal.monitoring?.fundraisingStatus === 'raising' && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 font-medium dark:bg-blue-900/30 dark:text-blue-400">Raising now</span>
+          )}
+          <span className="text-xs text-stone-400">{deal.stage}</span>
+        </div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a8a29e" strokeWidth="2" className="flex-shrink-0"><polyline points="9 18 15 12 9 6"/></svg>
+      </div>
+    </div>
+  );
+};
+
 function ConvexApp({ userMenu, syncStatus }) {
   const [page, setPage] = useState('list');
   const [deals, setDeals] = useState([]);
   const [selected, setSelected] = useState(null);
   const [toast, setToast] = useState(null);
   const [search, setSearch] = useState('');
-  const [sortBy, setSortBy] = useState('newest');
+  const [sortBy, setSortBy] = useState('health');
   const [showSortDropdown, setShowSortDropdown] = useState(false);
-  const [userPrefs, setUserPrefs] = useState(null);
   const [showAddPortfolio, setShowAddPortfolio] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   
@@ -3179,16 +2607,24 @@ function ConvexApp({ userMenu, syncStatus }) {
 
   useEffect(() => { setDeals(createDemoDeals()); }, []);
 
-  // Portfolio deals
+  // Invested deals — used for health scoring and portfolio summary
   const portfolioDeals = deals.filter(d => d.status === 'invested');
+  // All tracked deals — invested + watching + passed
+  const allTrackedDeals = deals;
 
-  // Filter and sort portfolio deals
-  const getFilteredDeals = () => {
-    let base = portfolioDeals;
-    
-    if (search) base = base.filter(d => d.companyName.toLowerCase().includes(search.toLowerCase()));
-    
-    return base.sort((a, b) => {
+  // Sort helper shared by both sections
+  const sortDeals = (base) => {
+    const agentCache = getAgentCache();
+    return [...base].sort((a, b) => {
+      if (sortBy === 'health') {
+        // Watching/passed deals have no health score — push them after invested
+        if (a.status !== 'invested' && b.status === 'invested') return 1;
+        if (a.status === 'invested' && b.status !== 'invested') return -1;
+        // calcDealHealth internally merges update log signals — consistent with card and detail view
+        const ha = calcDealHealth(a, agentCache[a.id]?.signals || []).score;
+        const hb = calcDealHealth(b, agentCache[b.id]?.signals || []).score;
+        return ha - hb;
+      }
       if (sortBy === 'newest') return new Date(b.statusEnteredAt || b.createdAt).getTime() - new Date(a.statusEnteredAt || a.createdAt).getTime();
       if (sortBy === 'oldest') return new Date(a.statusEnteredAt || a.createdAt).getTime() - new Date(b.statusEnteredAt || b.createdAt).getTime();
       if (sortBy === 'alphabetical') return a.companyName.localeCompare(b.companyName);
@@ -3197,11 +2633,16 @@ function ConvexApp({ userMenu, syncStatus }) {
         const stageOrder = { 'pre-seed': 1, 'seed': 2, 'series-a': 3, 'series-b': 4, 'series-c': 5, 'growth': 6 };
         return (stageOrder[a.stage] || 99) - (stageOrder[b.stage] || 99);
       }
-      if (sortBy === 'source') {
-        return (a.source?.channel || 'zzz').localeCompare(b.source?.channel || 'zzz');
-      }
+      if (sortBy === 'deployed') return (b.investment?.amount || 0) - (a.investment?.amount || 0);
       return 0;
     });
+  };
+
+  // Filter and sort — used for both sections
+  const getFilteredDeals = () => {
+    let base = allTrackedDeals;
+    if (search) base = base.filter(d => d.companyName.toLowerCase().includes(search.toLowerCase()));
+    return sortDeals(base);
   };
 
   const filtered = getFilteredDeals();
@@ -3223,14 +2664,7 @@ function ConvexApp({ userMenu, syncStatus }) {
     setSelected(prev => prev ? { ...prev, engagement: prev.engagement === 'active' ? 'inactive' : 'active' } : null);
   };
 
-  const completeOnboarding = (prefs) => {
-    setUserPrefs(prefs);
-    setPage('list');
-  };
 
-  const skipOnboarding = () => {
-    setPage('list');
-  };
 
   // Settings page
   if (page === 'settings') return (
@@ -3239,17 +2673,7 @@ function ConvexApp({ userMenu, syncStatus }) {
     </ThemeContext.Provider>
   );
 
-  // Portfolio Monitor page
-  if (page === 'portfolio-monitor') return (
-    <ThemeContext.Provider value={{ theme: settings.appearance, setTheme: (t) => setSettings(prev => ({ ...prev, appearance: t })) }}>
-      <PortfolioMonitorPage 
-        deals={deals}
-        selectedDeal={selected}
-        onBack={() => { setSelected(null); setPage('list'); setActiveTab('portfolio'); }}
-        onSelectCompany={(deal) => { setSelected(deal); }}
-      />
-    </ThemeContext.Provider>
-  );
+
 
   // Login/Landing - Thesis design with animated orbs
   if (page === 'login') {
@@ -3340,7 +2764,7 @@ function ConvexApp({ userMenu, syncStatus }) {
 
             {/* CTA Button */}
             <button 
-              onClick={() => setPage('howitworks')} 
+              onClick={() => setPage('login')} 
               style={{ backgroundColor: '#5B6DC4' }} 
               className="px-8 py-3 text-white rounded-xl font-medium hover:opacity-90 transition-all shadow-lg mb-16"
             >
@@ -3391,209 +2815,8 @@ function ConvexApp({ userMenu, syncStatus }) {
     );
   }
 
-  // How It Works page - shown after landing, before onboarding
-  if (page === 'howitworks') {
-    const steps = [
-      {
-        number: 1,
-        title: 'Add a new lead',
-        description: 'Name, stage, source. That\'s it.',
-        icon: (
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="1.5">
-            <circle cx="12" cy="12" r="10"/>
-            <line x1="12" y1="8" x2="12" y2="16"/>
-            <line x1="8" y1="12" x2="16" y2="12"/>
-          </svg>
-        ),
-        visual: (
-          <div className="bg-white rounded-xl p-3 shadow-sm border border-stone-200 max-w-[200px]">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center text-xs font-bold text-purple-600">AI</div>
-              <div>
-                <p className="text-xs font-medium text-stone-800">Acme AI</p>
-                <p className="text-[10px] text-stone-400">Seed · AI/ML</p>
-              </div>
-            </div>
-            <div className="text-[10px] text-stone-500">via Sarah Chen</div>
-          </div>
-        )
-      },
-      {
-        number: 2,
-        title: 'Think out loud',
-        description: 'Questions, concerns, gut reactions. Voice works too.',
-        icon: (
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="1.5">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-          </svg>
-        ),
-        visual: (
-          <div className="bg-white rounded-xl p-3 shadow-sm border border-stone-200 max-w-[200px]">
-            <div className="space-y-2">
-              <div className="bg-stone-100 rounded-lg p-2 text-[10px] text-stone-600">"How big is this market really?"</div>
-              <div className="bg-stone-100 rounded-lg p-2 text-[10px] text-stone-600">"Team seems strong but..."</div>
-              <div className="flex items-center gap-1 text-[10px] text-stone-400">
-                <div className="w-2 h-2 rounded-full bg-red-400 animate-pulse"/>
-                Recording...
-              </div>
-            </div>
-          </div>
-        )
-      },
-      {
-        number: 3,
-        title: 'Context fills in',
-        description: 'Market size, competitors, team backgrounds. You stay in flow.',
-        icon: (
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" strokeWidth="1.5">
-            <circle cx="11" cy="11" r="8"/>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-            <line x1="11" y1="8" x2="11" y2="14"/>
-            <line x1="8" y1="11" x2="14" y2="11"/>
-          </svg>
-        ),
-        visual: (
-          <div className="bg-white rounded-xl p-3 shadow-sm border border-stone-200 max-w-[200px]">
-            <div className="flex items-start gap-2">
-              <div className="w-5 h-5 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
-                <span className="text-[10px]">💡</span>
-              </div>
-              <div>
-                <p className="text-[10px] font-medium text-stone-800">Market is $24B and growing 18% YoY</p>
-                <p className="text-[10px] text-blue-500 underline mt-1">Gartner 2024 →</p>
-              </div>
-            </div>
-          </div>
-        )
-      },
-      {
-        number: 4,
-        title: 'Decide and learn',
-        description: 'Record your reasoning. Revisit it when outcomes are clear.',
-        icon: (
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#8B5CF6" strokeWidth="1.5">
-            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
-            <polyline points="22 4 12 14.01 9 11.01"/>
-          </svg>
-        ),
-        visual: (
-          <div className="bg-white rounded-xl p-3 shadow-sm border border-stone-200 max-w-[200px]">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="w-6 h-6 rounded-full bg-green-100 flex items-center justify-center">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>
-              </div>
-              <span className="text-xs font-medium text-green-700">Invested</span>
-            </div>
-            <p className="text-[10px] text-stone-500 italic">"Strong team + clear wedge into enterprise..."</p>
-          </div>
-        )
-      }
-    ];
-
-    return (
-      <div className="min-h-screen bg-stone-50 dark:bg-stone-900">
-        {/* Header */}
-        <header className="flex items-center justify-between px-6 py-4">
-          <button onClick={() => setPage('login')} className="flex items-center gap-1 text-stone-400 hover:text-stone-600">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
-            <span className="text-sm">Back</span>
-          </button>
-          <button 
-            onClick={() => setPage('onboarding')}
-            className="text-sm font-medium"
-            style={{ color: '#5B6DC4' }}
-          >
-            Skip
-          </button>
-        </header>
-
-        {/* Content */}
-        <main className="px-6 py-6 max-w-2xl mx-auto">
-          <div className="text-center mb-10">
-            <h1 className="text-2xl font-bold text-stone-900 dark:text-white mb-2">How Thesis Works</h1>
-            <p className="text-stone-400 dark:text-stone-500 text-sm">A simple loop you'll repeat over time.</p>
-          </div>
-
-          {/* Steps - grouped as input (1-2) and reflection (3-4) */}
-          <div className="space-y-6">
-            {/* Input phase */}
-            <div className="space-y-5">
-              {steps.slice(0, 2).map((step, idx) => (
-                <div key={step.number} className="flex gap-5 items-start">
-                  <div className="flex flex-col items-center">
-                    <div 
-                      className="w-11 h-11 rounded-2xl flex items-center justify-center"
-                      style={{ backgroundColor: idx === 0 ? '#5B6DC4' : '#10B981', opacity: 0.15 }}
-                    >
-                      {step.icon}
-                    </div>
-                    {idx < 1 && (
-                      <div className="w-0.5 h-12 bg-stone-200 dark:bg-stone-700 mt-2"/>
-                    )}
-                  </div>
-                  <div className="flex-1 pb-2">
-                    <span className="text-[10px] font-bold text-stone-300 uppercase tracking-wide">Step {step.number}</span>
-                    <h3 className="text-base font-semibold text-stone-900 dark:text-white mb-1">{step.title}</h3>
-                    <p className="text-sm text-stone-500 dark:text-stone-400 mb-3">{step.description}</p>
-                    {step.visual}
-                  </div>
-                </div>
-              ))}
-            </div>
-            
-            {/* Divider between phases */}
-            <div className="flex items-center gap-3 py-2">
-              <div className="flex-1 h-px bg-stone-200 dark:bg-stone-700"/>
-              <span className="text-[10px] text-stone-300 dark:text-stone-600 uppercase tracking-wide">Then</span>
-              <div className="flex-1 h-px bg-stone-200 dark:bg-stone-700"/>
-            </div>
-            
-            {/* Reflection phase */}
-            <div className="space-y-5">
-              {steps.slice(2, 4).map((step, idx) => (
-                <div key={step.number} className="flex gap-5 items-start">
-                  <div className="flex flex-col items-center">
-                    <div 
-                      className="w-11 h-11 rounded-2xl flex items-center justify-center"
-                      style={{ backgroundColor: idx === 0 ? '#F59E0B' : '#8B5CF6', opacity: 0.15 }}
-                    >
-                      {step.icon}
-                    </div>
-                    {idx < 1 && (
-                      <div className="w-0.5 h-12 bg-stone-200 dark:bg-stone-700 mt-2"/>
-                    )}
-                  </div>
-                  <div className="flex-1 pb-2">
-                    <span className="text-[10px] font-bold text-stone-300 uppercase tracking-wide">Step {step.number}</span>
-                    <h3 className="text-base font-semibold text-stone-900 dark:text-white mb-1">{step.title}</h3>
-                    <p className="text-sm text-stone-500 dark:text-stone-400 mb-3">{step.description}</p>
-                    {step.visual}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* CTA */}
-          <div className="mt-10 text-center">
-            <button 
-              onClick={() => setPage('onboarding')}
-              style={{ backgroundColor: '#5B6DC4' }}
-              className="px-8 py-3 text-white rounded-xl font-medium hover:opacity-90 transition-all shadow-lg"
-            >
-              Add your first company
-            </button>
-            <p className="text-xs text-stone-400 mt-4">Takes about 2 minutes to set up</p>
-          </div>
-        </main>
-      </div>
-    );
-  }
-
   // Onboarding
-  if (page === 'onboarding') return (
-    <OnboardingFlow onComplete={completeOnboarding} onSkip={skipOnboarding} />
-  );
+
 
   // Detail
   if (page === 'detail' && selected) {
@@ -3609,17 +2832,7 @@ function ConvexApp({ userMenu, syncStatus }) {
               <span className="text-sm font-medium">Portfolio</span>
             </button>
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => setPage('portfolio-monitor')}
-                className="px-3 py-1 rounded-lg text-sm font-medium transition-colors"
-                style={{ backgroundColor: '#5B6DC4', color: 'white' }}
-                title="Portfolio Monitor"
-              >
-                <svg className="inline mr-1 mb-0.5" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>
-                </svg>
-                Monitor
-              </button>
+
               <button 
                 onClick={() => toggleEngagement(selected.id)}
                 className={`px-3 py-1 rounded-lg text-sm font-medium transition-all ${
@@ -3634,7 +2847,10 @@ function ConvexApp({ userMenu, syncStatus }) {
           </div>
         </header>
         <main className="px-6 py-6">
-          <InvestedView deal={selected} onUpdate={updateDeal} setToast={setToast} />
+          {selected.status === 'invested'
+            ? <InvestedView deal={selected} onUpdate={updateDeal} setToast={setToast} />
+            : <WatchingView deal={selected} onUpdate={updateDeal} setToast={setToast} />
+          }
         </main>
         {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
       </div>
@@ -3689,61 +2905,155 @@ function ConvexApp({ userMenu, syncStatus }) {
       {/* Content */}
       <div className="px-6 py-6">
 
-        {/* Portfolio summary */}
+        {/* ── PORTFOLIO DASHBOARD ─────────────────────────────────────── */}
         {portfolioDeals.length > 0 && (() => {
-          const totalDeployed = portfolioDeals.reduce((sum, d) => sum + (d.investment?.amount || 0), 0);
-          const avgCheck = portfolioDeals.length > 0 ? totalDeployed / portfolioDeals.length : 0;
+          const agentCache = getAgentCache();
+          const signalsByDeal = Object.fromEntries(Object.entries(agentCache).map(([id, d]) => [id, d.signals || []]));
+          const portfolioHealth = calcPortfolioHealth(deals, signalsByDeal);
+          const dealHealthScores = portfolioDeals.map(d => ({ deal: d, health: calcDealHealth(d, signalsByDeal[d.id] || []) }));
+          const checkInDeals = dealHealthScores.filter(({ health }) => health.shouldCheckIn).sort((a, b) => a.health.score - b.health.score);
+          const totalDeployed = portfolioDeals.reduce((sum, d) => sum + getEffectiveCostBasis(d.investment || {}), 0);
+          const totalImplied = portfolioDeals.reduce((sum, d) => sum + calcImpliedValue(d), 0);
+          const portfolioMOIC = totalDeployed > 0 ? totalImplied / totalDeployed : null;
           const industries = [...new Set(portfolioDeals.map(d => d.industry))];
-          const fmtCurrency = (n) => n >= 1000000 ? `$${(n / 1000000).toFixed(1)}M` : n >= 1000 ? `$${(n / 1000).toFixed(0)}K` : `$${n}`;
-          
+
           return (
-            <div className="mb-6 bg-white dark:bg-stone-800 rounded-2xl p-6 border border-stone-200 dark:border-stone-700">
-              <div className="flex items-start justify-between mb-5">
-                <div>
-                  <h2 className="text-base font-medium text-stone-900 dark:text-stone-100">Your portfolio</h2>
-                  <p className="text-sm text-stone-400 mt-0.5">
-                    {portfolioDeals.length} {portfolioDeals.length === 1 ? 'company' : 'companies'} you've chosen to back
-                  </p>
-                </div>
-                {totalDeployed > 0 && (
-                  <div className="text-right">
-                    <div className="text-xl font-semibold text-stone-900 dark:text-stone-100">{fmtCurrency(totalDeployed)}</div>
-                    <p className="text-xs text-stone-400">deployed</p>
+            <div className="mb-6 space-y-4">
+
+              {/* ── Performance summary row ── */}
+              <div className="bg-white dark:bg-stone-800 rounded-2xl p-5 border border-stone-200 dark:border-stone-700">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h2 className="text-base font-semibold text-stone-900 dark:text-stone-100">Portfolio</h2>
+                    <p className="text-xs text-stone-400 mt-0.5">{portfolioDeals.length} {portfolioDeals.length === 1 ? 'company' : 'companies'} · {industries.slice(0,2).join(', ')}{industries.length > 2 ? ` +${industries.length-2}` : ''}</p>
                   </div>
-                )}
+                  <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-semibold" style={{ backgroundColor: portfolioHealth.color + '18', color: portfolioHealth.color }} title={`Portfolio health score: ${portfolioHealth.score}/100 — weighted by cost basis`}>
+                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: portfolioHealth.color }}/>
+                    {portfolioHealth.label}
+                    <span className="text-xs font-normal opacity-60">{portfolioHealth.score}/100</span>
+                  </div>
+                </div>
+
+                {/* 4-stat grid */}
+                <div className="grid grid-cols-4 gap-3">
+                  <div className="bg-stone-50 dark:bg-stone-700/50 rounded-xl p-3">
+                    <p className="text-[10px] text-stone-400 uppercase tracking-wide mb-1">Deployed</p>
+                    <p className="text-base font-bold text-stone-900 dark:text-stone-100">{formatCurrency(totalDeployed)}</p>
+                    <p className="text-[10px] text-stone-400 mt-0.5">cost basis</p>
+                  </div>
+                  <div className="bg-stone-50 dark:bg-stone-700/50 rounded-xl p-3">
+                    <p className="text-[10px] text-stone-400 uppercase tracking-wide mb-1">Implied</p>
+                    <p className="text-base font-bold" style={{ color: totalImplied >= totalDeployed ? '#10b981' : '#ef4444' }}>{formatCurrency(totalImplied)}</p>
+                    <p className="text-[10px] text-stone-400 mt-0.5">marked value</p>
+                  </div>
+                  <div className="bg-stone-50 dark:bg-stone-700/50 rounded-xl p-3">
+                    <p className="text-[10px] text-stone-400 uppercase tracking-wide mb-1">Port. MOIC</p>
+                    <p className="text-base font-bold" style={{ color: portfolioMOIC >= 1.5 ? '#10b981' : portfolioMOIC >= 1.0 ? '#5B6DC4' : '#ef4444' }}>
+                      {portfolioMOIC !== null ? `${portfolioMOIC.toFixed(2)}x` : '—'}
+                    </p>
+                    <p className="text-[10px] text-stone-400 mt-0.5">blended</p>
+                  </div>
+                  <div className="bg-stone-50 dark:bg-stone-700/50 rounded-xl p-3">
+                    <p className="text-[10px] text-stone-400 uppercase tracking-wide mb-1">Check-ins</p>
+                    <p className="text-base font-bold" style={{ color: checkInDeals.length > 0 ? '#f59e0b' : '#10b981' }}>{checkInDeals.length}</p>
+                    <p className="text-[10px] text-stone-400 mt-0.5">need action</p>
+                  </div>
+                </div>
+
+
               </div>
 
-              <div className="pt-4 border-t border-stone-100 dark:border-stone-700 space-y-2">
-                {industries.length > 0 && (
-                  <div className="flex items-start gap-2 text-stone-600 dark:text-stone-400">
-                    <svg className="mt-0.5 text-stone-400" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="5" r="3"/><line x1="12" y1="22" x2="12" y2="8"/><path d="M5 12H2a10 10 0 0 0 20 0h-3"/></svg>
-                    <p className="text-sm">
-                      You invest across <span className="font-medium text-stone-900 dark:text-stone-100">{industries.slice(0, 3).join(', ')}{industries.length > 3 ? ` +${industries.length - 3} more` : ''}</span>.
-                      {avgCheck > 0 && <> Average check: {fmtCurrency(avgCheck)}.</>}
-                    </p>
+              {/* ── Check-in queue — the main action surface ── */}
+              {checkInDeals.length > 0 && (
+                <div className="rounded-2xl overflow-hidden border border-amber-200 dark:border-amber-800/60">
+                  <div className="px-5 py-3 bg-amber-50 dark:bg-amber-900/20 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                      <span className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                        {checkInDeals.length} {checkInDeals.length === 1 ? 'company needs' : 'companies need'} your attention
+                      </span>
+                    </div>
+                    <span className="text-xs text-amber-600 dark:text-amber-400">as investor you may be able to help</span>
                   </div>
-                )}
-              </div>
+                  <div className="divide-y divide-amber-100 dark:divide-amber-900/30 bg-white dark:bg-stone-800">
+                    {checkInDeals.map(({ deal, health }) => {
+                      const implied = calcImpliedValue(deal);
+                      const moic = calcMOIC(deal);
+                      const method = getValuationMethod(deal);
+                      // Classify the reason into action type
+                      const reason = health.checkInReason || '';
+                      const isPolicy = reason.toLowerCase().includes('policy');
+                      const isHardware = reason.toLowerCase().includes('hardware') || reason.toLowerCase().includes('pilot');
+                      const isSilence = reason.toLowerCase().includes('silence') || reason.toLowerCase().includes('overdue');
+                      const isFinancial = reason.toLowerCase().includes('moic') || reason.toLowerCase().includes('mark') || reason.toLowerCase().includes('runway');
+                      const actionTag = isPolicy ? { label: 'Policy risk', color: '#7c3aed', bg: '#ede9fe' }
+                        : isHardware ? { label: 'Technical risk', color: '#dc2626', bg: '#fee2e2' }
+                        : isSilence ? { label: 'Check in', color: '#d97706', bg: '#fef3c7' }
+                        : isFinancial ? { label: 'Financial signal', color: '#5B6DC4', bg: '#eef2ff' }
+                        : { label: 'Review', color: '#78716c', bg: '#f5f5f4' };
+
+                      return (
+                        <div
+                          key={deal.id}
+                          onClick={() => { setSelected(deal); setPage('detail'); }}
+                          className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-stone-50 dark:hover:bg-stone-700/30 transition-colors"
+                        >
+                          {/* Logo */}
+                          <div className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
+                            style={{ backgroundColor: health.color }}>
+                            {deal.companyName.charAt(0)}
+                          </div>
+
+                          {/* Company + reason */}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <span className="font-semibold text-stone-900 dark:text-stone-100 text-sm">{deal.companyName}</span>
+                              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ backgroundColor: actionTag.bg, color: actionTag.color }}>{actionTag.label}</span>
+                            </div>
+                            <p className="text-xs text-stone-500 dark:text-stone-400">{health.checkInReason}</p>
+                            {/* Top 2 health factors */}
+                            <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                              {health.factors.filter(f => f.type !== 'info').slice(0, 2).map((f, i) => (
+                                <span key={i} className="flex items-center gap-1 text-xs text-stone-400">
+                                  <span className={`w-1.5 h-1.5 rounded-full ${f.type === 'negative' ? 'bg-red-400' : f.type === 'warning' ? 'bg-amber-400' : 'bg-emerald-400'}`}/>
+                                  {f.label}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Score + valuation */}
+                          <div className="text-right flex-shrink-0 space-y-1">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <div className="w-16 h-1.5 rounded-full bg-stone-100 dark:bg-stone-700 overflow-hidden">
+                                <div className="h-full rounded-full" style={{ width: `${health.score}%`, backgroundColor: health.color }}/>
+                              </div>
+                              <span className="text-xs font-semibold w-16 text-right" style={{ color: health.color }}>{health.label}</span>
+                            </div>
+                            {method !== 'mark-at-cost' && moic !== null && (
+                              <p className="text-xs font-medium" style={{ color: moic >= 1.0 ? '#10b981' : '#ef4444' }}>{moic.toFixed(2)}x MOIC</p>
+                            )}
+                            {method === 'mark-at-cost' && (
+                              <p className="text-xs text-stone-400">at cost</p>
+                            )}
+                          </div>
+
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a8a29e" strokeWidth="2" className="flex-shrink-0"><polyline points="9 18 15 12 9 6"/></svg>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           );
         })()}
 
-        {/* Portfolio Monitor button */}
+        {/* ── Companies list header ─────────────────────────────────────── */}
         <div className="flex items-center justify-between mb-4">
-          <p className="text-sm text-stone-500 dark:text-stone-400">Companies</p>
-          {portfolioDeals.length > 0 && (
-            <button
-              onClick={() => setPage('portfolio-monitor')}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
-              style={{ backgroundColor: '#5B6DC4', color: 'white' }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/>
-                <polyline points="17 6 23 6 23 12"/>
-              </svg>
-              Portfolio Context
-            </button>
-          )}
+          <p className="text-sm font-medium text-stone-500 dark:text-stone-400">
+            {allTrackedDeals.length} {allTrackedDeals.length === 1 ? 'company' : 'companies'} tracked
+          </p>
         </div>
 
         {/* Search and Filters - single row like screenshot */}
@@ -3769,7 +3079,7 @@ function ConvexApp({ userMenu, syncStatus }) {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="16" y2="12"/><line x1="4" y1="18" x2="12" y2="18"/>
                 </svg>
-                Sort: {sortBy === 'newest' ? 'Newest' : sortBy === 'oldest' ? 'Oldest' : sortBy === 'alphabetical' ? 'A-Z' : sortBy === 'industry' ? 'Industry' : sortBy === 'stage' ? 'Stage' : sortBy === 'source' ? 'Source' : 'Newest'}
+                Sort: {sortBy === 'health' ? 'Needs Attention' : sortBy === 'newest' ? 'Newest' : sortBy === 'oldest' ? 'Oldest' : sortBy === 'alphabetical' ? 'A-Z' : sortBy === 'industry' ? 'Industry' : sortBy === 'stage' ? 'Stage' : sortBy === 'deployed' ? 'Deployed' : 'Needs Attention'}
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <polyline points="6 9 12 15 18 9"/>
                 </svg>
@@ -3780,12 +3090,13 @@ function ConvexApp({ userMenu, syncStatus }) {
                   <div className="fixed inset-0 z-10" onClick={() => setShowSortDropdown(false)} />
                   <div className="absolute right-0 top-full mt-1 bg-white dark:bg-stone-800 rounded-xl shadow-lg border border-stone-200 dark:border-stone-700 py-1 z-20 min-w-[160px]">
                     {[
+                      { key: 'health', label: 'Needs Attention first', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> },
                       { key: 'newest', label: 'Newest First', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> },
                       { key: 'oldest', label: 'Oldest First', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 8 14"/></svg> },
                       { key: 'alphabetical', label: 'Name (A-Z)', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z"/></svg> },
-                      { key: 'industry', label: 'Industry', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="5" r="3"/><line x1="12" y1="22" x2="12" y2="8"/><path d="M5 12H2a10 10 0 0 0 20 0h-3"/></svg> },
+                      { key: 'deployed', label: 'Most Deployed', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg> },
                       { key: 'stage', label: 'Stage', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg> },
-                      { key: 'source', label: 'Source / Channel', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> },
+                      { key: 'industry', label: 'Industry', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="5" r="3"/><line x1="12" y1="22" x2="12" y2="8"/><path d="M5 12H2a10 10 0 0 0 20 0h-3"/></svg> },
                     ].map(option => (
                       <button
                         key={option.key}
@@ -3812,89 +3123,71 @@ function ConvexApp({ userMenu, syncStatus }) {
           </div>
         </div>
 
-        {/* Cards */}
-        <div className="space-y-3">
-          {filtered.length === 0 ? (
-            <div className="text-center py-16">
-              <p className="text-stone-500 dark:text-stone-400 font-medium mb-1">{emptyState.title}</p>
-              <p className="text-sm text-stone-400 dark:text-stone-500">{emptyState.subtitle}</p>
-            </div>
-          ) : (
-            filtered.map(deal => {
-              const founderName = deal.founders?.[0]?.name || deal.source?.name || '';
-              const isInactive = deal.engagement === 'inactive';
-              
-              return (
-                <div 
-                  key={deal.id} 
-                  onClick={() => { setSelected(deal); setPage('detail'); }}
-                  className={`bg-white dark:bg-stone-800 rounded-2xl border cursor-pointer transition-all hover:shadow-sm border-stone-200 dark:border-stone-700 hover:border-stone-300 dark:hover:border-stone-600 ${isInactive ? 'opacity-50' : ''}`}
-                >
-                  {/* Inactive indicator banner */}
-                  {isInactive && (
-                    <div className="px-5 py-2 bg-stone-100 dark:bg-stone-700/50 border-b border-stone-200 dark:border-stone-600 rounded-t-2xl">
-                      <div className="flex items-center gap-2">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#a8a29e" strokeWidth="2">
-                          <circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
-                        </svg>
-                        <span className="text-xs text-stone-400">Inactive{deal.inactiveReason ? ` · ${deal.inactiveReason}` : ''}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="p-5 flex items-center">
-                    {/* Company initial */}
-                    <div className="relative mr-4 flex-shrink-0">
-                      <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-emerald-50 dark:bg-emerald-900/30">
-                        <span className="text-lg font-semibold text-emerald-600 dark:text-emerald-400">{deal.companyName?.charAt(0)?.toUpperCase()}</span>
-                      </div>
-                    </div>
-                    
-                    {/* Company Info */}
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold mb-0.5 text-stone-900 dark:text-stone-100">{deal.companyName}</h3>
-                      <p className="text-sm text-stone-500 dark:text-stone-400">{deal.industry} · {deal.stage}</p>
-                      <p className="text-sm text-stone-400 dark:text-stone-500">{founderName}</p>
-                      
-                      {/* Investment thesis */}
-                      {deal.investment?.whyYes && (
-                        <div className="mt-3 p-3 bg-stone-50 dark:bg-stone-700/50 rounded-xl">
-                          <p className="text-xs text-stone-400 dark:text-stone-500 uppercase tracking-wide mb-1">Your thesis</p>
-                          <p className="text-sm text-stone-600 dark:text-stone-300 line-clamp-2">"{deal.investment.whyYes}"</p>
-                        </div>
-                      )}
-                    </div>
-                  
-                    {/* Right side - amount and date */}
-                    <div className="flex flex-col items-end gap-1.5 ml-4">
-                      <span className="text-sm font-medium text-stone-900 dark:text-stone-100">
-                        {deal.investment?.amount ? `$${(deal.investment.amount / 1000).toFixed(0)}K` : ''}
-                      </span>
-                      {deal.investment?.date && (
-                        <span className="text-xs text-stone-400 dark:text-stone-500">
-                          {formatRelativeTime(deal.investment.date)}
-                        </span>
-                      )}
-                    </div>
-                  
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a8a29e" strokeWidth="2" className="ml-3 flex-shrink-0">
-                      <polyline points="9 18 15 12 9 6"/>
-                    </svg>
+        {/* ── Two-section deal list: Invested then Watching ── */}
+        {(() => {
+          const investedDeals = filtered.filter(d => d.status === 'invested');
+          const watchingDeals = filtered.filter(d => d.status === 'watching');
+          const passedDeals   = filtered.filter(d => d.status === 'passed');
+          return (
+            <div className="space-y-6">
+              {/* ── INVESTED ── */}
+              {investedDeals.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"/>
+                    <p className="text-xs font-semibold text-stone-500 dark:text-stone-400 uppercase tracking-wide">Invested · {investedDeals.length}</p>
+                  </div>
+                  <div className="space-y-3">
+                    {investedDeals.map(deal => (
+                      <DealInvestedCard key={deal.id} deal={deal} onSelect={() => { setSelected(deal); setPage('detail'); }} />
+                    ))}
                   </div>
                 </div>
-              );
-            })
-          )}
-        </div>
-        
+              )}
+              {/* ── WATCHING ── */}
+              {watchingDeals.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="w-2 h-2 rounded-full bg-stone-400"/>
+                    <p className="text-xs font-semibold text-stone-500 dark:text-stone-400 uppercase tracking-wide">Watching · {watchingDeals.length}</p>
+                    <span className="text-xs text-stone-400 font-normal normal-case tracking-normal">— tracking but not yet invested</span>
+                  </div>
+                  <div className="space-y-3">
+                    {watchingDeals.map(deal => (
+                      <DealWatchingCard key={deal.id} deal={deal} onSelect={() => { setSelected(deal); setPage('detail'); }} />
+                    ))}
+                  </div>
+                </div>
+              )}
+              {/* ── PASSED ── */}
+              {passedDeals.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="w-2 h-2 rounded-full bg-stone-300"/>
+                    <p className="text-xs font-semibold text-stone-400 uppercase tracking-wide">Passed · {passedDeals.length}</p>
+                  </div>
+                  <div className="space-y-2 opacity-60">
+                    {passedDeals.map(deal => (
+                      <DealWatchingCard key={deal.id} deal={deal} onSelect={() => { setSelected(deal); setPage('detail'); }} />
+                    ))}
+                  </div>
+                </div>
+              )}
+              {filtered.length === 0 && (
+                <div className="text-center py-16">
+                  <p className="text-stone-500 dark:text-stone-400 font-medium mb-1">No companies yet</p>
+                  <p className="text-sm text-stone-400 dark:text-stone-500">Add your first investment or company you're tracking.</p>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {/* Footer */}
         {filtered.length > 0 && (
-          <div className="mt-8 text-center space-y-1">
+          <div className="mt-8 text-center">
             <p className="text-sm text-stone-400 dark:text-stone-500">
-              {portfolioDeals.length} {portfolioDeals.length === 1 ? 'investment' : 'investments'}. Each one a deliberate choice.
-            </p>
-            <p className="text-xs text-stone-300 dark:text-stone-600">
-              The best investors stay curious about their own patterns
+              {portfolioDeals.length} {portfolioDeals.length === 1 ? 'investment' : 'investments'} · health scores update every 6h
             </p>
           </div>
         )}
@@ -3908,123 +3201,21 @@ function ConvexApp({ userMenu, syncStatus }) {
 }
 
 // ============================================================================
-// AUTHENTICATED APP WRAPPER
-// ============================================================================
-
-const AuthenticatedApp = () => {
-  const { isAuthenticated, isLoading, user } = useAuth();
-  const { loadData, saveData, syncWithBackend, isSyncing, lastSync } = useUserData();
-  const [deals, setDeals] = useState([]);
-  const [settings, setSettings] = useState(null);
-  const [hasLoadedData, setHasLoadedData] = useState(false);
-  
-  // Load user data on auth
-  useEffect(() => {
-    if (isAuthenticated && !hasLoadedData) {
-      telemetry.track('app_loaded', { userId: user?.id });
-      
-      // Load deals from user-isolated storage
-      const storedDeals = loadData('deals');
-      const storedSettings = loadData('settings');
-      
-      if (storedDeals && storedDeals.length > 0) {
-        setDeals(storedDeals);
-        telemetry.track('deals_loaded', { count: storedDeals.length });
-      }
-      
-      if (storedSettings) {
-        setSettings(storedSettings);
-      }
-      
-      setHasLoadedData(true);
-    }
-  }, [isAuthenticated, hasLoadedData, loadData, user]);
-  
-  // Save deals when they change
-  useEffect(() => {
-    if (hasLoadedData && deals.length > 0) {
-      saveData('deals', deals);
-      // Optionally sync with backend
-      // syncWithBackend(deals);
-    }
-  }, [deals, hasLoadedData, saveData]);
-  
-  // Save settings when they change
-  useEffect(() => {
-    if (hasLoadedData && settings) {
-      saveData('settings', settings);
-    }
-  }, [settings, hasLoadedData, saveData]);
-  
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-stone-50 dark:bg-stone-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-[#5B6DC4] border-t-transparent rounded-full animate-spin mx-auto mb-4"/>
-          <p className="text-stone-500 dark:text-stone-400">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-  
-  if (!isAuthenticated) {
-    return <LoginPage />;
-  }
-  
-  // Pass deals and settings to main app
-  return (
-    <ConvexAppWithData 
-      initialDeals={deals}
-      initialSettings={settings}
-      onDealsChange={setDeals}
-      onSettingsChange={setSettings}
-      userMenu={<UserMenu />}
-      syncStatus={<SyncStatus isSyncing={isSyncing} lastSync={lastSync} />}
-    />
-  );
-};
-
-// Wrapper that injects user data into the main app
-const ConvexAppWithData = ({ 
-  initialDeals, 
-  initialSettings, 
-  onDealsChange, 
-  onSettingsChange,
-  userMenu,
-  syncStatus 
-}) => {
-  // This component bridges the auth system with the existing ConvexApp
-  // For now, we'll render the existing app structure
-  // The actual integration would modify ConvexApp to accept these props
-  
-  return (
-    <ConvexApp 
-      userMenu={userMenu}
-      syncStatus={syncStatus}
-    />
-  );
-};
-
-// ============================================================================
 // ROOT APP WITH PROVIDERS
 // ============================================================================
 
 const App = () => {
   const [showAuth, setShowAuth] = useState(true);
   const [user, setUser] = useState(null);
-  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
-  const [isNewUser, setIsNewUser] = useState(false);
+
   
   // Check for existing session
   useEffect(() => {
     try {
       const storedUser = localStorage.getItem('user');
-      const onboardingComplete = localStorage.getItem('onboardingComplete');
-      
       if (storedUser) {
         setUser(JSON.parse(storedUser));
         setShowAuth(false);
-        setHasCompletedOnboarding(onboardingComplete === 'true');
       }
     } catch (e) {
       console.error('Failed to restore session', e);
@@ -4045,43 +3236,24 @@ const App = () => {
     try {
       localStorage.setItem('user', JSON.stringify(mockUser));
       localStorage.setItem('authToken', `mock_token_${Date.now()}`);
-      // Don't set onboardingComplete - new users need to complete it
-    } catch (e) {
+      } catch (e) {
       console.error('Failed to save session', e);
     }
-    
     setUser(mockUser);
     setShowAuth(false);
-    setIsNewUser(true); // Flag this as a new signup
-    setHasCompletedOnboarding(false); // New users haven't completed onboarding
   };
   
-  const handleOnboardingComplete = (userPrefs) => {
-    try {
-      localStorage.setItem('onboardingComplete', 'true');
-      if (userPrefs) {
-        localStorage.setItem('userPrefs', JSON.stringify(userPrefs));
-      }
-    } catch (e) {
-      console.error('Failed to save onboarding state', e);
-    }
-    setHasCompletedOnboarding(true);
-    setIsNewUser(false);
-  };
+
   
   const handleLogout = () => {
     try {
       localStorage.removeItem('user');
       localStorage.removeItem('authToken');
-      localStorage.removeItem('onboardingComplete');
-      localStorage.removeItem('userPrefs');
     } catch (e) {
       console.error('Failed to clear session', e);
     }
     setUser(null);
     setShowAuth(true);
-    setHasCompletedOnboarding(false);
-    setIsNewUser(false);
   };
   
   // Show login page if not authenticated
@@ -4089,18 +3261,9 @@ const App = () => {
     return <SimpleLoginPage onLogin={handleLogin} />;
   }
   
-  // Show onboarding for new users who haven't completed it
-  if (!hasCompletedOnboarding) {
-    return (
-      <OnboardingFlow 
-        user={user}
-        onComplete={handleOnboardingComplete}
-        onLogout={handleLogout}
-      />
-    );
-  }
+
   
-  // Show main app for authenticated users who completed onboarding
+  // Show main app
   return (
     <ConvexApp 
       userMenu={<SimpleUserMenu user={user} onLogout={handleLogout} />}
@@ -4112,384 +3275,6 @@ const App = () => {
 // ============================================================================
 // ONBOARDING FLOW (for new signups)
 // ============================================================================
-
-const OnboardingFlow = ({ user, onComplete, onLogout }) => {
-  const [step, setStep] = useState('welcome'); // 'welcome' | 'howitworks' | 'questions'
-  const [prefs, setPrefs] = useState({
-    investorType: null,
-    portfolioSize: null,
-    updateFrequency: null,
-    checkSize: null
-  });
-  
-  // Welcome screen
-  if (step === 'welcome') {
-    return (
-      <div style={{ minHeight: '100vh', background: 'linear-gradient(to bottom right, #fafaf9, #e7e5e4)', display: 'flex', flexDirection: 'column' }}>
-        {/* Header */}
-        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{ width: '32px', height: '32px', background: '#5B6DC4', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
-                <rect x="3" y="3" width="18" height="18" rx="2"/>
-              </svg>
-            </div>
-            <span style={{ fontWeight: '600', color: '#1c1917' }}>Convex</span>
-          </div>
-          <button 
-            onClick={onLogout}
-            style={{ fontSize: '14px', color: '#78716c', background: 'none', border: 'none', cursor: 'pointer' }}
-          >
-            Sign out
-          </button>
-        </header>
-        
-        {/* Content */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px', textAlign: 'center' }}>
-          <div style={{ width: '80px', height: '80px', background: '#5B6DC4', borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '24px', boxShadow: '0 10px 25px -5px rgba(91, 109, 196, 0.4)' }}>
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-            </svg>
-          </div>
-          
-          <h1 style={{ fontSize: '28px', fontWeight: 'bold', color: '#1c1917', marginBottom: '8px' }}>
-            Welcome{user?.name ? `, ${user.name.split(' ')[0]}` : ''}!
-          </h1>
-          <p style={{ fontSize: '16px', color: '#78716c', marginBottom: '32px', maxWidth: '400px' }}>
-            Know what's happening at your portfolio companies without having to chase it.
-          </p>
-          
-          <button
-            onClick={() => setStep('howitworks')}
-            style={{
-              padding: '14px 32px',
-              background: '#5B6DC4',
-              color: 'white',
-              border: 'none',
-              borderRadius: '12px',
-              fontSize: '16px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              boxShadow: '0 4px 14px -3px rgba(91, 109, 196, 0.5)'
-            }}
-          >
-            Get Started
-          </button>
-          
-          <button
-            onClick={() => onComplete(null)}
-            style={{
-              marginTop: '16px',
-              padding: '10px 20px',
-              background: 'transparent',
-              color: '#a8a29e',
-              border: 'none',
-              fontSize: '14px',
-              cursor: 'pointer'
-            }}
-          >
-            Skip for now
-          </button>
-        </div>
-      </div>
-    );
-  }
-  
-  // How it works screen
-  if (step === 'howitworks') {
-    const steps = [
-      {
-        number: 1,
-        title: 'Add companies you\'ve invested in',
-        description: 'Log your portfolio — stage, vehicle, thesis, founders, terms. Everything in one place.',
-        icon: '📥',
-        color: '#5B6DC4'
-      },
-      {
-        number: 2,
-        title: 'Passive signals, no chasing',
-        description: 'Real news pulled from the web on demand — funding rounds, launches, grants, press coverage.',
-        icon: '📡',
-        color: '#10B981'
-      },
-      {
-        number: 3,
-        title: 'Update log with nudge',
-        description: 'Log founder updates. Get a reminder when you\'ve gone too long without checking in.',
-        icon: '🔔',
-        color: '#F59E0B'
-      },
-      {
-        number: 4,
-        title: 'Documents in one place',
-        description: 'Link your SAFEs, K-1s, cap table, and equity docs per company. No more hunting through email.',
-        icon: '📄',
-        color: '#8B5CF6'
-      }
-    ];
-    
-    return (
-      <div style={{ minHeight: '100vh', background: '#fafaf9', display: 'flex', flexDirection: 'column' }}>
-        {/* Header */}
-        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px' }}>
-          <button 
-            onClick={() => setStep('welcome')}
-            style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#78716c', background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px' }}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
-            Back
-          </button>
-          <button 
-            onClick={() => setStep('questions')}
-            style={{ fontSize: '14px', color: '#5B6DC4', background: 'none', border: 'none', cursor: 'pointer', fontWeight: '500' }}
-          >
-            Skip
-          </button>
-        </header>
-        
-        {/* Content */}
-        <div style={{ flex: 1, padding: '24px', maxWidth: '500px', margin: '0 auto' }}>
-          <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-            <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#1c1917', marginBottom: '8px' }}>How Convex Works</h1>
-            <p style={{ color: '#78716c', fontSize: '14px' }}>A simple loop you'll repeat over time</p>
-          </div>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {steps.map((s) => (
-              <div 
-                key={s.number}
-                style={{
-                  background: 'white',
-                  borderRadius: '16px',
-                  padding: '20px',
-                  border: '1px solid #e7e5e4',
-                  display: 'flex',
-                  gap: '16px',
-                  alignItems: 'flex-start'
-                }}
-              >
-                <div style={{
-                  width: '48px',
-                  height: '48px',
-                  borderRadius: '12px',
-                  background: `${s.color}15`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '24px',
-                  flexShrink: 0
-                }}>
-                  {s.icon}
-                </div>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                    <span style={{ 
-                      width: '20px', 
-                      height: '20px', 
-                      borderRadius: '50%', 
-                      background: s.color, 
-                      color: 'white', 
-                      fontSize: '11px', 
-                      fontWeight: '600',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center'
-                    }}>
-                      {s.number}
-                    </span>
-                    <h3 style={{ fontWeight: '600', color: '#1c1917', fontSize: '15px' }}>{s.title}</h3>
-                  </div>
-                  <p style={{ color: '#78716c', fontSize: '14px', lineHeight: '1.5' }}>{s.description}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-          
-          <button
-            onClick={() => setStep('questions')}
-            style={{
-              width: '100%',
-              marginTop: '24px',
-              padding: '14px',
-              background: '#5B6DC4',
-              color: 'white',
-              border: 'none',
-              borderRadius: '12px',
-              fontSize: '16px',
-              fontWeight: '600',
-              cursor: 'pointer'
-            }}
-          >
-            Continue
-          </button>
-        </div>
-      </div>
-    );
-  }
-  
-  // Questions screen
-  if (step === 'questions') {
-    const questions = [
-      {
-        key: 'investorType',
-        question: 'How do you invest?',
-        options: [
-          { value: 'solo', label: 'Solo angel', desc: 'Individual investments from personal capital' },
-          { value: 'syndicate', label: 'Syndicate lead', desc: 'Lead deals with co-investors' },
-          { value: 'fund', label: 'Micro-fund GP', desc: 'Managing a small fund' }
-        ]
-      },
-      {
-        key: 'portfolioSize',
-        question: 'How many active portfolio companies?',
-        options: [
-          { value: 'small', label: '1–5', desc: 'Early days' },
-          { value: 'medium', label: '6–15', desc: 'Growing portfolio' },
-          { value: 'large', label: '15+', desc: 'Established portfolio' }
-        ]
-      },
-      {
-        key: 'updateFrequency',
-        question: 'How often do founders update you?',
-        options: [
-          { value: 'regular', label: 'Monthly or quarterly', desc: 'Consistent cadence' },
-          { value: 'irregular', label: 'Sporadically', desc: 'Whenever they feel like it' },
-          { value: 'rarely', label: 'Rarely', desc: 'I usually have to ask' }
-        ]
-      },
-      {
-        key: 'checkSize',
-        question: 'Typical check size?',
-        options: [
-          { value: 'small', label: '$5–25K', desc: 'Smaller bets' },
-          { value: 'medium', label: '$25–100K', desc: 'Standard angel' },
-          { value: 'large', label: '$100K+', desc: 'Larger positions' }
-        ]
-      }
-    ];
-    
-    const currentQ = questions.find(q => !prefs[q.key]) || questions[questions.length - 1];
-    const answeredCount = Object.values(prefs).filter(Boolean).length;
-    const allAnswered = answeredCount === questions.length;
-    
-    return (
-      <div style={{ minHeight: '100vh', background: '#fafaf9', display: 'flex', flexDirection: 'column' }}>
-        {/* Header */}
-        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px' }}>
-          <button 
-            onClick={() => setStep('howitworks')}
-            style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#78716c', background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px' }}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
-            Back
-          </button>
-          <button 
-            onClick={() => onComplete(prefs)}
-            style={{ fontSize: '14px', color: '#5B6DC4', background: 'none', border: 'none', cursor: 'pointer', fontWeight: '500' }}
-          >
-            Skip
-          </button>
-        </header>
-        
-        {/* Progress */}
-        <div style={{ padding: '0 24px', marginBottom: '24px' }}>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            {questions.map((q, i) => (
-              <div 
-                key={q.key}
-                style={{
-                  flex: 1,
-                  height: '4px',
-                  borderRadius: '2px',
-                  background: prefs[q.key] ? '#5B6DC4' : '#e7e5e4',
-                  transition: 'background 0.3s'
-                }}
-              />
-            ))}
-          </div>
-          <p style={{ fontSize: '12px', color: '#a8a29e', marginTop: '8px' }}>
-            {answeredCount} of {questions.length} questions
-          </p>
-        </div>
-        
-        {/* Content */}
-        <div style={{ flex: 1, padding: '0 24px 24px', maxWidth: '500px', margin: '0 auto', width: '100%' }}>
-          {!allAnswered ? (
-            <>
-              <h2 style={{ fontSize: '22px', fontWeight: 'bold', color: '#1c1917', marginBottom: '24px' }}>
-                {currentQ.question}
-              </h2>
-              
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {currentQ.options.map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => setPrefs(p => ({ ...p, [currentQ.key]: opt.value }))}
-                    style={{
-                      padding: '16px 20px',
-                      background: prefs[currentQ.key] === opt.value ? '#5B6DC4' : 'white',
-                      color: prefs[currentQ.key] === opt.value ? 'white' : '#1c1917',
-                      border: `1px solid ${prefs[currentQ.key] === opt.value ? '#5B6DC4' : '#e7e5e4'}`,
-                      borderRadius: '12px',
-                      textAlign: 'left',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s'
-                    }}
-                  >
-                    <div style={{ fontWeight: '600', marginBottom: '2px' }}>{opt.label}</div>
-                    <div style={{ fontSize: '13px', opacity: 0.7 }}>{opt.desc}</div>
-                  </button>
-                ))}
-              </div>
-            </>
-          ) : (
-            <div style={{ textAlign: 'center', paddingTop: '40px' }}>
-              <div style={{ 
-                width: '64px', 
-                height: '64px', 
-                background: '#10B981', 
-                borderRadius: '50%', 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center',
-                margin: '0 auto 24px'
-              }}>
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
-                  <polyline points="20 6 9 17 4 12"/>
-                </svg>
-              </div>
-              
-              <h2 style={{ fontSize: '24px', fontWeight: 'bold', color: '#1c1917', marginBottom: '8px' }}>
-                You're all set!
-              </h2>
-              <p style={{ color: '#78716c', marginBottom: '32px' }}>
-                Convex is configured for your investing style.
-              </p>
-              
-              <button
-                onClick={() => onComplete(prefs)}
-                style={{
-                  padding: '14px 32px',
-                  background: '#5B6DC4',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '12px',
-                  fontSize: '16px',
-                  fontWeight: '600',
-                  cursor: 'pointer'
-                }}
-              >
-                Start Using Convex
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-  
-  return null;
-};
 
 // Simple Login Page (standalone, no context needed)
 const SimpleLoginPage = ({ onLogin }) => {
