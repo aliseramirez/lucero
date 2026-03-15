@@ -15,14 +15,11 @@ export function AuthProvider({ children }) {
   // Load profile and settings
   const loadUserData = useCallback(async (userId) => {
     try {
-      // Get profile - don't let this block auth
       try {
         const { data: profileData, error: profileError } = await db.getProfile(userId)
         if (!profileError && profileData) {
           setProfile(profileData)
-        } else if (profileError) {
-          console.warn('Profile not found or error:', profileError.message)
-          // Set a minimal profile so onboarding works
+        } else {
           setProfile({ id: userId, onboarding_complete: false })
         }
       } catch (e) {
@@ -30,7 +27,6 @@ export function AuthProvider({ children }) {
         setProfile({ id: userId, onboarding_complete: false })
       }
 
-      // Get settings - don't let this block auth
       try {
         const { data: settingsData, error: settingsError } = await db.getSettings(userId)
         if (!settingsError && settingsData) {
@@ -44,20 +40,13 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
-  // Initialize auth state
+  // Initialize auth state — no timeout, just let Supabase resolve naturally
   useEffect(() => {
     let mounted = true
 
     const initAuth = async () => {
       try {
-        // Check for existing session with timeout
-        const sessionPromise = auth.getSession()
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Auth timeout')), 10000)
-        )
-        
-        const { session } = await Promise.race([sessionPromise, timeoutPromise])
-        
+        const { session } = await auth.getSession()
         if (mounted) {
           if (session?.user) {
             setUser(session.user)
@@ -90,10 +79,8 @@ export function AuthProvider({ children }) {
           setSettings(null)
           setIsLoading(false)
         } else if (event === 'TOKEN_REFRESHED') {
-          // Session refreshed, user still logged in
           setIsLoading(false)
         } else if (event === 'INITIAL_SESSION') {
-          // Initial session check complete
           if (!session) {
             setIsLoading(false)
           }
@@ -109,9 +96,7 @@ export function AuthProvider({ children }) {
 
   // Sign in with OAuth
   const signInWithProvider = useCallback(async (provider) => {
-    setIsLoading(true)
     setError(null)
-    
     try {
       const { error } = await auth.signInWithProvider(provider)
       if (error) throw error
@@ -125,7 +110,6 @@ export function AuthProvider({ children }) {
   const signInWithEmail = useCallback(async (email, password) => {
     setIsLoading(true)
     setError(null)
-    
     try {
       const { data, error } = await auth.signInWithEmail(email, password)
       if (error) throw error
@@ -141,7 +125,6 @@ export function AuthProvider({ children }) {
   const signUpWithEmail = useCallback(async (email, password, fullName) => {
     setIsLoading(true)
     setError(null)
-    
     try {
       const { data, error } = await auth.signUpWithEmail(email, password, fullName)
       if (error) throw error
@@ -156,7 +139,6 @@ export function AuthProvider({ children }) {
   // Sign out
   const signOut = useCallback(async () => {
     setIsLoading(true)
-    
     try {
       await auth.signOut()
       setUser(null)
@@ -172,7 +154,6 @@ export function AuthProvider({ children }) {
   // Update profile
   const updateProfile = useCallback(async (updates) => {
     if (!user) return { error: new Error('Not authenticated') }
-    
     try {
       const { data, error } = await db.updateProfile(user.id, updates)
       if (error) throw error
@@ -186,7 +167,6 @@ export function AuthProvider({ children }) {
   // Update settings
   const updateSettings = useCallback(async (updates) => {
     if (!user) return { error: new Error('Not authenticated') }
-    
     try {
       const { data, error } = await db.upsertSettings(user.id, updates)
       if (error) throw error
@@ -199,22 +179,13 @@ export function AuthProvider({ children }) {
 
   // Complete onboarding
   const completeOnboarding = useCallback(async (prefs) => {
-    // Always update local state first - this ensures UI advances
     setProfile(prev => ({ ...prev, onboarding_complete: true }))
-    
-    if (!user) {
-      console.warn('No user for onboarding completion')
-      return { success: true }
-    }
-    
-    // Try to save to database, but don't block on failure
+    if (!user) return { success: true }
     try {
       await db.updateProfile(user.id, { onboarding_complete: true })
     } catch (e) {
       console.warn('Failed to save onboarding to profile:', e)
     }
-    
-    // Try to save preferences
     if (prefs) {
       try {
         await db.upsertSettings(user.id, {
@@ -227,7 +198,6 @@ export function AuthProvider({ children }) {
         console.warn('Failed to save onboarding preferences:', e)
       }
     }
-    
     return { success: true }
   }, [user])
 
