@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
 import { supabase } from '../lib/supabase';
+import { useAuth } from '../hooks/useAuth';
 
 const ThemeContext = createContext({ theme: 'light', setTheme: () => {} });
 const useTheme = () => useContext(ThemeContext);
@@ -3246,44 +3247,24 @@ function ConvexApp({ userMenu, syncStatus, user }) {
 // ============================================================================
 
 const App = () => {
-  const [user, setUser] = useState(null);
-  const [showAuth, setShowAuth] = useState(true);
-  const [authLoading, setAuthLoading] = useState(true);
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
-      setShowAuth(!session?.user);
-      setAuthLoading(false);
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-      setShowAuth(!session?.user);
-    });
-    return () => subscription.unsubscribe();
-  }, []);
+  const { user, isLoading, isAuthenticated, signInWithProvider, signOut } = useAuth();
 
   const handleLogin = async () => {
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: window.location.origin }
-    });
+    await signInWithProvider('google');
   };
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    setShowAuth(true);
+    await signOut();
   };
 
-  if (authLoading) return (
+  if (isLoading) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fafaf9' }}>
       <div style={{ width: '32px', height: '32px', border: '3px solid #e7e5e4', borderTopColor: '#5B6DC4', borderRadius: '50%', animation: 'spin 1s linear infinite' }}/>
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 
-  if (showAuth || !user) return <SimpleLoginPage onLogin={handleLogin} />;
+  if (!isAuthenticated) return <SimpleLoginPage onLogin={handleLogin} />;
 
   return (
     <ConvexApp
