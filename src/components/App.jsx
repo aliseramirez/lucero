@@ -3273,12 +3273,8 @@ const App = () => {
     await signOut();
   };
 
-  if (isLoading) return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fafaf9' }}>
-      <div style={{ width: '32px', height: '32px', border: '3px solid #e7e5e4', borderTopColor: '#5B6DC4', borderRadius: '50%', animation: 'spin 1s linear infinite' }}/>
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-    </div>
-  );
+  if (isLoading) return null;
+
 
   if (!isAuthenticated) return <SimpleLoginPage onLogin={handleLogin} />;
 
