@@ -2783,9 +2783,17 @@ function ConvexApp({ userMenu, syncStatus, user }) {
           {/* Header */}
           <header className="flex items-center justify-between px-6 py-4">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: '#5B6DC4' }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
-                  <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: '#4A1942' }}>
+                <svg width="18" height="18" viewBox="0 0 38 38" fill="none">
+                  <circle cx="19" cy="19" r="4.5" fill="#F5DFA0"/>
+                  <line x1="19" y1="3" x2="19" y2="10" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/>
+                  <line x1="19" y1="28" x2="19" y2="35" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/>
+                  <line x1="3" y1="19" x2="10" y2="19" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/>
+                  <line x1="28" y1="19" x2="35" y2="19" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/>
+                  <line x1="7.1" y1="7.1" x2="12.1" y2="12.1" stroke="#F5DFA0" strokeWidth="2" strokeLinecap="round" opacity=".8"/>
+                  <line x1="25.9" y1="25.9" x2="30.9" y2="30.9" stroke="#F5DFA0" strokeWidth="2" strokeLinecap="round" opacity=".8"/>
+                  <line x1="30.9" y1="7.1" x2="25.9" y2="12.1" stroke="#F5DFA0" strokeWidth="2" strokeLinecap="round" opacity=".8"/>
+                  <line x1="12.1" y1="25.9" x2="7.1" y2="30.9" stroke="#F5DFA0" strokeWidth="2" strokeLinecap="round" opacity=".8"/>
                 </svg>
               </div>
               <span className="font-semibold text-stone-900 dark:text-stone-100">Thesis</span>
@@ -2913,7 +2921,7 @@ function ConvexApp({ userMenu, syncStatus, user }) {
                   <rect x="3" y="3" width="18" height="18" rx="2"/>
                 </svg>
               </div>
-              <span className="font-semibold text-stone-900 dark:text-stone-100">Convex</span>
+              <span className="font-semibold text-stone-900 dark:text-stone-100" style={{letterSpacing:'-0.3px'}}>Lucero</span>
             </div>
             {/* Sync Status */}
             {syncStatus}
@@ -3292,13 +3300,21 @@ const SimpleLoginPage = ({ onLogin }) => {
     <div style={{ minHeight: '100vh', background: 'linear-gradient(to bottom right, #fafaf9, #e7e5e4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
       <div style={{ width: '100%', maxWidth: '400px' }}>
         <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-          <div style={{ width: '64px', height: '64px', background: '#5B6DC4', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}>
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+          <div style={{ width: '72px', height: '72px', background: '#4A1942', borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', boxShadow: '0 20px 40px rgba(74,25,66,.25), 0 4px 12px rgba(74,25,66,.15)' }}>
+            <svg width="38" height="38" viewBox="0 0 38 38" fill="none">
+              <circle cx="19" cy="19" r="4.5" fill="#F5DFA0"/>
+              <line x1="19" y1="3" x2="19" y2="10" stroke="#F5DFA0" strokeWidth="2.2" strokeLinecap="round"/>
+              <line x1="19" y1="28" x2="19" y2="35" stroke="#F5DFA0" strokeWidth="2.2" strokeLinecap="round"/>
+              <line x1="3" y1="19" x2="10" y2="19" stroke="#F5DFA0" strokeWidth="2.2" strokeLinecap="round"/>
+              <line x1="28" y1="19" x2="35" y2="19" stroke="#F5DFA0" strokeWidth="2.2" strokeLinecap="round"/>
+              <line x1="7.1" y1="7.1" x2="12.1" y2="12.1" stroke="#F5DFA0" strokeWidth="1.8" strokeLinecap="round" opacity=".8"/>
+              <line x1="25.9" y1="25.9" x2="30.9" y2="30.9" stroke="#F5DFA0" strokeWidth="1.8" strokeLinecap="round" opacity=".8"/>
+              <line x1="30.9" y1="7.1" x2="25.9" y2="12.1" stroke="#F5DFA0" strokeWidth="1.8" strokeLinecap="round" opacity=".8"/>
+              <line x1="12.1" y1="25.9" x2="7.1" y2="30.9" stroke="#F5DFA0" strokeWidth="1.8" strokeLinecap="round" opacity=".8"/>
             </svg>
           </div>
-          <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#1c1917', marginBottom: '8px' }}>Convex</h1>
-          <p style={{ color: '#78716c' }}>Track your angel investments</p>
+          <h1 style={{ fontSize: '28px', fontWeight: '800', color: '#1c1917', marginBottom: '6px', letterSpacing: '-0.5px' }}>Lucero</h1>
+          <p style={{ color: '#78716c', fontSize: '15px' }}>Your angel portfolio, all in one place</p>
         </div>
 
         <div style={{ background: 'white', borderRadius: '16px', padding: '32px', border: '1px solid #e7e5e4', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
