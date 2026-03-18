@@ -1,13 +1,34 @@
 import { useState, useEffect, useCallback, createContext, useContext } from 'react'
-import { auth, db } from '../lib/supabase'
+import { supabase, auth, db } from '../lib/supabase'
 
 const AuthContext = createContext(null)
 
+// Read session synchronously from localStorage before first render
+// This prevents any flash to the login screen on refresh
+const getInitialSession = () => {
+  try {
+    const storageKey = 'lucero-auth'
+    const raw = localStorage.getItem(storageKey)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    const session = parsed?.currentSession || parsed
+    // Check token hasn't expired
+    if (session?.expires_at && session.expires_at * 1000 < Date.now()) return null
+    return session?.user ? session : null
+  } catch {
+    return null
+  }
+}
+
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null)
+  const initialSession = getInitialSession()
+
+  const [user, setUser] = useState(initialSession?.user ?? null)
   const [profile, setProfile] = useState(null)
   const [settings, setSettings] = useState(null)
-  const [isLoading, setIsLoading] = useState(true)
+  // If we found a session in localStorage, start as NOT loading
+  // so there's zero flash to the login screen
+  const [isLoading, setIsLoading] = useState(!initialSession)
   const [error, setError] = useState(null)
 
   const loadUserData = useCallback(async (userId) => {
@@ -39,29 +60,27 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let mounted = true
 
-    const init = async () => {
-      try {
-        // Read session from localStorage eagerly before listener fires
-        const { session } = await auth.getSession()
-        if (mounted && session?.user) {
-          setUser(session.user)
-          await loadUserData(session.user.id)
-        }
-      } catch (e) {
-        console.warn('getSession error:', e)
-      } finally {
-        if (mounted) setIsLoading(false)
-      }
+    // If we seeded from localStorage, still load profile data in background
+    if (initialSession?.user) {
+      loadUserData(initialSession.user.id)
     }
 
-    init()
-
-    // Listen for subsequent changes only — INITIAL_SESSION handled above
-    const { data: { subscription } } = auth.onAuthStateChange(async (event, session) => {
+    // onAuthStateChange is the authoritative source going forward
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return
-      console.log('Auth event:', event)
+      console.log('Auth event:', event, !!session?.user)
 
-      if (event === 'SIGNED_IN') {
+      if (event === 'INITIAL_SESSION') {
+        if (session?.user) {
+          setUser(session.user)
+          if (!initialSession) await loadUserData(session.user.id)
+        } else {
+          setUser(null)
+          setProfile(null)
+          setSettings(null)
+        }
+        setIsLoading(false)
+      } else if (event === 'SIGNED_IN') {
         if (session?.user) {
           setUser(session.user)
           await loadUserData(session.user.id)
@@ -75,22 +94,13 @@ export function AuthProvider({ children }) {
       } else if (event === 'TOKEN_REFRESHED') {
         if (session?.user) setUser(session.user)
       }
-      // INITIAL_SESSION intentionally ignored — handled by getSession() above
     })
-
-    const fallback = setTimeout(() => {
-      if (mounted) {
-        console.warn('Auth fallback timeout')
-        setIsLoading(false)
-      }
-    }, 4000)
 
     return () => {
       mounted = false
       subscription?.unsubscribe()
-      clearTimeout(fallback)
     }
-  }, [loadUserData])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const signInWithProvider = useCallback(async (provider) => {
     setError(null)
@@ -99,7 +109,6 @@ export function AuthProvider({ children }) {
       if (error) throw error
     } catch (e) {
       setError(e.message)
-      setIsLoading(false)
     }
   }, [])
 
