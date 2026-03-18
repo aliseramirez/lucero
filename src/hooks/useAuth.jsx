@@ -39,32 +39,51 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     let mounted = true
 
-    // Listen for auth changes FIRST before getSession,
-    // so we never miss an event that fires before getSession resolves
-    const { data: { subscription } } = auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth state change:', event, !!session)
-      if (!mounted) return
+    const init = async () => {
+      try {
+        // Read session from localStorage eagerly before listener fires
+        const { session } = await auth.getSession()
+        if (mounted && session?.user) {
+          setUser(session.user)
+          await loadUserData(session.user.id)
+        }
+      } catch (e) {
+        console.warn('getSession error:', e)
+      } finally {
+        if (mounted) setIsLoading(false)
+      }
+    }
 
-      if (session?.user) {
-        setUser(session.user)
-        await loadUserData(session.user.id)
-      } else {
+    init()
+
+    // Listen for subsequent changes only — INITIAL_SESSION handled above
+    const { data: { subscription } } = auth.onAuthStateChange(async (event, session) => {
+      if (!mounted) return
+      console.log('Auth event:', event)
+
+      if (event === 'SIGNED_IN') {
+        if (session?.user) {
+          setUser(session.user)
+          await loadUserData(session.user.id)
+        }
+        setIsLoading(false)
+      } else if (event === 'SIGNED_OUT') {
         setUser(null)
         setProfile(null)
         setSettings(null)
+        setIsLoading(false)
+      } else if (event === 'TOKEN_REFRESHED') {
+        if (session?.user) setUser(session.user)
       }
-
-      // Always resolve loading on any auth event
-      setIsLoading(false)
+      // INITIAL_SESSION intentionally ignored — handled by getSession() above
     })
 
-    // Fallback: if onAuthStateChange never fires (rare), resolve after 3s
     const fallback = setTimeout(() => {
       if (mounted) {
-        console.warn('Auth fallback timeout fired')
+        console.warn('Auth fallback timeout')
         setIsLoading(false)
       }
-    }, 3000)
+    }, 4000)
 
     return () => {
       mounted = false
