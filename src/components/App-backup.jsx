@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, createContext, useContext } from 'react';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../hooks/useAuth';
 
 const ThemeContext = createContext({ theme: 'light', setTheme: () => {} });
 const useTheme = () => useContext(ThemeContext);
@@ -2559,9 +2561,10 @@ const DealWatchingCard = ({ deal, onSelect }) => {
   );
 };
 
-function ConvexApp({ userMenu, syncStatus }) {
+function ConvexApp({ userMenu, syncStatus, user }) {
   const [page, setPage] = useState('list');
   const [deals, setDeals] = useState([]);
+  const [dealsLoading, setDealsLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const [toast, setToast] = useState(null);
   const [search, setSearch] = useState('');
@@ -2605,7 +2608,33 @@ function ConvexApp({ userMenu, syncStatus }) {
     return () => mediaQuery.removeEventListener('change', handleChange);
   }, [settings.appearance]);
 
-  useEffect(() => { setDeals(createDemoDeals()); }, []);
+  useEffect(() => {
+    if (!user) return;
+    const loadDeals = async () => {
+      const { data, error } = await supabase
+        .from('deals')
+        .select('id, data')
+        .eq('user_id', user.id);
+      if (data && data.length > 0) {
+        setDeals(data.map(row => ({ ...row.data, id: row.id })));
+      } else {
+        const demo = createDemoDeals();
+        setDeals(demo);
+        for (const deal of demo) {
+          const { id, ...dealData } = deal;
+          await supabase.from('deals').insert({
+            id,
+            user_id: user.id,
+            company_name: deal.companyName,
+            status: deal.status,
+            data: dealData
+          });
+        }
+      }
+      setDealsLoading(false);
+    };
+    loadDeals();
+  }, [user]);
 
   // Invested deals — used for health scoring and portfolio summary
   const portfolioDeals = deals.filter(d => d.status === 'invested');
@@ -2647,13 +2676,26 @@ function ConvexApp({ userMenu, syncStatus }) {
 
   const filtered = getFilteredDeals();
 
-  const updateDeal = (updated) => {
+  const updateDeal = async (updated) => {
     const now = new Date().toISOString();
-    setDeals(prev => prev.map(d => d.id === updated.id ? { ...updated, lastActivity: now } : d));
-    setSelected({ ...updated, lastActivity: now });
+    const { id, ...dealData } = { ...updated, lastActivity: now };
+    await supabase.from('deals')
+      .update({ data: dealData, company_name: updated.companyName, status: updated.status, updated_at: now })
+      .eq('id', id)
+      .eq('user_id', user.id);
+    setDeals(prev => prev.map(d => d.id === id ? { id, ...dealData } : d));
+    setSelected({ id, ...dealData });
   };
 
-  const addDeal = (newDeal) => {
+  const addDeal = async (newDeal) => {
+    const { id, ...dealData } = newDeal;
+    await supabase.from('deals').insert({
+      id,
+      user_id: user.id,
+      company_name: newDeal.companyName,
+      status: newDeal.status,
+      data: dealData
+    });
     setDeals(prev => [newDeal, ...prev]);
     const statusLabel = STATUS_CONFIG[newDeal.status]?.label || newDeal.status;
     setToast({ message: `${newDeal.companyName} added as ${statusLabel}`, type: 'success' });
@@ -3205,69 +3247,30 @@ function ConvexApp({ userMenu, syncStatus }) {
 // ============================================================================
 
 const App = () => {
-  const [showAuth, setShowAuth] = useState(true);
-  const [user, setUser] = useState(null);
+  const { user, isLoading, isAuthenticated, signInWithProvider, signOut } = useAuth();
 
-  
-  // Check for existing session
-  useEffect(() => {
-    try {
-      const storedUser = localStorage.getItem('user');
-      if (storedUser) {
-        setUser(JSON.parse(storedUser));
-        setShowAuth(false);
-      }
-    } catch (e) {
-      console.error('Failed to restore session', e);
-    }
-  }, []);
-  
-  const handleLogin = async (provider) => {
-    // Simulate login
-    const mockUser = {
-      id: `user_${Math.random().toString(36).substr(2, 9)}`,
-      email: `demo@${provider}.example.com`,
-      name: 'Demo User',
-      avatar: `https://ui-avatars.com/api/?name=Demo+User&background=5B6DC4&color=fff`,
-      provider,
-      createdAt: new Date().toISOString()
-    };
-    
-    try {
-      localStorage.setItem('user', JSON.stringify(mockUser));
-      localStorage.setItem('authToken', `mock_token_${Date.now()}`);
-      } catch (e) {
-      console.error('Failed to save session', e);
-    }
-    setUser(mockUser);
-    setShowAuth(false);
+  const handleLogin = async () => {
+    await signInWithProvider('google');
   };
-  
 
-  
-  const handleLogout = () => {
-    try {
-      localStorage.removeItem('user');
-      localStorage.removeItem('authToken');
-    } catch (e) {
-      console.error('Failed to clear session', e);
-    }
-    setUser(null);
-    setShowAuth(true);
+  const handleLogout = async () => {
+    await signOut();
   };
-  
-  // Show login page if not authenticated
-  if (showAuth && !user) {
-    return <SimpleLoginPage onLogin={handleLogin} />;
-  }
-  
 
-  
-  // Show main app
+  if (isLoading) return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fafaf9' }}>
+      <div style={{ width: '32px', height: '32px', border: '3px solid #e7e5e4', borderTopColor: '#5B6DC4', borderRadius: '50%', animation: 'spin 1s linear infinite' }}/>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+
+  if (!isAuthenticated) return <SimpleLoginPage onLogin={handleLogin} />;
+
   return (
-    <ConvexApp 
+    <ConvexApp
       userMenu={<SimpleUserMenu user={user} onLogout={handleLogout} />}
       syncStatus={null}
+      user={user}
     />
   );
 };
@@ -3278,14 +3281,13 @@ const App = () => {
 
 // Simple Login Page (standalone, no context needed)
 const SimpleLoginPage = ({ onLogin }) => {
-  const [loading, setLoading] = useState(null);
-  
-  const handleClick = async (provider) => {
-    setLoading(provider);
-    await new Promise(r => setTimeout(r, 1000));
-    onLogin(provider);
+  const [loading, setLoading] = useState(false);
+
+  const handleClick = async () => {
+    setLoading(true);
+    await onLogin();
   };
-  
+
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(to bottom right, #fafaf9, #e7e5e4)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
       <div style={{ width: '100%', maxWidth: '400px' }}>
@@ -3296,119 +3298,39 @@ const SimpleLoginPage = ({ onLogin }) => {
             </svg>
           </div>
           <h1 style={{ fontSize: '24px', fontWeight: 'bold', color: '#1c1917', marginBottom: '8px' }}>Convex</h1>
-          <p style={{ color: '#78716c' }}>Track your angel investments with clarity</p>
+          <p style={{ color: '#78716c' }}>Track your angel investments</p>
         </div>
-        
-        <div style={{ background: 'white', borderRadius: '16px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', padding: '32px', border: '1px solid #e7e5e4' }}>
-          <h2 style={{ fontSize: '18px', fontWeight: '600', color: '#1c1917', marginBottom: '24px', textAlign: 'center' }}>Sign in to continue</h2>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {/* Google Button */}
-            <button
-              onClick={() => handleClick('google')}
-              disabled={loading}
-              style={{ 
-                width: '100%', 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center', 
-                gap: '12px', 
-                padding: '12px 16px', 
-                borderRadius: '12px', 
-                border: '1px solid #d1d5db', 
-                background: 'white', 
-                color: '#374151', 
-                fontWeight: '500',
-                cursor: loading ? 'not-allowed' : 'pointer',
-                opacity: loading ? 0.5 : 1
-              }}
-            >
-              {loading === 'google' ? (
-                <div style={{ width: '20px', height: '20px', border: '2px solid #d1d5db', borderTopColor: '#374151', borderRadius: '50%', animation: 'spin 1s linear infinite' }}/>
-              ) : (
-                <svg width="20" height="20" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                </svg>
-              )}
-              Continue with Google
-            </button>
-            
-            {/* AngelList Button */}
-            <button
-              onClick={() => handleClick('angellist')}
-              disabled={loading}
-              style={{ 
-                width: '100%', 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center', 
-                gap: '12px', 
-                padding: '12px 16px', 
-                borderRadius: '12px', 
-                border: '1px solid #000', 
-                background: '#000', 
-                color: 'white', 
-                fontWeight: '500',
-                cursor: loading ? 'not-allowed' : 'pointer',
-                opacity: loading ? 0.5 : 1
-              }}
-            >
-              {loading === 'angellist' ? (
-                <div style={{ width: '20px', height: '20px', border: '2px solid #666', borderTopColor: 'white', borderRadius: '50%', animation: 'spin 1s linear infinite' }}/>
-              ) : (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
-                  <circle cx="12" cy="12" r="10"/>
-                </svg>
-              )}
-              Continue with AngelList
-            </button>
-            
-            {/* Carta Button */}
-            <button
-              onClick={() => handleClick('carta')}
-              disabled={loading}
-              style={{ 
-                width: '100%', 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center', 
-                gap: '12px', 
-                padding: '12px 16px', 
-                borderRadius: '12px', 
-                border: '1px solid #0066FF', 
-                background: '#0066FF', 
-                color: 'white', 
-                fontWeight: '500',
-                cursor: loading ? 'not-allowed' : 'pointer',
-                opacity: loading ? 0.5 : 1
-              }}
-            >
-              {loading === 'carta' ? (
-                <div style={{ width: '20px', height: '20px', border: '2px solid #99c2ff', borderTopColor: 'white', borderRadius: '50%', animation: 'spin 1s linear infinite' }}/>
-              ) : (
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                  <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
-                </svg>
-              )}
-              Continue with Carta
-            </button>
-          </div>
-          
-          <p style={{ fontSize: '12px', color: '#a8a29e', textAlign: 'center', marginTop: '24px' }}>
-            By signing in, you agree to our Terms of Service and Privacy Policy
+
+        <div style={{ background: 'white', borderRadius: '16px', padding: '32px', border: '1px solid #e7e5e4', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
+          <button
+            onClick={handleClick}
+            disabled={loading}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              gap: '12px', padding: '12px 16px', borderRadius: '12px',
+              border: '1px solid #d1d5db', background: 'white', color: '#374151',
+              fontWeight: '500', fontSize: '15px', cursor: loading ? 'not-allowed' : 'pointer',
+              opacity: loading ? 0.6 : 1
+            }}
+          >
+            {loading ? (
+              <div style={{ width: '20px', height: '20px', border: '2px solid #d1d5db', borderTopColor: '#374151', borderRadius: '50%', animation: 'spin 1s linear infinite' }}/>
+            ) : (
+              <svg width="20" height="20" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+              </svg>
+            )}
+            Continue with Google
+          </button>
+          <p style={{ fontSize: '12px', color: '#a8a29e', textAlign: 'center', marginTop: '16px' }}>
+            Access is invite-only
           </p>
         </div>
-        
-        {/* Spin animation */}
-        <style>{`
-          @keyframes spin {
-            to { transform: rotate(360deg); }
-          }
-        `}</style>
       </div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 };
@@ -3416,28 +3338,27 @@ const SimpleLoginPage = ({ onLogin }) => {
 // Simple User Menu (standalone, no context needed)
 const SimpleUserMenu = ({ user, onLogout }) => {
   const [isOpen, setIsOpen] = useState(false);
-  
+
   if (!user) return null;
-  
+
+  const displayName = user.user_metadata?.full_name || user.user_metadata?.name || user.email || 'User';
+  const avatarUrl = user.user_metadata?.avatar_url || user.user_metadata?.picture ||
+    `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=5B6DC4&color=fff`;
+
   return (
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-2 p-1.5 rounded-full hover:bg-stone-100 transition-colors"
       >
-        <img
-          src={user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name || user.email)}&background=5B6DC4&color=fff`}
-          alt={user.name || user.email}
-          className="w-8 h-8 rounded-full"
-        />
+        <img src={avatarUrl} alt={displayName} className="w-8 h-8 rounded-full" />
       </button>
-      
+
       {isOpen && (
         <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-stone-200 py-2 z-50">
           <div className="px-4 py-3 border-b border-stone-200">
-            <p className="font-medium text-stone-900 truncate">{user.name || 'User'}</p>
+            <p className="font-medium text-stone-900 truncate">{displayName}</p>
             <p className="text-sm text-stone-500 truncate">{user.email}</p>
-            <span className="text-xs text-stone-400 capitalize">via {user.provider}</span>
           </div>
           <button
             onClick={() => { setIsOpen(false); onLogout(); }}
