@@ -1,10 +1,8 @@
 import { useState, useEffect, useCallback, createContext, useContext } from 'react'
 import { auth, db } from '../lib/supabase'
 
-// Create context
 const AuthContext = createContext(null)
 
-// Auth Provider component
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [profile, setProfile] = useState(null)
@@ -12,7 +10,6 @@ export function AuthProvider({ children }) {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
 
-  // Load profile and settings
   const loadUserData = useCallback(async (userId) => {
     try {
       try {
@@ -26,7 +23,6 @@ export function AuthProvider({ children }) {
         console.warn('Failed to load profile:', e)
         setProfile({ id: userId, onboarding_complete: false })
       }
-
       try {
         const { data: settingsData, error: settingsError } = await db.getSettings(userId)
         if (!settingsError && settingsData) {
@@ -40,61 +36,43 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
-  // Initialize auth state — no timeout, just let Supabase resolve naturally
   useEffect(() => {
     let mounted = true
 
-    const initAuth = async () => {
-      try {
-        const { session } = await auth.getSession()
-        if (mounted) {
-          if (session?.user) {
-            setUser(session.user)
-            await loadUserData(session.user.id)
-          }
-          setIsLoading(false)
-        }
-      } catch (e) {
-        console.error('Auth init error:', e)
-        if (mounted) {
-          setError(e.message)
-          setIsLoading(false)
-        }
-      }
-    }
-
-    initAuth()
-
-    // Listen for auth changes
+    // Listen for auth changes FIRST before getSession,
+    // so we never miss an event that fires before getSession resolves
     const { data: { subscription } } = auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth state change:', event)
-      if (mounted) {
-        if (event === 'SIGNED_IN' && session?.user) {
-          setUser(session.user)
-          await loadUserData(session.user.id)
-          setIsLoading(false)
-        } else if (event === 'SIGNED_OUT') {
-          setUser(null)
-          setProfile(null)
-          setSettings(null)
-          setIsLoading(false)
-        } else if (event === 'TOKEN_REFRESHED') {
-          setIsLoading(false)
-        } else if (event === 'INITIAL_SESSION') {
-          if (!session) {
-            setIsLoading(false)
-          }
-        }
+      console.log('Auth state change:', event, !!session)
+      if (!mounted) return
+
+      if (session?.user) {
+        setUser(session.user)
+        await loadUserData(session.user.id)
+      } else {
+        setUser(null)
+        setProfile(null)
+        setSettings(null)
       }
+
+      // Always resolve loading on any auth event
+      setIsLoading(false)
     })
+
+    // Fallback: if onAuthStateChange never fires (rare), resolve after 3s
+    const fallback = setTimeout(() => {
+      if (mounted) {
+        console.warn('Auth fallback timeout fired')
+        setIsLoading(false)
+      }
+    }, 3000)
 
     return () => {
       mounted = false
       subscription?.unsubscribe()
+      clearTimeout(fallback)
     }
   }, [loadUserData])
 
-  // Sign in with OAuth
   const signInWithProvider = useCallback(async (provider) => {
     setError(null)
     try {
@@ -106,7 +84,6 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
-  // Sign in with email
   const signInWithEmail = useCallback(async (email, password) => {
     setIsLoading(true)
     setError(null)
@@ -121,7 +98,6 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
-  // Sign up with email
   const signUpWithEmail = useCallback(async (email, password, fullName) => {
     setIsLoading(true)
     setError(null)
@@ -136,7 +112,6 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
-  // Sign out
   const signOut = useCallback(async () => {
     setIsLoading(true)
     try {
@@ -151,7 +126,6 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
-  // Update profile
   const updateProfile = useCallback(async (updates) => {
     if (!user) return { error: new Error('Not authenticated') }
     try {
@@ -164,7 +138,6 @@ export function AuthProvider({ children }) {
     }
   }, [user])
 
-  // Update settings
   const updateSettings = useCallback(async (updates) => {
     if (!user) return { error: new Error('Not authenticated') }
     try {
@@ -177,7 +150,6 @@ export function AuthProvider({ children }) {
     }
   }, [user])
 
-  // Complete onboarding
   const completeOnboarding = useCallback(async (prefs) => {
     setProfile(prev => ({ ...prev, onboarding_complete: true }))
     if (!user) return { success: true }
@@ -225,7 +197,6 @@ export function AuthProvider({ children }) {
   )
 }
 
-// Hook to use auth context
 export function useAuth() {
   const context = useContext(AuthContext)
   if (!context) {
