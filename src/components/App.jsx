@@ -4263,26 +4263,38 @@ function ConvexApp({ userMenu, syncStatus, user }) {
   const updateDeal = async (updated) => {
     const now = new Date().toISOString();
     const { id, ...dealData } = { ...updated, lastActivity: now };
-    await supabase.from('deals')
+    // Optimistic update first
+    setDeals(prev => prev.map(d => d.id === id ? { id, ...dealData } : d));
+    setSelected({ id, ...dealData });
+    // Persist in background
+    const { error } = await supabase.from('deals')
       .update({ data: dealData, company_name: updated.companyName, status: updated.status, updated_at: now })
       .eq('id', id)
       .eq('user_id', user.id);
-    setDeals(prev => prev.map(d => d.id === id ? { id, ...dealData } : d));
-    setSelected({ id, ...dealData });
+    if (error) console.error('Failed to update deal:', error);
   };
 
   const addDeal = async (newDeal) => {
+    // Optimistically update UI immediately
+    setDeals(prev => [newDeal, ...prev]);
+
+    // Persist to Supabase
     const { id, ...dealData } = newDeal;
-    await supabase.from('deals').insert({
+    const { error } = await supabase.from('deals').insert({
       id,
       user_id: user.id,
       company_name: newDeal.companyName,
       status: newDeal.status,
       data: dealData
     });
-    setDeals(prev => [newDeal, ...prev]);
-    const statusLabel = STATUS_CONFIG[newDeal.status]?.label || newDeal.status;
-    setToast({ message: `${newDeal.companyName} added as ${statusLabel}`, type: 'success' });
+
+    if (error) {
+      console.error('Failed to save deal to Supabase:', error);
+      setToast({ message: `Saved locally — sync failed: ${error.message}`, type: 'error' });
+    } else {
+      const statusLabel = STATUS_CONFIG[newDeal.status]?.label || newDeal.status;
+      setToast({ message: `${newDeal.companyName} added as ${statusLabel}`, type: 'success' });
+    }
   };
 
   const toggleEngagement = (dealId) => {
