@@ -1780,30 +1780,39 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
 
-  // Load deals from Supabase
+  // Load deals from Supabase — never show demo data flash
   useEffect(() => {
     if (!user?.id) return;
-    // Show demo data immediately while Supabase loads
-    setDeals(DEALS);
-    setDealsReady(true);
-
+    let mounted = true;
     const load = async () => {
       try {
         const { data, error } = await supabase
           .from('deals').select('id, data').eq('user_id', user.id);
-        if (error) { console.warn('Supabase load error:', error.message); return; }
+        if (!mounted) return;
+        if (error) { console.warn('Supabase load error:', error.message); setDealsReady(true); return; }
         if (data && data.length > 0) {
           setDeals(data.map(row => ({ ...row.data, id: row.id })));
+          setDealsReady(true);
         } else {
-          // Seed demo deals for new user in background
+          // New user — show empty portfolio immediately, seed demo in background
+          setDealsReady(true);
           for (const deal of DEALS) {
             const { id, ...dealData } = deal;
             await supabase.from('deals').insert({ id, user_id: user.id, company_name: deal.companyName, status: deal.status, data: dealData });
           }
+          // Now load what was just seeded
+          if (mounted) {
+            const { data: seeded } = await supabase.from('deals').select('id, data').eq('user_id', user.id);
+            if (mounted && seeded?.length > 0) setDeals(seeded.map(row => ({ ...row.data, id: row.id })));
+          }
         }
-      } catch(e) { console.warn('Supabase unavailable:', e.message); }
+      } catch(e) {
+        console.warn('Supabase unavailable:', e.message);
+        if (mounted) setDealsReady(true);
+      }
     };
     load();
+    return () => { mounted = false; };
   }, [user?.id]);
 
   const updateDeal = async (updated) => {
@@ -1830,8 +1839,22 @@ export default function App() {
     }
   };
 
-  // Auth states
-  if (isLoading) return null;
+  // Single loading screen covers both auth resolving and deals fetching
+  if (isLoading || (isAuthenticated && !dealsReady)) return (
+    <div style={{minHeight:'100vh',background:'#f9fafb',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16}}>
+      <div style={{width:40,height:40,background:'#4A1942',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center'}}>
+        <svg width="20" height="20" viewBox="0 0 38 38" fill="none">
+          <circle cx="19" cy="19" r="4.5" fill="#F5DFA0"/>
+          <line x1="19" y1="3" x2="19" y2="10" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/>
+          <line x1="19" y1="28" x2="19" y2="35" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/>
+          <line x1="3" y1="19" x2="10" y2="19" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/>
+          <line x1="28" y1="19" x2="35" y2="19" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/>
+        </svg>
+      </div>
+      <div style={{width:20,height:20,border:'2px solid #e5e7eb',borderTopColor:'#4A1942',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}/>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
   if (!isAuthenticated) return <LoginPage onLogin={() => signInWithProvider('google')} />;
   if (!dealsReady) return null;
 
