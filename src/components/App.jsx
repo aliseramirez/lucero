@@ -83,12 +83,7 @@ const calcImpliedValue = (deal) => {
   return costBasis;
 };
 
-const calcMOIC = (deal) => {
-  const inv = deal.investment || {};
-  const costBasis = getEffectiveCostBasis(inv);
-  if (!costBasis) return null;
-  return calcImpliedValue(deal) / costBasis;
-};
+// calcMOIC defined below
 
 const getValuationLabel = (method) => ({
   'mark-at-cost': 'Mark at cost', 'last-round': 'Last round',
@@ -758,17 +753,7 @@ const createDemoDeals = () => [
 ];
 
 // Components
-const CompanyLogo = ({ url, name, size = 'md' }) => {
-  const sizes = { sm: 'w-10 h-10 text-sm', md: 'w-12 h-12 text-base', lg: 'w-14 h-14 text-lg' };
-  const initial = name?.charAt(0)?.toUpperCase() || '?';
-  if (url) return <img src={url} alt={name} className={`${sizes[size].split(' ').slice(0,2).join(' ')} rounded-xl object-cover`} />;
-  return (
-    <div className={`${sizes[size]} rounded-xl bg-stone-200 dark:bg-stone-700 flex items-center justify-center font-semibold text-stone-500 dark:text-stone-400`}>
-      {initial}
-    </div>
-  );
-  return <div className={`${sizes[size]} rounded-xl bg-gradient-to-br from-stone-200 to-stone-300 flex items-center justify-center text-stone-600 font-bold`}>{name.split(' ').map(w => w[0]).join('').slice(0,2)}</div>;
-};
+// CompanyLogo defined below
 
 const StatusBadge = ({ status, size = 'md' }) => {
   const config = STATUS_CONFIG[status];
