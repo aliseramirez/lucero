@@ -1962,11 +1962,21 @@ function ImportModal({ onClose, onImport }) {
     const toImport = rows.filter(r => r.selected).map(r => r.deal);
     setStage('importing');
     let updated = 0, added = 0;
+
+    // Process in small batches to avoid hanging on any single deal
+    const withTimeout = (promise, ms = 5000) =>
+      Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))]);
+
     for (let i = 0; i < toImport.length; i++) {
       const d = toImport[i];
-      const isExisting = deals.find(x => x.companyName.toLowerCase() === d.companyName.toLowerCase());
-      if (isExisting) updated++; else added++;
-      await onImport(d, true);
+      try {
+        const isExisting = deals.find(x => x.companyName.toLowerCase() === d.companyName.toLowerCase());
+        if (isExisting) updated++; else added++;
+        await withTimeout(onImport(d, true));
+      } catch (e) {
+        console.warn(`Import failed for ${d.companyName}:`, e.message);
+        // Continue with next deal even if this one fails/times out
+      }
       setProgress(Math.round(((i + 1) / toImport.length) * 100));
     }
     setImportSummary({ updated, added });
@@ -2187,20 +2197,29 @@ export default function App() {
   };
 
   const addDeal = async (d, upsert = false) => {
-    // In upsert mode: check if a deal with same company name already exists
     if (upsert) {
       const existing = deals.find(x => x.companyName.toLowerCase() === d.companyName.toLowerCase());
       if (existing) {
-        // Replace existing deal with fresh imported data, keep same id
         const merged = { ...d, id: existing.id };
+        // Update UI immediately
         setDeals(prev => prev.map(x => x.id === existing.id ? merged : x));
+        // Write to Supabase in background — don't await
         const { id, ...dealData } = merged;
-        await supabase.from('deals')
+        supabase.from('deals')
           .update({ data: dealData, company_name: merged.companyName, status: merged.status })
-          .eq('id', id).eq('user_id', user.id);
+          .eq('id', id).eq('user_id', user.id)
+          .then(({ error }) => { if (error) console.warn('Update failed:', error.message); });
         return;
       }
+      // New deal — insert without blocking
+      setDeals(prev => [d, ...prev]);
+      const { id, ...dealData } = d;
+      supabase.from('deals')
+        .insert({ id, user_id: user.id, company_name: d.companyName, status: d.status, data: dealData })
+        .then(({ error }) => { if (error) console.warn('Insert failed:', error.message); });
+      return;
     }
+    // Manual add — await and show toast
     setDeals(prev => [d, ...prev]);
     setToast(`${d.companyName} added`);
     const { id, ...dealData } = d;
