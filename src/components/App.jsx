@@ -1530,6 +1530,40 @@ const InvestedCard = ({deal,onClick}) => {
   const moic=calcMOIC(deal);
   const method=getMethod(deal);
   const trl={'lab':'TRL 1–3','pilot':'TRL 4–6','scale':'TRL 7–8'}[health.mat]||null;
+  const cb = getCB(deal.investment||{});
+
+  // Realized deal — has liquidity events
+  const liquidityEvents = deal.liquidityEvents || [];
+  const exits = liquidityEvents.filter(e => e.type !== 'writedown');
+  const writedowns = liquidityEvents.filter(e => e.type === 'writedown');
+  const isRealized = liquidityEvents.length > 0;
+  const totalProceeds = exits.reduce((s,e) => s + (e.proceeds||0), 0);
+  const isLoss = isRealized && totalProceeds === 0;
+  const netReturn = totalProceeds - cb;
+
+  if (isRealized) return (
+    <div onClick={onClick} style={{background:'white',borderRadius:16,border:'1px solid #e5e7eb',cursor:'pointer',overflow:'hidden',opacity:0.75}}>
+      <div style={{padding:'14px 16px',display:'flex',alignItems:'center',gap:14}}>
+        <CompanyLogo name={deal.companyName} website={deal.website} size={44} radius={12} fallbackBg="#9ca3af" fallbackColor="white"/>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:2}}>
+            <span style={{fontWeight:600,fontSize:14,color:'#6b7280'}}>{deal.companyName}</span>
+            <Pill color="#6b7280" bg="#f3f4f6">Realized</Pill>
+          </div>
+          <p style={{fontSize:12,color:'#9ca3af'}}>{deal.industry} · {deal.stage}</p>
+        </div>
+        <div style={{textAlign:'right',flexShrink:0}}>
+          <p style={{fontSize:14,fontWeight:600,color:'#9ca3af'}}>{fmtC(cb)} in</p>
+          {isLoss
+            ? <p style={{fontSize:12,fontWeight:600,color:'#ef4444'}}>−{fmtC(cb)} lost</p>
+            : <p style={{fontSize:12,fontWeight:600,color:netReturn>=0?'#10b981':'#ef4444'}}>{netReturn>=0?'+':'-'}{fmtC(Math.abs(netReturn))}</p>
+          }
+        </div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
+      </div>
+    </div>
+  );
+
   return (
     <div onClick={onClick} style={{background:'white',borderRadius:16,border:`1px solid ${health.needsCheckIn?'#fde68a':'#e5e7eb'}`,cursor:'pointer',overflow:'hidden'}}>
       {health.needsCheckIn&&<div style={{padding:'6px 16px',background:'#fffbeb',borderBottom:'1px solid #fde68a',display:'flex',gap:8,alignItems:'center'}}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span style={{fontSize:12,fontWeight:500,color:'#92400e'}}>{health.checkInReason}</span></div>}
@@ -1544,7 +1578,7 @@ const InvestedCard = ({deal,onClick}) => {
           {health.factors.filter(f=>f.t!=='info').slice(0,1).map((f,i)=><div key={i} style={{display:'flex',alignItems:'center',gap:6,marginTop:4}}><span style={{width:6,height:6,borderRadius:99,background:f.t==='positive'?'#10b981':f.t==='negative'?'#ef4444':'#f59e0b',display:'inline-block'}}/><span style={{fontSize:11,color:'#9ca3af'}}>{f.l}</span></div>)}
         </div>
         <div style={{textAlign:'right',flexShrink:0}}>
-          <p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{fmtC(getCB(deal.investment||{}))}</p>
+          <p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{fmtC(cb)}</p>
           {method!=='mark-at-cost'&&moic?<p style={{fontSize:12,fontWeight:500,color:moic>=1?'#10b981':'#ef4444'}}>{moic.toFixed(2)}x</p>:<p style={{fontSize:12,color:'#9ca3af'}}>at cost</p>}
         </div>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
@@ -2161,10 +2195,37 @@ export default function App() {
   const portfolio = deals.filter(d => d.status === 'invested');
   const ph = calcPortHealth(deals);
   const totalDep = portfolio.reduce((s, d) => s + getCB(d.investment || {}), 0);
-  const totalImp = portfolio.reduce((s, d) => s + calcIV(d), 0);
-  const moic = totalDep > 0 ? totalImp / totalDep : null;
-  const realized = portfolio.reduce((s, d) => (d.liquidityEvents || []).filter(e => e.type !== 'writedown').reduce((a, e) => a + (e.proceeds || 0), s), 0);
-  const dpi = totalDep > 0 ? realized / totalDep : 0;
+
+  // Split into live (still active) and realized (exited/written down)
+  const liveDeals = portfolio.filter(d => !(d.liquidityEvents || []).length && !d.source?.realized);
+  const realizedDeals = portfolio.filter(d => (d.liquidityEvents || []).length > 0);
+
+  // Live implied value (unrealized marks)
+  const totalUnrealizedImp = portfolio.reduce((s, d) => {
+    const hasLiquidity = (d.liquidityEvents || []).length > 0;
+    return s + (hasLiquidity ? 0 : calcIV(d));
+  }, 0);
+
+  // Realized proceeds (actual cash back from exits)
+  const totalProceeds = portfolio.reduce((s, d) =>
+    (d.liquidityEvents || []).filter(e => e.type !== 'writedown').reduce((a, e) => a + (e.proceeds || 0), s), 0);
+
+  // Realized losses (cost basis of writedowns with $0 back)
+  const totalWritedowns = portfolio.reduce((s, d) => {
+    const hasWritedown = (d.liquidityEvents || []).some(e => e.type === 'writedown');
+    const hasExit = (d.liquidityEvents || []).some(e => e.type !== 'writedown' && (e.proceeds || 0) > 0);
+    if (hasWritedown && !hasExit) return s + getCB(d.investment || {});
+    return s;
+  }, 0);
+
+  // Net P&L = proceeds from exits - writedowns - unrealized losses on live deals
+  const realizedPnL = totalProceeds - totalWritedowns;
+  // Total net: realized P&L + unrealized gain/loss on live positions
+  const unrealizedPnL = totalUnrealizedImp - (totalDep - totalProceeds - totalWritedowns); // subtract deployed into realized deals
+  const netPnL = totalProceeds + totalUnrealizedImp - totalDep; // simplified: total value - total cost
+
+  const moic = totalDep > 0 ? (totalProceeds + totalUnrealizedImp) / totalDep : null;
+  const dpi = totalDep > 0 ? totalProceeds / totalDep : 0;
   const filtered = search ? deals.filter(d => d.companyName.toLowerCase().includes(search.toLowerCase())) : deals;
   const fInvested = filtered.filter(d => d.status === 'invested');
   const fWatching = filtered.filter(d => d.status === 'watching');
@@ -2230,12 +2291,16 @@ export default function App() {
               <span style={{fontSize:12,color:'#9ca3af'}}>{portfolio.length} {portfolio.length === 1 ? 'company' : 'companies'}</span>
             </div>
             {(() => {
-              const unrealizedGain = totalImp - totalDep;
               const statC = (v) => v > 0 ? '#10b981' : v < 0 ? '#ef4444' : '#9ca3af';
+              const fmtPnL = (v) => {
+                if (v === 0) return '—';
+                const abs = fmtC(Math.abs(v));
+                return v > 0 ? `+${abs}` : `−${abs}`;
+              };
               const stats = [
-                { l: 'Deployed', v: fmtC(totalDep), sub: 'cost basis', c: '#111827' },
-                { l: 'Implied', v: fmtC(totalImp), sub: 'marked value', c: totalImp >= totalDep ? '#10b981' : '#ef4444' },
-                { l: 'Gain', v: unrealizedGain === 0 ? '—' : (unrealizedGain > 0 ? `+${fmtC(unrealizedGain)}` : `−${fmtC(Math.abs(unrealizedGain))}`), sub: 'unrealized', c: statC(unrealizedGain) },
+                { l: 'Deployed', v: fmtC(totalDep), sub: 'total cost basis', c: '#111827' },
+                { l: 'Live Value', v: fmtC(totalUnrealizedImp), sub: 'unrealized marks', c: '#111827' },
+                { l: 'Net P&L', v: fmtPnL(netPnL), sub: `${totalProceeds > 0 ? fmtC(totalProceeds) + ' returned · ' : ''}${totalWritedowns > 0 ? fmtC(totalWritedowns) + ' lost' : 'no exits yet'}`, c: statC(netPnL) },
                 { l: 'MOIC', v: moic ? `${moic.toFixed(2)}x` : '—', sub: 'blended', c: moic >= 1.5 ? '#10b981' : moic >= 1 ? '#5B6DC4' : '#9ca3af' },
                 { l: 'DPI', v: dpi > 0 ? `${dpi.toFixed(2)}x` : '0.00x', sub: 'distributed/paid-in', c: dpi >= 1 ? '#10b981' : dpi > 0 ? '#5B6DC4' : '#9ca3af' },
                 { l: 'Watching', v: String(deals.filter(d => d.status === 'watching').length), sub: `${portfolio.length} invested`, c: '#5B6DC4' },
@@ -2265,13 +2330,30 @@ export default function App() {
         <div style={{display:'flex',flexDirection:'column',gap:16}}>
           {fInvested.length > 0 && (
             <div>
-              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
-                <span style={{width:8,height:8,borderRadius:99,background:'#10b981',display:'inline-block'}}/>
-                <p style={{fontSize:11,fontWeight:600,color:'#6b7280',textTransform:'uppercase',letterSpacing:.8}}>Invested · {fInvested.length}</p>
-              </div>
-              <div style={{display:'flex',flexDirection:'column',gap:10}}>
-                {fInvested.map(d => <InvestedCard key={d.id} deal={d} onClick={() => { setSelected(d); setPage('detail'); }}/>)}
-              </div>
+              {/* Live investments */}
+              {fInvested.filter(d => !(d.liquidityEvents||[]).length).length > 0 && (
+                <div style={{marginBottom:16}}>
+                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+                    <span style={{width:8,height:8,borderRadius:99,background:'#10b981',display:'inline-block'}}/>
+                    <p style={{fontSize:11,fontWeight:600,color:'#6b7280',textTransform:'uppercase',letterSpacing:.8}}>Invested · {fInvested.filter(d => !(d.liquidityEvents||[]).length).length}</p>
+                  </div>
+                  <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                    {fInvested.filter(d => !(d.liquidityEvents||[]).length).map(d => <InvestedCard key={d.id} deal={d} onClick={() => { setSelected(d); setPage('detail'); }}/>)}
+                  </div>
+                </div>
+              )}
+              {/* Realized investments */}
+              {fInvested.filter(d => (d.liquidityEvents||[]).length > 0).length > 0 && (
+                <div>
+                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+                    <span style={{width:8,height:8,borderRadius:99,background:'#9ca3af',display:'inline-block'}}/>
+                    <p style={{fontSize:11,fontWeight:600,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.8}}>Realized · {fInvested.filter(d => (d.liquidityEvents||[]).length > 0).length}</p>
+                  </div>
+                  <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                    {fInvested.filter(d => (d.liquidityEvents||[]).length > 0).map(d => <InvestedCard key={d.id} deal={d} onClick={() => { setSelected(d); setPage('detail'); }}/>)}
+                  </div>
+                </div>
+              )}
             </div>
           )}
           {fWatching.length > 0 && (
