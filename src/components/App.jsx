@@ -326,15 +326,40 @@ const MetricsTracker = ({deal, onUpdate}) => {
   const hasRevenue = revenue.length > 0;
   const isLoggingRevenue = active === '__revenue__';
 
+  // Merge manual revenue log with any fetched revenue data from signal cache
+  // Fetched entries have a 'numericValue' field; manual entries have 'v'
+  const allRevenuePoints = (() => {
+    const manual = revenue.map(r => ({ v: r.v, date: r.date, source: 'manual' }));
+    const fromCache = (() => {
+      try {
+        const cached = loadSignalCache()[deal?.id];
+        if (!cached?.momentum?.revenueData) return [];
+        return cached.momentum.revenueData
+          .filter(r => r.numericValue && r.date)
+          .map(r => ({ v: r.numericValue, date: new Date(r.date).toISOString(), source: r.source || 'External', metric: r.metric, label: r.value }));
+      } catch { return []; }
+    })();
+    // Deduplicate by month, prefer manual over fetched
+    const byMonth = {};
+    [...fromCache, ...manual].forEach(r => {
+      const key = r.date?.substring(0, 7);
+      if (key) byMonth[key] = r;
+    });
+    return Object.values(byMonth).sort((a, b) => new Date(a.date) - new Date(b.date));
+  })();
+
+  const hasAnyRevenue = allRevenuePoints.length > 0;
+
   return (
     <div style={{background:'white',borderRadius:16,padding:20,marginBottom:12}}>
       {/* Revenue — primary, always shown */}
       <div style={{marginBottom:metrics.length?16:0}}>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:hasRevenue?10:6}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:hasAnyRevenue?10:6}}>
           <div style={{display:'flex',alignItems:'center',gap:8}}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
             <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Revenue</span>
-            {!hasRevenue&&<span style={{fontSize:11,color:'#9ca3af'}}>— log when available</span>}
+            {!hasAnyRevenue&&<span style={{fontSize:11,color:'#9ca3af'}}>— log when available</span>}
+            {allRevenuePoints.some(r=>r.source!=='manual')&&<span style={{fontSize:10,color:'#10b981',background:'#f0fdf4',padding:'1px 6px',borderRadius:99}}>incl. external data</span>}
           </div>
           {!isLoggingRevenue&&<button onClick={()=>{setActive('__revenue__');setInputVal('');}} style={{fontSize:12,color:'#5B6DC4',background:'none',border:'none',cursor:'pointer',padding:0}}>+ Log</button>}
         </div>
@@ -345,21 +370,30 @@ const MetricsTracker = ({deal, onUpdate}) => {
             <button onClick={()=>logEntry('__revenue__',true)} disabled={!inputVal||isNaN(Number(inputVal))} style={{padding:'6px 14px',background:'#10b981',color:'white',border:'none',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',opacity:inputVal?1:.5}}>Save</button>
             <button onClick={()=>setActive(null)} style={{padding:'6px 10px',background:'none',border:'none',color:'#9ca3af',fontSize:13,cursor:'pointer'}}>Cancel</button>
           </div>
-        ):hasRevenue?(
+        ):hasAnyRevenue?(
           <div>
-            <MiniLine readings={revenue} color="#10b981" wide={true}/>
-            <button onClick={()=>setShowReadings(showReadings==='__revenue__'?null:'__revenue__')} style={{marginTop:6,fontSize:11,color:'#9ca3af',background:'none',border:'none',cursor:'pointer',padding:0}}>{showReadings==='__revenue__'?'Hide readings':'Edit readings ({revenue.length})'}</button>
+            <MiniLine readings={allRevenuePoints} color="#10b981" wide={true}/>
+            <button onClick={()=>setShowReadings(showReadings==='__revenue__'?null:'__revenue__')} style={{marginTop:6,fontSize:11,color:'#9ca3af',background:'none',border:'none',cursor:'pointer',padding:0}}>
+              {showReadings==='__revenue__'?'Hide':'Show'} {allRevenuePoints.length} reading{allRevenuePoints.length!==1?'s':''}
+            </button>
             {showReadings==='__revenue__'&&<div style={{marginTop:8,display:'flex',flexDirection:'column',gap:4}}>
-              {revenue.map((r,i)=>(
+              {allRevenuePoints.map((r,i)=>(
                 <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 8px',background:'#f9fafb',borderRadius:8}}>
-                  <span style={{fontSize:12,color:'#374151',flex:1}}>{fmtC(r.v)} · {new Date(r.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</span>
-                  <button onClick={()=>deleteReading('__revenue__',i,true)} style={{color:'#d1d5db',background:'none',border:'none',cursor:'pointer',padding:2,fontSize:11}}>✕</button>
+                  <span style={{fontSize:12,color:'#374151',flex:1}}>
+                    {r.label || fmtC(r.v)}
+                    {r.metric && r.metric !== 'Revenue' && <span style={{color:'#9ca3af'}}> {r.metric}</span>}
+                    {' · '}{new Date(r.date).toLocaleDateString('en-US',{month:'short',year:'numeric'})}
+                  </span>
+                  {r.source!=='manual'
+                    ? <span style={{fontSize:10,color:'#9ca3af',fontStyle:'italic'}}>{r.source}</span>
+                    : <button onClick={()=>deleteReading('__revenue__',revenue.findIndex((_,ri)=>ri===i),true)} style={{color:'#d1d5db',background:'none',border:'none',cursor:'pointer',padding:2,fontSize:11}}>✕</button>
+                  }
                 </div>
               ))}
             </div>}
           </div>
         ):(
-          <p style={{fontSize:12,color:'#d1d5db',fontStyle:'italic'}}>No revenue logged yet — add a reading once the company starts generating revenue</p>
+          <p style={{fontSize:12,color:'#d1d5db',fontStyle:'italic'}}>No revenue logged yet — add a reading or fetch signals to pull public data</p>
         )}
       </div>
 
@@ -1719,11 +1753,51 @@ const DetailView = ({deal,onUpdate,setToast}) => {
             })()}
           </div>
         </div>
-        {deal.overview&&<p style={{fontSize:14,color:'#374151',lineHeight:1.6}}>{deal.overview}</p>}
+
+        {deal.overview&&<p style={{fontSize:14,color:'#374151',lineHeight:1.6,marginBottom:12}}>{deal.overview}</p>}
+
+        {/* Investment quick stats */}
+        <div style={{display:'flex',gap:20,paddingTop:12,borderTop:'1px solid #f3f4f6',flexWrap:'wrap'}}>
+          <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:2}}>Invested</p><p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{fmtC(cb)}</p></div>
+          <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:2}}>Vehicle</p><p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{inv.vehicle||'—'}</p></div>
+          <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:2}}>Date</p><p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{inv.date?new Date(inv.date).toLocaleDateString('en-US',{month:'short',year:'numeric'}):'—'}</p></div>
+          {inv.ownershipPercent&&<div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:2}}>Ownership</p><p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{inv.ownershipPercent}%</p></div>}
+        </div>
+
+        {/* Founders */}
         {deal.founders?.length>0&&<div style={{display:'flex',alignItems:'center',gap:8,marginTop:12,paddingTop:12,borderTop:'1px solid #f3f4f6'}}>
           <span style={{fontSize:13,color:'#6b7280'}}>Founders:</span>
           {deal.founders.map((f,i)=><span key={i} style={{fontSize:13,color:'#374151',fontWeight:500}}>{f.name} <span style={{fontWeight:400,color:'#9ca3af'}}>({f.role})</span></span>)}
         </div>}
+
+        {/* Co-investors on this round — collapsed by default */}
+        {(()=>{
+          const coInvs = deal.coInvestors||[];
+          const [open, setOpen] = useState(false);
+          return (
+            <div style={{marginTop:12,paddingTop:12,borderTop:'1px solid #f3f4f6'}}>
+              <button onClick={()=>setOpen(v=>!v)} style={{display:'flex',alignItems:'center',gap:8,background:'none',border:'none',cursor:'pointer',padding:0,width:'100%'}}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                <span style={{fontSize:12,color:'#9ca3af',fontWeight:500}}>Co-investors on this round{coInvs.length>0?` (${coInvs.length})`:''}</span>
+                <span style={{fontSize:10,color:'#d1d5db',marginLeft:'auto'}}>{open?'▲':'▼'}</span>
+              </button>
+              {open&&<div style={{marginTop:10}}>
+                {coInvs.length===0&&<p style={{fontSize:12,color:'#d1d5db',fontStyle:'italic'}}>None logged — add from the Investors section below</p>}
+                <div style={{display:'flex',flexWrap:'wrap',gap:8,marginTop:coInvs.length?8:0}}>
+                  {coInvs.map(ci=>{
+                    const rc=ROLE_CFG[ci.role]||ROLE_CFG['co-investor'];
+                    return <div key={ci.id} style={{display:'flex',alignItems:'center',gap:6,padding:'4px 10px',borderRadius:99,background:rc.c+'12',border:`1px solid ${rc.c}30`}}>
+                      <span style={{width:20,height:20,borderRadius:99,background:rc.c+'25',color:rc.c,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:10,flexShrink:0}}>{ci.name[0].toUpperCase()}</span>
+                      <span style={{fontSize:12,fontWeight:500,color:'#374151'}}>{ci.name}</span>
+                      {ci.fund&&ci.fund!==ci.name&&<span style={{fontSize:11,color:'#9ca3af'}}>· {ci.fund}</span>}
+                      <Pill color={rc.c} bg={rc.c+'15'}>{rc.l}</Pill>
+                    </div>;
+                  })}
+                </div>
+              </div>}
+            </div>
+          );
+        })()}
       </div>
 
       <ActiveRaiseCard deal={deal} onUpdate={onUpdate} setToast={setToast}/>
@@ -1832,7 +1906,6 @@ const DetailView = ({deal,onUpdate,setToast}) => {
 
       <SignalsSection deal={deal} onUpdate={onUpdate}/>
 
-      <CoInvestorsSection deal={deal} onUpdate={onUpdate} setToast={setToast}/>
       <FundraiseHistory deal={deal} onUpdate={onUpdate} setToast={setToast}/>
       <div style={{marginTop:12}}><LiquiditySection deal={deal} onUpdate={onUpdate} setToast={setToast}/></div>
       <div style={{marginTop:12}}><DocumentsSection deal={deal} onUpdate={onUpdate} setToast={setToast}/></div>
