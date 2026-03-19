@@ -105,7 +105,8 @@ const calcHealth = (deal, extSigs=[]) => {
 
   const lastUpd=inv.lastUpdateReceived||deal.lastUpdateReceived;
   const nextExp=inv.nextUpdateExpected||deal.nextUpdateExpected;
-  const dSinceUpd=lastUpd?dAgo(lastUpd):999;
+  const dealAge=deal.createdAt?dAgo(deal.createdAt):0;
+  const dSinceUpd=lastUpd?dAgo(lastUpd):(dealAge<7?0:999);
   const dUntilNext=nextExp?dUntil(nextExp):null;
   const overdueThr=mat==='lab'?60:30;
   const isOverdue=dUntilNext!==null&&dUntilNext<-overdueThr;
@@ -826,39 +827,204 @@ const FundraiseHistory = ({deal, onUpdate, setToast}) => {
   );
 };
 
-const SignalsSection = ({deal}) => {
-  const allMilestones = (deal.milestones||[])
-    .filter(m => ['fundraising','partnership','product','update'].includes(m.type))
-    .sort((a,b) => new Date(b.date)-new Date(a.date));
-  if (!allMilestones.length) return null;
-  const TYPE_CFG = {
-    fundraising:{color:'#5B6DC4',bg:'#FFFBEC',label:'Funding'},
-    partnership:{color:'#10b981',bg:'#f0fdf4',label:'Partnership'},
-    product:{color:'#f59e0b',bg:'#fffbeb',label:'Product'},
-    update:{color:'#78716c',bg:'#f5f5f4',label:'Update'},
+// ── EXTERNAL SIGNAL FETCHER ───────────────────────────────────────────────────
+const SIGNAL_CACHE_KEY = 'lucero_signals_v1';
+const SIGNAL_TTL = 12 * 60 * 60 * 1000; // 12 hours
+
+const loadSignalCache = () => { try { return JSON.parse(localStorage.getItem(SIGNAL_CACHE_KEY) || '{}'); } catch { return {}; } };
+const saveSignalCache = (c) => { try { localStorage.setItem(SIGNAL_CACHE_KEY, JSON.stringify(c)); } catch {} };
+
+const fetchExternalSignals = async (deal) => {
+  const resp = await fetch('/api/signals', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      companyName: deal.companyName,
+      website: deal.website || null,
+      stage: deal.stage || null,
+      industry: deal.industry || null,
+    }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${resp.status}`);
+  }
+  return resp.json();
+};
+
+const SignalsSection = ({ deal, onUpdate }) => {
+  const [state, setState] = useState('idle'); // idle | loading | done | error
+  const [data, setData] = useState(null);
+  const [lastFetched, setLastFetched] = useState(null);
+  const manualMilestones = (deal.milestones || [])
+    .filter(m => ['fundraising', 'partnership', 'product', 'update'].includes(m.type))
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  // Load from cache on mount
+  useEffect(() => {
+    const cache = loadSignalCache();
+    const cached = cache[deal.id];
+    if (cached && (Date.now() - new Date(cached.fetchedAt).getTime()) < SIGNAL_TTL) {
+      setData(cached);
+      setLastFetched(new Date(cached.fetchedAt));
+      setState('done');
+    }
+  }, [deal.id]);
+
+  const fetch = async () => {
+    setState('loading');
+    try {
+      const result = await fetchExternalSignals(deal);
+      const entry = { ...result, fetchedAt: new Date().toISOString(), dealId: deal.id };
+      const cache = loadSignalCache();
+      cache[deal.id] = entry;
+      saveSignalCache(cache);
+      setData(entry);
+      setLastFetched(new Date());
+      setState('done');
+
+      // If we found signals, save top ones as milestones on the deal
+      if (result.signals?.length > 0 && onUpdate) {
+        const existing = new Set((deal.milestones || []).map(m => m.title));
+        const newMilestones = result.signals
+          .filter(s => !existing.has(s.title))
+          .slice(0, 5)
+          .map(s => ({
+            id: genId(),
+            type: s.type === 'funding' ? 'fundraising' : s.type === 'partnership' ? 'partnership' : s.type === 'product' ? 'product' : 'update',
+            title: s.title,
+            description: s.description,
+            date: s.date ? new Date(s.date).toISOString() : new Date().toISOString(),
+            source: s.source,
+            sourceUrl: s.url,
+            fromAgent: true,
+            sentiment: s.sentiment,
+          }));
+        if (newMilestones.length > 0) {
+          onUpdate({ ...deal, milestones: [...(deal.milestones || []), ...newMilestones] });
+        }
+      }
+    } catch (e) {
+      console.error('Signal fetch failed:', e);
+      setState('error');
+    }
   };
+
+  const TYPE_CFG = {
+    funding: { color: '#5B6DC4', bg: '#FFFBEC', label: 'Funding' },
+    revenue: { color: '#10b981', bg: '#f0fdf4', label: 'Revenue' },
+    product: { color: '#f59e0b', bg: '#fffbeb', label: 'Product' },
+    partnership: { color: '#10b981', bg: '#f0fdf4', label: 'Partnership' },
+    team: { color: '#7c3aed', bg: '#f5f3ff', label: 'Team' },
+    news: { color: '#78716c', bg: '#f5f5f4', label: 'News' },
+    risk: { color: '#ef4444', bg: '#fef2f2', label: 'Risk' },
+    fundraising: { color: '#5B6DC4', bg: '#FFFBEC', label: 'Funding' },
+    update: { color: '#78716c', bg: '#f5f5f4', label: 'Update' },
+  };
+
+  const allSignals = data?.signals || [];
+  const hasAnyContent = state === 'done' || manualMilestones.length > 0;
+
   return (
-    <div style={{background:'white',borderRadius:16,padding:20,marginBottom:12}}>
-      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14}}>
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Signals</span>
-        <span style={{fontSize:12,color:'#9ca3af'}}>{allMilestones.length} logged</span>
+    <div style={{ background: 'white', borderRadius: 16, padding: 20, marginBottom: 12 }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>External Signals</span>
+          {lastFetched && <span style={{ fontSize: 11, color: '#9ca3af' }}>· {dAgo(lastFetched)}d ago</span>}
+        </div>
+        <button
+          onClick={fetch}
+          disabled={state === 'loading'}
+          style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600, background: state === 'loading' ? '#f3f4f6' : '#eef2ff', color: state === 'loading' ? '#9ca3af' : '#5B6DC4', border: 'none', cursor: state === 'loading' ? 'not-allowed' : 'pointer' }}
+        >
+          {state === 'loading'
+            ? <><div style={{ width: 10, height: 10, border: '1.5px solid #d1d5db', borderTopColor: '#5B6DC4', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }}/> Searching…</>
+            : <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.12-7.51"/></svg>{state === 'done' ? 'Refresh' : 'Fetch signals'}</>
+          }
+        </button>
       </div>
-      <div style={{display:'flex',flexDirection:'column',gap:8}}>
-        {allMilestones.slice(0,6).map((s,i)=>{
-          const cfg=TYPE_CFG[s.type]||TYPE_CFG.update;
-          return <div key={s.id||i} style={{display:'flex',alignItems:'flex-start',gap:10,padding:'10px 12px',borderRadius:12,background:cfg.bg}}>
-            <div style={{flexShrink:0,marginTop:2}}>
-              <Pill color={cfg.color} bg={cfg.color+'18'}>{cfg.label}</Pill>
-            </div>
-            <div style={{flex:1,minWidth:0}}>
-              <p style={{fontSize:13,fontWeight:500,color:'#111827',marginBottom:2}}>{s.title}</p>
-              {s.description&&<p style={{fontSize:12,color:'#6b7280',lineHeight:1.5}}>{s.description}</p>}
-            </div>
-            <span style={{fontSize:11,color:'#9ca3af',flexShrink:0,marginTop:2}}>{dAgo(s.date)}d ago</span>
-          </div>;
-        })}
-      </div>
+
+      {/* Idle state — prompt to fetch */}
+      {state === 'idle' && manualMilestones.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '20px 0' }}>
+          <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 6 }}>No signals yet for {deal.companyName}</p>
+          <p style={{ fontSize: 12, color: '#9ca3af' }}>Click "Fetch signals" to search for news, funding rounds, revenue data, and website status.</p>
+        </div>
+      )}
+
+      {/* Error */}
+      {state === 'error' && (
+        <p style={{ fontSize: 13, color: '#ef4444', textAlign: 'center', padding: '8px 0' }}>Failed to fetch — check your connection and try again.</p>
+      )}
+
+      {/* Summary */}
+      {data?.summary && (
+        <div style={{ background: '#f9fafb', borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
+          <p style={{ fontSize: 13, color: '#374151', lineHeight: 1.6 }}>{data.summary}</p>
+          <div style={{ display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
+            {data.websiteStatus && data.websiteStatus !== 'unknown' && (
+              <span style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ width: 6, height: 6, borderRadius: 99, background: data.websiteStatus === 'active' ? '#10b981' : data.websiteStatus === 'down' ? '#ef4444' : '#f59e0b', display: 'inline-block' }}/>
+                <span style={{ color: '#6b7280' }}>Website {data.websiteStatus}</span>
+              </span>
+            )}
+            {data.lastFundingRound && <span style={{ fontSize: 11, color: '#5B6DC4' }}>💰 {data.lastFundingRound}</span>}
+            {data.estimatedRevenue && <span style={{ fontSize: 11, color: '#10b981' }}>📈 {data.estimatedRevenue}</span>}
+          </div>
+        </div>
+      )}
+
+      {/* Check-in recommendation */}
+      {data?.checkInRecommended && (
+        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '8px 12px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <p style={{ fontSize: 12, color: '#92400e' }}>{data.checkInReason}</p>
+        </div>
+      )}
+
+      {/* External signals from agent */}
+      {allSignals.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: manualMilestones.length ? 16 : 0 }}>
+          {allSignals.map((s, i) => {
+            const cfg = TYPE_CFG[s.type] || TYPE_CFG.news;
+            return (
+              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', borderRadius: 12, background: cfg.bg }}>
+                <Pill color={cfg.color} bg={cfg.color + '18'}>{cfg.label}</Pill>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: 13, fontWeight: 500, color: '#111827', marginBottom: 2 }}>{s.title}</p>
+                  <p style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.5 }}>{s.description}</p>
+                  {s.url && <a href={s.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: '#5B6DC4', marginTop: 3, display: 'inline-block' }}>View source →</a>}
+                </div>
+                <span style={{ fontSize: 11, color: '#9ca3af', flexShrink: 0 }}>{s.source || ''}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Manual milestones you've logged */}
+      {manualMilestones.length > 0 && (
+        <>
+          {allSignals.length > 0 && <p style={{ fontSize: 11, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: .6, marginBottom: 8 }}>Your notes</p>}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {manualMilestones.slice(0, 4).map((s, i) => {
+              const cfg = TYPE_CFG[s.type] || TYPE_CFG.update;
+              return (
+                <div key={s.id || i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', borderRadius: 12, background: cfg.bg }}>
+                  <Pill color={cfg.color} bg={cfg.color + '18'}>{cfg.label}</Pill>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 13, fontWeight: 500, color: '#111827', marginBottom: 2 }}>{s.title}</p>
+                    {s.description && <p style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.5 }}>{s.description}</p>}
+                  </div>
+                  <span style={{ fontSize: 11, color: '#9ca3af', flexShrink: 0 }}>{dAgo(s.date)}d ago</span>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 };
@@ -1358,7 +1524,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
         <FounderUpdates deal={deal} onUpdate={onUpdate} setToast={setToast}/>
 
         {/* Signals */}
-        <SignalsSection deal={deal}/>
+        <SignalsSection deal={deal} onUpdate={onUpdate}/>
 
         {/* Known investors */}
         {(deal.coInvestors||[]).length>0&&<div style={C.card}>
@@ -1514,7 +1680,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
 
       <FounderUpdates deal={deal} onUpdate={onUpdate} setToast={setToast} inv={inv} overdue={overdue} dUntilNext={dUntilNext} dSinceUpd={dSinceUpd}/>
 
-      <SignalsSection deal={deal}/>
+      <SignalsSection deal={deal} onUpdate={onUpdate}/>
 
       <CoInvestorsSection deal={deal} onUpdate={onUpdate} setToast={setToast}/>
       <FundraiseHistory deal={deal} onUpdate={onUpdate} setToast={setToast}/>
@@ -1529,7 +1695,40 @@ const InvestedCard = ({deal,onClick}) => {
   const health=calcHealth(deal,[]);
   const moic=calcMOIC(deal);
   const method=getMethod(deal);
-  const trl={'lab':'TRL 1–3','pilot':'TRL 4–6','scale':'TRL 7–8'}[health.mat]||null;
+  const cb = getCB(deal.investment||{});
+
+  // Realized deal — has liquidity events
+  const liquidityEvents = deal.liquidityEvents || [];
+  const exits = liquidityEvents.filter(e => e.type !== 'writedown');
+  const writedowns = liquidityEvents.filter(e => e.type === 'writedown');
+  const isRealized = liquidityEvents.length > 0;
+  const totalProceeds = exits.reduce((s,e) => s + (e.proceeds||0), 0);
+  const isLoss = isRealized && totalProceeds === 0;
+  const netReturn = totalProceeds - cb;
+
+  if (isRealized) return (
+    <div onClick={onClick} style={{background:'white',borderRadius:16,border:'1px solid #e5e7eb',cursor:'pointer',overflow:'hidden',opacity:0.75}}>
+      <div style={{padding:'14px 16px',display:'flex',alignItems:'center',gap:14}}>
+        <CompanyLogo name={deal.companyName} website={deal.website} size={44} radius={12} fallbackBg="#9ca3af" fallbackColor="white"/>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:2}}>
+            <span style={{fontWeight:600,fontSize:14,color:'#6b7280'}}>{deal.companyName}</span>
+            <Pill color="#6b7280" bg="#f3f4f6">Realized</Pill>
+          </div>
+          <p style={{fontSize:12,color:'#9ca3af'}}>{deal.industry} · {deal.stage}</p>
+        </div>
+        <div style={{textAlign:'right',flexShrink:0}}>
+          <p style={{fontSize:14,fontWeight:600,color:'#9ca3af'}}>{fmtC(cb)} in</p>
+          {isLoss
+            ? <p style={{fontSize:12,fontWeight:600,color:'#ef4444'}}>−{fmtC(cb)} lost</p>
+            : <p style={{fontSize:12,fontWeight:600,color:netReturn>=0?'#10b981':'#ef4444'}}>{netReturn>=0?'+':'-'}{fmtC(Math.abs(netReturn))}</p>
+          }
+        </div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
+      </div>
+    </div>
+  );
+
   return (
     <div onClick={onClick} style={{background:'white',borderRadius:16,border:`1px solid ${health.needsCheckIn?'#fde68a':'#e5e7eb'}`,cursor:'pointer',overflow:'hidden'}}>
       {health.needsCheckIn&&<div style={{padding:'6px 16px',background:'#fffbeb',borderBottom:'1px solid #fde68a',display:'flex',gap:8,alignItems:'center'}}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span style={{fontSize:12,fontWeight:500,color:'#92400e'}}>{health.checkInReason}</span></div>}
@@ -1538,13 +1737,12 @@ const InvestedCard = ({deal,onClick}) => {
         <div style={{flex:1,minWidth:0}}>
           <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:2}}>
             <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>{deal.companyName}</span>
-            {trl&&<Pill>{trl}</Pill>}
           </div>
           <p style={{fontSize:12,color:'#6b7280'}}>{deal.industry} · {deal.stage}</p>
           {health.factors.filter(f=>f.t!=='info').slice(0,1).map((f,i)=><div key={i} style={{display:'flex',alignItems:'center',gap:6,marginTop:4}}><span style={{width:6,height:6,borderRadius:99,background:f.t==='positive'?'#10b981':f.t==='negative'?'#ef4444':'#f59e0b',display:'inline-block'}}/><span style={{fontSize:11,color:'#9ca3af'}}>{f.l}</span></div>)}
         </div>
         <div style={{textAlign:'right',flexShrink:0}}>
-          <p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{fmtC(getCB(deal.investment||{}))}</p>
+          <p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{fmtC(cb)}</p>
           {method!=='mark-at-cost'&&moic?<p style={{fontSize:12,fontWeight:500,color:moic>=1?'#10b981':'#ef4444'}}>{moic.toFixed(2)}x</p>:<p style={{fontSize:12,color:'#9ca3af'}}>at cost</p>}
         </div>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
@@ -1693,12 +1891,32 @@ const AddModal = ({onClose,onAdd}) => {
 };
 
 // ── ROOT APP ──────────────────────────────────────────────────────────────────
+
+// ── DELETE BUTTON ─────────────────────────────────────────────────────────────
+function DeleteButton({ onDelete }) {
+  const [confirm, setConfirm] = useState(false);
+  if (confirm) return (
+    <div style={{display:'flex',alignItems:'center',gap:6}}>
+      <span style={{fontSize:13,color:'#6b7280'}}>Remove company?</span>
+      <button onClick={onDelete} style={{padding:'5px 10px',borderRadius:8,fontSize:13,fontWeight:600,background:'#ef4444',color:'white',border:'none',cursor:'pointer'}}>Delete</button>
+      <button onClick={() => setConfirm(false)} style={{padding:'5px 10px',borderRadius:8,fontSize:13,color:'#6b7280',background:'#f3f4f6',border:'none',cursor:'pointer'}}>Cancel</button>
+    </div>
+  );
+  return (
+    <button onClick={() => setConfirm(true)} style={{display:'flex',alignItems:'center',gap:5,padding:'5px 10px',borderRadius:8,fontSize:13,color:'#9ca3af',background:'none',border:'1px solid #e5e7eb',cursor:'pointer'}}
+      onMouseEnter={e => { e.currentTarget.style.color='#ef4444'; e.currentTarget.style.borderColor='#fca5a5'; }}
+      onMouseLeave={e => { e.currentTarget.style.color='#9ca3af'; e.currentTarget.style.borderColor='#e5e7eb'; }}>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+      Delete
+    </button>
+  );
+}
+
 // ── LOGIN PAGE ────────────────────────────────────────────────────────────────
 function LoginPage({ onLogin }) {
   const [loading, setLoading] = useState(false);
-  const handleClick = async () => { setLoading(true); await onLogin(); };
   return (
-    <div style={{minHeight:'100vh',background:'linear-gradient(to bottom right,#fafaf9,#e7e5e4)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+    <div style={{minHeight:'100vh',background:'linear-gradient(135deg,#fafaf9,#e7e5e4)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
       <div style={{width:'100%',maxWidth:400}}>
         <div style={{textAlign:'center',marginBottom:32}}>
           <div style={{width:72,height:72,background:'#4A1942',borderRadius:20,display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 20px',boxShadow:'0 20px 40px rgba(74,25,66,.25)'}}>
@@ -1718,7 +1936,11 @@ function LoginPage({ onLogin }) {
           <p style={{color:'#78716c',fontSize:15}}>Your angel portfolio, all in one place</p>
         </div>
         <div style={{background:'white',borderRadius:20,padding:32,border:'1px solid #e7e5e4',boxShadow:'0 4px 24px rgba(0,0,0,.06)'}}>
-          <button onClick={handleClick} disabled={loading} style={{width:'100%',display:'flex',alignItems:'center',justifyContent:'center',gap:12,padding:'13px 16px',borderRadius:12,border:'1px solid #d1d5db',background:'white',color:'#374151',fontWeight:500,fontSize:15,cursor:loading?'not-allowed':'pointer',opacity:loading?0.6:1}}>
+          <button
+            onClick={async () => { setLoading(true); await onLogin(); }}
+            disabled={loading}
+            style={{width:'100%',display:'flex',alignItems:'center',justifyContent:'center',gap:12,padding:'13px 16px',borderRadius:12,border:'1px solid #d1d5db',background:'white',color:'#374151',fontWeight:500,fontSize:15,cursor:loading?'not-allowed':'pointer',opacity:loading?0.6:1}}
+          >
             {loading
               ? <div style={{width:20,height:20,border:'2px solid #d1d5db',borderTopColor:'#374151',borderRadius:'50%',animation:'spin 1s linear infinite'}}/>
               : <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
@@ -1738,9 +1960,9 @@ function UserMenu({ user, onLogout }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
-    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    if (open) document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    if (open) document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
   }, [open]);
   if (!user) return null;
   const name = user.user_metadata?.full_name || user.user_metadata?.name || user.email || 'User';
@@ -1748,23 +1970,313 @@ function UserMenu({ user, onLogout }) {
     `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=4A1942&color=F5DFA0`;
   return (
     <div ref={ref} style={{position:'relative'}}>
-      <button onClick={()=>setOpen(v=>!v)} style={{display:'flex',alignItems:'center',gap:6,background:'none',border:'none',cursor:'pointer',padding:4,borderRadius:99}}>
-        <img src={avatar} alt={name} style={{width:32,height:32,borderRadius:99}}/>
+      <button onClick={() => setOpen(v => !v)} style={{display:'flex',alignItems:'center',gap:6,background:'none',border:'none',cursor:'pointer',padding:4,borderRadius:99}}>
+        <img src={avatar} alt={name} style={{width:32,height:32,borderRadius:99,objectFit:'cover'}}/>
         <span style={{fontSize:13,color:'#374151',fontWeight:500,maxWidth:100,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{name.split(' ')[0]}</span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
-      {open&&<div style={{position:'absolute',right:0,top:'calc(100% + 8px)',width:210,background:'white',borderRadius:14,boxShadow:'0 10px 25px rgba(0,0,0,.12)',border:'1px solid #e5e7eb',zIndex:999,overflow:'hidden'}}>
-        <div style={{padding:'12px 16px',borderBottom:'1px solid #f3f4f6'}}>
-          <p style={{fontWeight:600,fontSize:13,color:'#111827',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{name}</p>
-          <p style={{fontSize:12,color:'#9ca3af',marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{user.email}</p>
+      {open && (
+        <div style={{position:'absolute',right:0,top:'calc(100% + 8px)',width:210,background:'white',borderRadius:14,boxShadow:'0 10px 25px rgba(0,0,0,.12)',border:'1px solid #e5e7eb',zIndex:999,overflow:'hidden'}}>
+          <div style={{padding:'12px 16px',borderBottom:'1px solid #f3f4f6'}}>
+            <p style={{fontWeight:600,fontSize:13,color:'#111827',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{name}</p>
+            <p style={{fontSize:12,color:'#9ca3af',marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{user.email}</p>
+          </div>
+          <button
+            onClick={() => { setOpen(false); onLogout(); }}
+            style={{width:'100%',padding:'10px 16px',textAlign:'left',fontSize:13,color:'#ef4444',background:'none',border:'none',cursor:'pointer',display:'flex',alignItems:'center',gap:8}}
+            onMouseEnter={e => e.currentTarget.style.background='#fef2f2'}
+            onMouseLeave={e => e.currentTarget.style.background='none'}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Sign out
+          </button>
         </div>
-        <button onClick={()=>{setOpen(false);onLogout();}} style={{width:'100%',padding:'10px 16px',textAlign:'left',fontSize:13,color:'#ef4444',background:'none',border:'none',cursor:'pointer',display:'flex',alignItems:'center',gap:8}}
-          onMouseEnter={e=>e.currentTarget.style.background='#fef2f2'}
-          onMouseLeave={e=>e.currentTarget.style.background='none'}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-          Sign out
-        </button>
-      </div>}
+      )}
+    </div>
+  );
+}
+
+// ── ANGELLIST CSV IMPORT MODAL ────────────────────────────────────────────────
+function ImportModal({ onClose, onImport }) {
+  const [stage, setStage] = useState('upload'); // upload | preview | importing | done
+  const [rows, setRows] = useState([]);
+  const [error, setError] = useState('');
+  const [progress, setProgress] = useState(0);
+  const [importSummary, setImportSummary] = useState({ updated: 0, added: 0 });
+  const fileRef = useRef(null);
+
+  const parseCSV = (text) => {
+    const lines = text.trim().split('\n');
+    // AngelList CSV has a disclaimer on row 1 — find the actual header row
+    const headerIdx = lines.findIndex(l => l.includes('Company/Fund') || l.includes('company/fund'));
+    if (headerIdx === -1) return null;
+    const headers = lines[headerIdx].split(',').map(h => h.trim().replace(/"/g, '').toLowerCase());
+    return lines.slice(headerIdx + 1).map(line => {
+      const cols = []; let cur = '', inQ = false;
+      for (const ch of line) {
+        if (ch === '"') inQ = !inQ;
+        else if (ch === ',' && !inQ) { cols.push(cur.trim()); cur = ''; }
+        else cur += ch;
+      }
+      cols.push(cur.trim());
+      const row = {};
+      headers.forEach((h, i) => { row[h] = (cols[i] || '').replace(/^"|"$/g, '').trim(); });
+      return row;
+    }).filter(r => r['company/fund'] && r['company/fund'].length > 0);
+  };
+
+  const parseMoney = (val) => {
+    if (!val || val === 'Locked' || val === '$0') return 0;
+    return parseFloat(val.replace(/[$,\s]/g, '')) || 0;
+  };
+
+  const rowToDeal = (row) => {
+    const name = row['company/fund'] || '';
+    const amount = parseMoney(row['invested']);
+    const unrealized = parseMoney(row['unrealized value']);
+    const realized = parseMoney(row['realized value']);
+    const multiple = parseFloat(row['multiple']) || null;
+    const dateRaw = row['invest date'] || '';
+    const date = dateRaw ? new Date(dateRaw).toISOString() : new Date().toISOString();
+    const round = (row['round'] || '').toLowerCase();
+    const invType = (row['investment type'] || '').toLowerCase();
+    const market = row['market'] || 'Other';
+    const instrument = (row['instrument'] || '').toLowerCase();
+    const isRealized = (row['status'] || '').toLowerCase() === 'realized';
+    const capRaw = parseMoney(row['valuation or cap']);
+    const discount = parseFloat((row['discount'] || '').replace('%', '')) || 0;
+    const stageMap = {
+      'pre-seed': 'pre-seed', 'preseed': 'pre-seed', 'seed': 'seed',
+      'series a': 'series-a', 'series b': 'series-b', 'series c': 'series-c',
+      'series d': 'series-c', 'series e': 'series-c', 'series f': 'series-c',
+      'growth': 'growth', 'late': 'growth', 'spv': 'seed',
+      'rolling fund': 'seed', 'syndicate': 'seed', 'fund': 'seed',
+    };
+    const vehicle = instrument.includes('safe') ? 'SAFE'
+      : instrument.includes('note') ? 'Convertible Note'
+      : invType === 'fund' ? 'Fund'
+      : 'Equity';
+    const deal = {
+      id: genId(),
+      companyName: name,
+      status: 'invested',
+      stage: stageMap[round] || 'seed',
+      industry: market,
+      website: null,
+      founders: [],
+      coInvestors: [],
+      dealSource: row['lead'] || '',  // syndicate/fund channel from AngelList
+      liquidityEvents: [],
+      documents: [],
+      monitoring: { healthStatus: 'stable', fundraisingStatus: 'not-raising' },
+      milestones: [],
+      metricsToWatch: [],
+      metricsLog: {},
+      revenueLog: [],
+      notesLog: [],
+      memo: '',
+      founderUpdates: [],
+      createdAt: date,
+      statusEnteredAt: date,
+      investment: {
+        amount, costBasis: amount, vehicle, date,
+        lastUpdateReceived: date,
+        ...(capRaw > 0 ? { impliedValuation: capRaw } : {}),
+        ...(discount > 0 ? { discount } : {}),
+        ...(multiple && multiple > 0 && multiple !== 1 ? {
+          impliedValue: Math.round(amount * multiple),
+          lastValuationDate: date,
+        } : {}),
+      },
+      source: { type: 'angellist', name: row['lead'] || 'AngelList' },
+      isFund: invType === 'fund' || (row['investment type']||'').toLowerCase() === 'fund',
+      terms: {
+        instrument: vehicle,
+        ...(capRaw > 0 ? { cap: capRaw } : {}),
+        ...(discount > 0 ? { discount } : {}),
+        capType: row['valuation or cap type'] || '',
+      },
+    };
+    if (isRealized && realized > 0) {
+      deal.liquidityEvents = [{ id: genId(), type: 'exit', date, proceeds: realized, notes: 'Imported from AngelList' }];
+    } else if (isRealized) {
+      deal.liquidityEvents = [{ id: genId(), type: 'writedown', date, writedownAmount: amount, proceeds: 0, notes: 'Realized $0 — imported from AngelList' }];
+    }
+    return deal;
+  };
+
+  const handleFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!file.name.endsWith('.csv')) { setError('Please upload a .csv file'); return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = parseCSV(ev.target.result);
+        if (!parsed) { setError("Couldn't find the header row. Make sure this is an AngelList portfolio export."); return; }
+        if (!parsed.length) { setError("No investments found in this file."); return; }
+        setRows(parsed.map(r => ({ raw: r, deal: rowToDeal(r), selected: true })));
+        setStage('preview');
+        setError('');
+      } catch (err) { setError('Failed to parse CSV: ' + err.message); }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleImport = async () => {
+    const toImport = rows.filter(r => r.selected).map(r => r.deal);
+    setStage('importing');
+    let updated = 0, added = 0;
+
+    // Process in small batches to avoid hanging on any single deal
+    const withTimeout = (promise, ms = 5000) =>
+      Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))]);
+
+    for (let i = 0; i < toImport.length; i++) {
+      const d = toImport[i];
+      try {
+        const isExisting = deals.find(x => x.companyName.toLowerCase() === d.companyName.toLowerCase());
+        if (isExisting) updated++; else added++;
+        await withTimeout(onImport(d, true));
+      } catch (e) {
+        console.warn(`Import failed for ${d.companyName}:`, e.message);
+        // Continue with next deal even if this one fails/times out
+      }
+      setProgress(Math.round(((i + 1) / toImport.length) * 100));
+    }
+    setImportSummary({ updated, added });
+    setStage('done');
+  };
+
+  const selected = rows.filter(r => r.selected).length;
+  const liveCount = rows.filter(r => r.selected && (r.raw['status'] || '').toLowerCase() === 'live').length;
+  const realizedCount = rows.filter(r => r.selected && (r.raw['status'] || '').toLowerCase() === 'realized').length;
+  const btn = { padding: '10px 20px', borderRadius: 12, fontSize: 14, fontWeight: 600, cursor: 'pointer', border: 'none' };
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+      <div style={{background:'white',borderRadius:20,width:'100%',maxWidth:520,maxHeight:'85vh',display:'flex',flexDirection:'column',overflow:'hidden'}}>
+
+        <div style={{padding:'16px 20px',borderBottom:'1px solid #f3f4f6',display:'flex',justifyContent:'space-between',alignItems:'center',flexShrink:0}}>
+          <div>
+            <p style={{fontWeight:700,fontSize:15,color:'#111827'}}>Import from AngelList</p>
+            <p style={{fontSize:12,color:'#9ca3af',marginTop:2}}>Upload your AngelList portfolio CSV export</p>
+          </div>
+          <button onClick={onClose} style={{background:'none',border:'none',cursor:'pointer',color:'#9ca3af'}}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        <div style={{padding:20,overflowY:'auto',flex:1}}>
+          {stage === 'upload' && (
+            <div style={{display:'flex',flexDirection:'column',gap:20}}>
+              <div style={{background:'#eef2ff',borderRadius:12,padding:16}}>
+                <p style={{fontWeight:600,fontSize:13,color:'#3730a3',marginBottom:10}}>How to export from AngelList</p>
+                {['Go to venture.angellist.com', 'Click Portfolio → Dashboard', 'Scroll to the Investments table', 'Click Export CSV'].map((step, i) => (
+                  <div key={i} style={{display:'flex',alignItems:'center',gap:10,marginBottom:i<3?7:0}}>
+                    <span style={{width:22,height:22,borderRadius:99,background:'#5B6DC4',color:'white',fontSize:11,fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>{i + 1}</span>
+                    <span style={{fontSize:13,color:'#374151'}}>{step}</span>
+                  </div>
+                ))}
+              </div>
+              <div
+                onClick={() => fileRef.current?.click()}
+                style={{border:'2px dashed #d1d5db',borderRadius:14,padding:'36px 20px',textAlign:'center',cursor:'pointer',background:'white',transition:'all .15s'}}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = '#5B6DC4'; e.currentTarget.style.background = '#f5f7ff'; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = '#d1d5db'; e.currentTarget.style.background = 'white'; }}
+              >
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="1.5" style={{margin:'0 auto 12px',display:'block'}}>
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <p style={{fontWeight:600,fontSize:14,color:'#374151',marginBottom:4}}>Click to upload your CSV</p>
+                <p style={{fontSize:12,color:'#9ca3af'}}>AngelList portfolio export (.csv)</p>
+                <input ref={fileRef} type="file" accept=".csv" onChange={handleFile} style={{display:'none'}}/>
+              </div>
+              {error && <p style={{color:'#ef4444',fontSize:13,textAlign:'center'}}>{error}</p>}
+            </div>
+          )}
+
+          {stage === 'preview' && (
+            <div style={{display:'flex',flexDirection:'column',gap:14}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                <div>
+                  <p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{selected} of {rows.length} selected</p>
+                  <p style={{fontSize:12,color:'#9ca3af',marginTop:2}}>{liveCount} live · {realizedCount} realized/exited</p>
+                </div>
+                <button
+                  onClick={() => setRows(r => r.map(x => ({ ...x, selected: !rows.every(r => r.selected) })))}
+                  style={{fontSize:12,color:'#5B6DC4',background:'none',border:'none',cursor:'pointer'}}
+                >
+                  {rows.every(r => r.selected) ? 'Deselect all' : 'Select all'}
+                </button>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                {rows.map((r, i) => {
+                  const isLive = (r.raw['status'] || '').toLowerCase() === 'live';
+                  const amt = parseMoney(r.raw['invested']);
+                  return (
+                    <div
+                      key={i}
+                      onClick={() => setRows(prev => prev.map((x, j) => j === i ? { ...x, selected: !x.selected } : x))}
+                      style={{display:'flex',alignItems:'center',gap:12,padding:'10px 14px',borderRadius:12,border:`1.5px solid ${r.selected ? '#5B6DC4' : '#e5e7eb'}`,background:r.selected ? '#f5f7ff' : 'white',cursor:'pointer'}}
+                    >
+                      <div style={{width:18,height:18,borderRadius:5,border:`2px solid ${r.selected ? '#5B6DC4' : '#d1d5db'}`,background:r.selected ? '#5B6DC4' : 'white',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                        {r.selected && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+                      </div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <p style={{fontWeight:600,fontSize:13,color:'#111827',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.deal.companyName}</p>
+                        <p style={{fontSize:12,color:'#6b7280'}}>{r.deal.stage}{r.deal.industry !== 'Other' ? ` · ${r.deal.industry}` : ''}{amt > 0 ? ` · ${fmtC(amt)}` : ''}</p>
+                      </div>
+                      <span style={{fontSize:11,padding:'2px 8px',borderRadius:99,background:isLive?'#ecfdf5':'#f3f4f6',color:isLive?'#059669':'#6b7280',fontWeight:500,flexShrink:0}}>
+                        {isLive ? 'Live' : 'Realized'}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {stage === 'importing' && (
+            <div style={{textAlign:'center',padding:'40px 20px'}}>
+              <div style={{width:44,height:44,border:'3px solid #e5e7eb',borderTopColor:'#5B6DC4',borderRadius:'50%',animation:'spin 0.8s linear infinite',margin:'0 auto 16px'}}/>
+              <p style={{fontWeight:600,fontSize:15,color:'#111827',marginBottom:10}}>Importing {selected} investments…</p>
+              <div style={{height:6,background:'#f3f4f6',borderRadius:99,overflow:'hidden',maxWidth:220,margin:'0 auto'}}>
+                <div style={{height:'100%',background:'#5B6DC4',borderRadius:99,width:`${progress}%`,transition:'width .3s'}}/>
+              </div>
+              <p style={{fontSize:12,color:'#9ca3af',marginTop:8}}>{progress}%</p>
+            </div>
+          )}
+
+          {stage === 'done' && (
+            <div style={{textAlign:'center',padding:'40px 20px'}}>
+              <div style={{width:56,height:56,background:'#ecfdf5',borderRadius:99,display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 16px'}}>
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <p style={{fontWeight:700,fontSize:16,color:'#111827',marginBottom:6}}>{selected} investments synced</p>
+              <div style={{display:'flex',justifyContent:'center',gap:16,marginBottom:20}}>
+                {importSummary.added > 0 && <p style={{fontSize:13,color:'#10b981'}}>✦ {importSummary.added} new</p>}
+                {importSummary.updated > 0 && <p style={{fontSize:13,color:'#5B6DC4'}}>↻ {importSummary.updated} updated</p>}
+              </div>
+              <button onClick={onClose} style={{...btn, background:'#5B6DC4', color:'white', width:'100%'}}>View Portfolio</button>
+            </div>
+          )}
+        </div>
+
+        {(stage === 'upload' || stage === 'preview') && (
+          <div style={{padding:'14px 20px',borderTop:'1px solid #f3f4f6',display:'flex',gap:10,flexShrink:0}}>
+            <button onClick={stage === 'preview' ? () => setStage('upload') : onClose} style={{...btn, background:'#f3f4f6', color:'#374151', flex:1}}>
+              {stage === 'preview' ? 'Back' : 'Cancel'}
+            </button>
+            {stage === 'preview' && (
+              <button onClick={handleImport} disabled={selected === 0} style={{...btn, background: selected > 0 ? '#5B6DC4' : '#e5e7eb', color: selected > 0 ? 'white' : '#9ca3af', flex:2}}>
+                Import {selected} investment{selected !== 1 ? 's' : ''}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
 }
@@ -1779,8 +2291,11 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
 
-  // Load deals from Supabase — never show demo data flash
+  // Load deals — wait for real data, never flash demo
   useEffect(() => {
     if (!user?.id) return;
     let mounted = true;
@@ -1789,25 +2304,39 @@ export default function App() {
         const { data, error } = await supabase
           .from('deals').select('id, data').eq('user_id', user.id);
         if (!mounted) return;
-        if (error) { console.warn('Supabase load error:', error.message); setDealsReady(true); return; }
+        if (error) { console.warn('Load error:', error.message); setDealsReady(true); return; }
         if (data && data.length > 0) {
-          setDeals(data.map(row => ({ ...row.data, id: row.id })));
+          setDeals(data.map(row => {
+            const d = { ...row.data, id: row.id };
+            // Compute isFund at runtime for existing deals that predate the flag
+            if (!('isFund' in d)) {
+              const name = (d.companyName || '').toLowerCase();
+              const src = (d.source?.name || '').toLowerCase();
+              const vehicle = (d.investment?.vehicle || '').toLowerCase();
+              d.isFund = vehicle === 'fund'
+                || name.includes('ventures')
+                || name.includes(' fund')
+                || name.includes('capital')
+                || name.includes('partners')
+                || src.includes('fund');
+            }
+            return d;
+          }));
           setDealsReady(true);
         } else {
-          // New user — show empty portfolio immediately, seed demo in background
+          // New user — seed demo deals then show them
           setDealsReady(true);
           for (const deal of DEALS) {
             const { id, ...dealData } = deal;
             await supabase.from('deals').insert({ id, user_id: user.id, company_name: deal.companyName, status: deal.status, data: dealData });
           }
-          // Now load what was just seeded
           if (mounted) {
             const { data: seeded } = await supabase.from('deals').select('id, data').eq('user_id', user.id);
-            if (mounted && seeded?.length > 0) setDeals(seeded.map(row => ({ ...row.data, id: row.id })));
+            if (mounted && seeded?.length) setDeals(seeded.map(row => ({ ...row.data, id: row.id })));
           }
         }
-      } catch(e) {
-        console.warn('Supabase unavailable:', e.message);
+      } catch (e) {
+        console.warn('Supabase error:', e.message);
         if (mounted) setDealsReady(true);
       }
     };
@@ -1816,10 +2345,8 @@ export default function App() {
   }, [user?.id]);
 
   const updateDeal = async (updated) => {
-    // Optimistic update
     setDeals(prev => prev.map(d => d.id === updated.id ? updated : d));
     setSelected(updated);
-    // Persist
     const { id, ...dealData } = updated;
     const { error } = await supabase.from('deals')
       .update({ data: dealData, company_name: updated.companyName, status: updated.status })
@@ -1827,7 +2354,60 @@ export default function App() {
     if (error) console.error('Update failed:', error.message);
   };
 
-  const addDeal = async (d) => {
+  const deleteDeal = async (id) => {
+    setDeals(prev => prev.filter(d => d.id !== id));
+    setPage('list');
+    setSelected(null);
+    const { error } = await supabase.from('deals').delete().eq('id', id).eq('user_id', user.id);
+    if (error) console.error('Delete failed:', error.message);
+    else setToast('Company removed');
+  };
+
+  const massDelete = async () => {
+    const ids = [...selectedIds];
+    setDeals(prev => prev.filter(d => !selectedIds.has(d.id)));
+    setSelectMode(false);
+    setSelectedIds(new Set());
+    setToast(`${ids.length} ${ids.length === 1 ? 'company' : 'companies'} removed`);
+    // Delete from Supabase in background
+    for (const id of ids) {
+      supabase.from('deals').delete().eq('id', id).eq('user_id', user.id)
+        .then(({ error }) => { if (error) console.warn('Delete failed:', id, error.message); });
+    }
+  };
+
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const addDeal = async (d, upsert = false) => {
+    if (upsert) {
+      const existing = deals.find(x => x.companyName.toLowerCase() === d.companyName.toLowerCase());
+      if (existing) {
+        const merged = { ...d, id: existing.id };
+        // Update UI immediately
+        setDeals(prev => prev.map(x => x.id === existing.id ? merged : x));
+        // Write to Supabase in background — don't await
+        const { id, ...dealData } = merged;
+        supabase.from('deals')
+          .update({ data: dealData, company_name: merged.companyName, status: merged.status })
+          .eq('id', id).eq('user_id', user.id)
+          .then(({ error }) => { if (error) console.warn('Update failed:', error.message); });
+        return;
+      }
+      // New deal — insert without blocking
+      setDeals(prev => [d, ...prev]);
+      const { id, ...dealData } = d;
+      supabase.from('deals')
+        .insert({ id, user_id: user.id, company_name: d.companyName, status: d.status, data: dealData })
+        .then(({ error }) => { if (error) console.warn('Insert failed:', error.message); });
+      return;
+    }
+    // Manual add — await and show toast
     setDeals(prev => [d, ...prev]);
     setToast(`${d.companyName} added`);
     const { id, ...dealData } = d;
@@ -1839,9 +2419,9 @@ export default function App() {
     }
   };
 
-  // Single loading screen covers both auth resolving and deals fetching
+  // Loading state — covers both auth and data fetching
   if (isLoading || (isAuthenticated && !dealsReady)) return (
-    <div style={{minHeight:'100vh',background:'#f9fafb',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16}}>
+    <div style={{minHeight:'100vh',background:'#f9fafb',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:14}}>
       <div style={{width:40,height:40,background:'#4A1942',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center'}}>
         <svg width="20" height="20" viewBox="0 0 38 38" fill="none">
           <circle cx="19" cy="19" r="4.5" fill="#F5DFA0"/>
@@ -1851,42 +2431,75 @@ export default function App() {
           <line x1="28" y1="19" x2="35" y2="19" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/>
         </svg>
       </div>
-      <div style={{width:20,height:20,border:'2px solid #e5e7eb',borderTopColor:'#4A1942',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}/>
+      <div style={{width:18,height:18,border:'2px solid #e5e7eb',borderTopColor:'#4A1942',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}/>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
-  if (!isAuthenticated) return <LoginPage onLogin={() => signInWithProvider('google')} />;
-  if (!dealsReady) return null;
 
-  const portfolio = deals.filter(d => d.status === 'invested');
+  if (!isAuthenticated) return <LoginPage onLogin={() => signInWithProvider('google')} />;
+
+  const portfolio = deals.filter(d => d.status === 'invested' && !d.isFund);
+  const allInvested = deals.filter(d => d.status === 'invested');
   const ph = calcPortHealth(deals);
-  const totalDep = portfolio.reduce((s,d) => s + getCB(d.investment||{}), 0);
-  const totalImp = portfolio.reduce((s,d) => s + calcIV(d), 0);
-  const moic = totalDep > 0 ? totalImp / totalDep : null;
-  const realized = portfolio.reduce((s,d) => (d.liquidityEvents||[]).filter(e=>e.type!=='writedown').reduce((a,e)=>a+(e.proceeds||0),s), 0);
-  const dpi = totalDep > 0 ? realized / totalDep : 0;
+
+  // All invested including funds for financial totals
+  const totalDep = allInvested.reduce((s, d) => s + getCB(d.investment || {}), 0);
+
+  // Live implied value (unrealized marks) — funds mark at cost
+  const totalUnrealizedImp = allInvested.reduce((s, d) => {
+    const hasLiquidity = (d.liquidityEvents || []).length > 0;
+    return s + (hasLiquidity ? 0 : calcIV(d));
+  }, 0);
+
+  // Realized proceeds (actual cash back from exits)
+  const totalProceeds = allInvested.reduce((s, d) =>
+    (d.liquidityEvents || []).filter(e => e.type !== 'writedown').reduce((a, e) => a + (e.proceeds || 0), s), 0);
+
+  // Realized losses (cost basis of writedowns with $0 back)
+  const totalWritedowns = allInvested.reduce((s, d) => {
+    const hasWritedown = (d.liquidityEvents || []).some(e => e.type === 'writedown');
+    const hasExit = (d.liquidityEvents || []).some(e => e.type !== 'writedown' && (e.proceeds || 0) > 0);
+    if (hasWritedown && !hasExit) return s + getCB(d.investment || {});
+    return s;
+  }, 0);
+
+  // Net P&L = proceeds from exits - writedowns - unrealized losses on live deals
+  const realizedPnL = totalProceeds - totalWritedowns;
+  // Total net: realized P&L + unrealized gain/loss on live positions
+  const unrealizedPnL = totalUnrealizedImp - (totalDep - totalProceeds - totalWritedowns); // subtract deployed into realized deals
+  const netPnL = totalProceeds + totalUnrealizedImp - totalDep; // simplified: total value - total cost
+
+  const moic = totalDep > 0 ? (totalProceeds + totalUnrealizedImp) / totalDep : null;
+  const dpi = totalDep > 0 ? totalProceeds / totalDep : 0;
   const filtered = search ? deals.filter(d => d.companyName.toLowerCase().includes(search.toLowerCase())) : deals;
-  const fInvested = filtered.filter(d => d.status === 'invested');
+  const fInvested = filtered.filter(d => d.status === 'invested' && !d.isFund);
+  const fFunds = filtered.filter(d => d.status === 'invested' && d.isFund);
   const fWatching = filtered.filter(d => d.status === 'watching');
 
   if (page === 'detail' && selected) return (
     <div style={{minHeight:'100vh',background:'#f9fafb',fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif'}}>
       <div style={{background:'white',borderBottom:'1px solid #e5e7eb',position:'sticky',top:0,zIndex:10}}>
-        <div style={{padding:'14px 32px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-          <button onClick={()=>{setPage('list');setSelected(null);}} style={{display:'flex',alignItems:'center',gap:6,background:'none',border:'none',cursor:'pointer',color:'#6b7280',fontSize:14,fontWeight:500}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>Portfolio</button>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 32px'}}>
+          <button onClick={() => { setPage('list'); setSelected(null); }} style={{display:'flex',alignItems:'center',gap:6,background:'none',border:'none',cursor:'pointer',color:'#6b7280',fontSize:14,fontWeight:500}}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
+            Portfolio
+          </button>
           <span style={{fontWeight:700,fontSize:14,color:'#111827'}}>{selected.companyName}</span>
-          <UserMenu user={user} onLogout={signOut}/>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <DeleteButton onDelete={() => deleteDeal(selected.id)}/>
+            <UserMenu user={user} onLogout={signOut}/>
+          </div>
         </div>
       </div>
-      <div style={{padding:'0'}}><DetailView deal={selected} onUpdate={updateDeal} setToast={setToast}/></div>
-      {toast&&<Toast msg={toast} onClose={()=>setToast(null)}/>}
+      <DetailView deal={selected} onUpdate={updateDeal} setToast={setToast}/>
+      {toast && <Toast msg={typeof toast === 'string' ? toast : toast.message} onClose={() => setToast(null)}/>}
     </div>
   );
 
   return (
     <div style={{minHeight:'100vh',background:'#f9fafb',fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif'}}>
       <div style={{background:'white',borderBottom:'1px solid #e5e7eb',position:'sticky',top:0,zIndex:10}}>
-        <div style={{padding:'14px 32px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 32px'}}>
           <div style={{display:'flex',alignItems:'center',gap:10}}>
             <div style={{width:34,height:34,borderRadius:10,background:'#4A1942',display:'flex',alignItems:'center',justifyContent:'center'}}>
               <svg width="18" height="18" viewBox="0 0 38 38" fill="none">
@@ -1904,66 +2517,213 @@ export default function App() {
             <span style={{fontWeight:800,fontSize:16,color:'#111827',letterSpacing:'-0.3px'}}>Lucero</span>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:10}}>
-            <button onClick={()=>setShowAdd(true)} style={{padding:'8px 14px',background:'#5B6DC4',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}><span style={{fontSize:16,lineHeight:1}}>+</span>Add Company</button>
+            {selectMode ? (
+              <>
+                <span style={{fontSize:13,color:'#6b7280'}}>{selectedIds.size} selected</span>
+                <button
+                  onClick={() => {
+                    const allIds = new Set(deals.map(d => d.id));
+                    setSelectedIds(selectedIds.size === deals.length ? new Set() : allIds);
+                  }}
+                  style={{padding:'8px 12px',background:'white',color:'#374151',border:'1px solid #e5e7eb',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer'}}
+                >
+                  {selectedIds.size === deals.length ? 'Deselect all' : 'Select all'}
+                </button>
+                <button
+                  onClick={massDelete}
+                  disabled={selectedIds.size === 0}
+                  style={{padding:'8px 14px',background:selectedIds.size>0?'#ef4444':'#f3f4f6',color:selectedIds.size>0?'white':'#9ca3af',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:selectedIds.size>0?'pointer':'not-allowed',display:'flex',alignItems:'center',gap:6}}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg>
+                  Delete {selectedIds.size > 0 ? selectedIds.size : ''}
+                </button>
+                <button
+                  onClick={() => { setSelectMode(false); setSelectedIds(new Set()); }}
+                  style={{padding:'8px 12px',background:'white',color:'#6b7280',border:'1px solid #e5e7eb',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer'}}
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                <button onClick={() => setShowImport(true)} style={{padding:'8px 14px',background:'white',color:'#374151',border:'1px solid #e5e7eb',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  Import CSV
+                </button>
+                <button onClick={() => setShowAdd(true)} style={{padding:'8px 14px',background:'#5B6DC4',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}>
+                  <span style={{fontSize:16,lineHeight:1}}>+</span>Add Company
+                </button>
+                <button onClick={() => setSelectMode(true)} style={{padding:'8px 10px',background:'white',color:'#6b7280',border:'1px solid #e5e7eb',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer'}} title="Select to delete">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg>
+                </button>
+              </>
+            )}
             <UserMenu user={user} onLogout={signOut}/>
           </div>
         </div>
       </div>
 
       <div style={{padding:'24px 32px'}}>
-        {portfolio.length>0&&<div style={{background:'white',borderRadius:16,padding:20,marginBottom:16,border:'1px solid #e5e7eb'}}>
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
-            <h2 style={{fontSize:15,fontWeight:700,color:'#111827'}}>Portfolio</h2>
-            <span style={{fontSize:12,color:'#9ca3af'}}>{portfolio.length} {portfolio.length===1?'company':'companies'}</span>
+        {portfolio.length > 0 && (
+          <div style={{background:'white',borderRadius:16,padding:20,marginBottom:16,border:'1px solid #e5e7eb'}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+              <h2 style={{fontSize:15,fontWeight:700,color:'#111827'}}>Portfolio</h2>
+              <span style={{fontSize:12,color:'#9ca3af'}}>{allInvested.length} {allInvested.length === 1 ? 'position' : 'positions'}</span>
+            </div>
+            {(() => {
+              const statC = (v) => v > 0 ? '#10b981' : v < 0 ? '#ef4444' : '#9ca3af';
+              const fmtPnL = (v) => {
+                if (v === 0) return '—';
+                const abs = fmtC(Math.abs(v));
+                return v > 0 ? `+${abs}` : `−${abs}`;
+              };
+              const stats = [
+                { l: 'Deployed', v: fmtC(totalDep), sub: 'total cost basis', c: '#111827' },
+                { l: 'Live Value', v: fmtC(totalUnrealizedImp), sub: 'unrealized marks', c: '#111827' },
+                { l: 'Net P&L', v: fmtPnL(netPnL), sub: `${totalProceeds > 0 ? fmtC(totalProceeds) + ' returned · ' : ''}${totalWritedowns > 0 ? fmtC(totalWritedowns) + ' lost' : 'no exits yet'}`, c: statC(netPnL) },
+                { l: 'MOIC', v: moic ? `${moic.toFixed(2)}x` : '—', sub: 'blended', c: moic >= 1.5 ? '#10b981' : moic >= 1 ? '#5B6DC4' : '#9ca3af' },
+                { l: 'DPI', v: dpi > 0 ? `${dpi.toFixed(2)}x` : '0.00x', sub: 'distributed/paid-in', c: dpi >= 1 ? '#10b981' : dpi > 0 ? '#5B6DC4' : '#9ca3af' },
+                { l: 'Watching', v: String(deals.filter(d => d.status === 'watching').length), sub: `${portfolio.length} invested`, c: '#5B6DC4' },
+              ];
+              return (
+                <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10}}>
+                  {stats.map(({ l, v, sub, c }) => (
+                    <div key={l} style={{background:'#f9fafb',borderRadius:12,padding:'10px 12px'}}>
+                      <p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.7,marginBottom:4}}>{l}</p>
+                      <p style={{fontSize:16,fontWeight:700,color:c,lineHeight:1.2}}>{v}</p>
+                      <p style={{fontSize:10,color:'#c4c4c4',marginTop:3}}>{sub}</p>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
-          {(()=>{
-            const unrealizedGain = totalImp - totalDep;
-            const statC = (v, pos='#10b981', neg='#ef4444', neu='#9ca3af') => v > 0 ? pos : v < 0 ? neg : neu;
-            const stats = [
-              { l:'Deployed', v:fmtC(totalDep), sub:'cost basis', c:'#111827' },
-              { l:'Implied', v:fmtC(totalImp), sub:'marked value', c:totalImp>=totalDep?'#10b981':'#ef4444' },
-              { l:'Gain', v:unrealizedGain===0?'—':(unrealizedGain>0?`+${fmtC(unrealizedGain)}`:`−${fmtC(Math.abs(unrealizedGain))}`), sub:'unrealized', c:statC(unrealizedGain) },
-              { l:'MOIC', v:moic?`${moic.toFixed(2)}x`:'—', sub:'blended', c:moic>=1.5?'#10b981':moic>=1?'#5B6DC4':'#9ca3af' },
-              { l:'DPI', v:dpi>0?`${dpi.toFixed(2)}x`:'0.00x', sub:'distributed/paid-in', c:dpi>=1?'#10b981':dpi>0?'#5B6DC4':'#9ca3af' },
-              { l:'Watching', v:String(deals.filter(d=>d.status==='watching').length), sub:`${portfolio.length} invested`, c:'#5B6DC4' },
-            ];
-            return (
-              <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10}}>
-                {stats.map(({l,v,sub,c})=>(
-                  <div key={l} style={{background:'#f9fafb',borderRadius:12,padding:'10px 12px'}}>
-                    <p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.7,marginBottom:4}}>{l}</p>
-                    <p style={{fontSize:16,fontWeight:700,color:c,lineHeight:1.2}}>{v}</p>
-                    <p style={{fontSize:10,color:'#c4c4c4',marginTop:3}}>{sub}</p>
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
-        </div>}
+        )}
 
         <div style={{marginBottom:14}}>
           <div style={{background:'white',borderRadius:14,border:'1px solid #e5e7eb',padding:'6px 12px',display:'flex',alignItems:'center',gap:10}}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search companies..." style={{border:'none',outline:'none',fontSize:14,flex:1,color:'#111827'}}/>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search companies..." style={{border:'none',outline:'none',fontSize:14,flex:1,color:'#111827',background:'transparent'}}/>
           </div>
         </div>
 
         <div style={{display:'flex',flexDirection:'column',gap:16}}>
-          {fInvested.length>0&&<div>
-            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}><span style={{width:8,height:8,borderRadius:99,background:'#10b981',display:'inline-block'}}/><p style={{fontSize:11,fontWeight:600,color:'#6b7280',textTransform:'uppercase',letterSpacing:.8}}>Invested · {fInvested.length}</p></div>
-            <div style={{display:'flex',flexDirection:'column',gap:10}}>{fInvested.map(d=><InvestedCard key={d.id} deal={d} onClick={()=>{setSelected(d);setPage('detail');}}/>)}</div>
-          </div>}
-          {fWatching.length>0&&<div>
-            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}><span style={{width:8,height:8,borderRadius:99,background:'#9ca3af',display:'inline-block'}}/><p style={{fontSize:11,fontWeight:600,color:'#6b7280',textTransform:'uppercase',letterSpacing:.8}}>Watching · {fWatching.length}</p></div>
-            <div style={{display:'flex',flexDirection:'column',gap:10}}>{fWatching.map(d=><WatchingCard key={d.id} deal={d} onClick={()=>{setSelected(d);setPage('detail');}}/>)}</div>
-          </div>}
-          {filtered.length===0&&<p style={{textAlign:'center',color:'#9ca3af',padding:40}}>No companies yet — add your first deal</p>}
+          {fInvested.length > 0 && (
+            <div>
+              {/* Live startups */}
+              {fInvested.filter(d => !(d.liquidityEvents||[]).length).length > 0 && (
+                <div style={{marginBottom:16}}>
+                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+                    <span style={{width:8,height:8,borderRadius:99,background:'#10b981',display:'inline-block'}}/>
+                    <p style={{fontSize:11,fontWeight:600,color:'#6b7280',textTransform:'uppercase',letterSpacing:.8}}>Invested · {fInvested.filter(d => !(d.liquidityEvents||[]).length).length}</p>
+                  </div>
+                  <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                    {fInvested.filter(d => !(d.liquidityEvents||[]).length).map(d => (
+                    <div key={d.id} style={{position:'relative'}} onClick={selectMode ? () => toggleSelect(d.id) : undefined}>
+                      <InvestedCard deal={d} onClick={selectMode ? undefined : () => { setSelected(d); setPage('detail'); }}/>
+                      {selectMode && <div style={{position:'absolute',top:12,left:12,width:20,height:20,borderRadius:6,border:`2px solid ${selectedIds.has(d.id)?'#5B6DC4':'#d1d5db'}`,background:selectedIds.has(d.id)?'#5B6DC4':'white',display:'flex',alignItems:'center',justifyContent:'center',zIndex:10,pointerEvents:'none'}}>
+                        {selectedIds.has(d.id)&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+                      </div>}
+                    </div>
+                  ))}
+                  </div>
+                </div>
+              )}
+              {/* Realized */}
+              {fInvested.filter(d => (d.liquidityEvents||[]).length > 0).length > 0 && (
+                <div style={{marginBottom:16}}>
+                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+                    <span style={{width:8,height:8,borderRadius:99,background:'#9ca3af',display:'inline-block'}}/>
+                    <p style={{fontSize:11,fontWeight:600,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.8}}>Realized · {fInvested.filter(d => (d.liquidityEvents||[]).length > 0).length}</p>
+                  </div>
+                  <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                    {fInvested.filter(d => (d.liquidityEvents||[]).length > 0).map(d => (
+                    <div key={d.id} style={{position:'relative'}} onClick={selectMode ? () => toggleSelect(d.id) : undefined}>
+                      <InvestedCard deal={d} onClick={selectMode ? undefined : () => { setSelected(d); setPage('detail'); }}/>
+                      {selectMode && <div style={{position:'absolute',top:12,left:12,width:20,height:20,borderRadius:6,border:`2px solid ${selectedIds.has(d.id)?'#5B6DC4':'#d1d5db'}`,background:selectedIds.has(d.id)?'#5B6DC4':'white',display:'flex',alignItems:'center',justifyContent:'center',zIndex:10,pointerEvents:'none'}}>
+                        {selectedIds.has(d.id)&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+                      </div>}
+                    </div>
+                  ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Fund LP positions */}
+          {fFunds.length > 0 && (
+            <div style={{marginBottom:16}}>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+                <span style={{width:8,height:8,borderRadius:99,background:'#7c3aed',display:'inline-block'}}/>
+                <p style={{fontSize:11,fontWeight:600,color:'#7c3aed',textTransform:'uppercase',letterSpacing:.8}}>Fund LP Positions · {fFunds.length}</p>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                {fFunds.map(d => {
+                  const cb = getCB(d.investment||{});
+                  return (
+                    <div key={d.id} style={{position:'relative'}} onClick={selectMode ? () => toggleSelect(d.id) : undefined}>
+                      <div onClick={selectMode ? undefined : () => { setSelected(d); setPage('detail'); }}
+                        style={{background:'white',borderRadius:16,border:'1px solid #ede9fe',cursor:'pointer',padding:'14px 16px',display:'flex',alignItems:'center',gap:14}}>
+                        <div style={{width:44,height:44,borderRadius:12,background:'#7c3aed20',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                        </div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:2}}>
+                            <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>{d.companyName}</span>
+                            <Pill color="#7c3aed" bg="#f5f3ff">LP</Pill>
+                          </div>
+                          <p style={{fontSize:12,color:'#9ca3af'}}>{d.source?.name && d.source.name !== 'AngelList' ? d.source.name : 'Fund investment'}</p>
+                        </div>
+                        <div style={{textAlign:'right',flexShrink:0}}>
+                          <p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{fmtC(cb)}</p>
+                          <p style={{fontSize:12,color:'#9ca3af'}}>LP position</p>
+                        </div>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
+                      </div>
+                      {selectMode && <div style={{position:'absolute',top:12,left:12,width:20,height:20,borderRadius:6,border:`2px solid ${selectedIds.has(d.id)?'#5B6DC4':'#d1d5db'}`,background:selectedIds.has(d.id)?'#5B6DC4':'white',display:'flex',alignItems:'center',justifyContent:'center',zIndex:10,pointerEvents:'none'}}>
+                        {selectedIds.has(d.id)&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+                      </div>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {fWatching.length > 0 && (
+            <div>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+                <span style={{width:8,height:8,borderRadius:99,background:'#9ca3af',display:'inline-block'}}/>
+                <p style={{fontSize:11,fontWeight:600,color:'#6b7280',textTransform:'uppercase',letterSpacing:.8}}>Watching · {fWatching.length}</p>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                {fWatching.map(d => (
+                <div key={d.id} style={{position:'relative'}} onClick={selectMode ? () => toggleSelect(d.id) : undefined}>
+                  <WatchingCard deal={d} onClick={selectMode ? undefined : () => { setSelected(d); setPage('detail'); }}/>
+                  {selectMode && <div style={{position:'absolute',top:12,left:12,width:20,height:20,borderRadius:6,border:`2px solid ${selectedIds.has(d.id)?'#5B6DC4':'#d1d5db'}`,background:selectedIds.has(d.id)?'#5B6DC4':'white',display:'flex',alignItems:'center',justifyContent:'center',zIndex:10,pointerEvents:'none'}}>
+                    {selectedIds.has(d.id)&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+                  </div>}
+                </div>
+              ))}
+              </div>
+            </div>
+          )}
+          {filtered.length === 0 && (
+            <div style={{textAlign:'center',padding:'60px 20px',color:'#9ca3af'}}>
+              <p style={{fontWeight:500,marginBottom:4}}>No companies yet</p>
+              <p style={{fontSize:13}}>Add your first investment or import from AngelList</p>
+            </div>
+          )}
         </div>
-        <p style={{textAlign:'center',fontSize:12,color:'#9ca3af',marginTop:28}}>{portfolio.length} investment{portfolio.length!==1?'s':''}</p>
+
+        <p style={{textAlign:'center',fontSize:12,color:'#9ca3af',marginTop:28}}>
+          {portfolio.length} investment{portfolio.length !== 1 ? 's' : ''}
+        </p>
       </div>
 
-      {showAdd&&<AddModal onClose={()=>setShowAdd(false)} onAdd={addDeal}/>}
-      {toast&&<Toast msg={typeof toast==='string'?toast:toast.message} onClose={()=>setToast(null)}/>}
+      {showAdd && <AddModal onClose={() => setShowAdd(false)} onAdd={addDeal}/>}
+      {showImport && <ImportModal onClose={() => setShowImport(false)} onImport={addDeal}/>}
+      {toast && <Toast msg={typeof toast === 'string' ? toast : toast.message} onClose={() => setToast(null)}/>}
     </div>
   );
 }
