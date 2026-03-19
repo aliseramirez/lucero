@@ -4194,75 +4194,44 @@ function ConvexApp({ userMenu, syncStatus, user }) {
 
   useEffect(() => {
     if (!user?.id) return;
-    let mounted = true;
-    const loadDeals = async () => {
+    // Always show demo data immediately — never block on Supabase
+    const demo = createDemoDeals();
+    setDeals(demo);
+    setDealsLoading(false);
+
+    // Try to load real data in background
+    const loadFromSupabase = async () => {
       try {
         const { data, error } = await supabase
           .from('deals')
           .select('id, data')
           .eq('user_id', user.id);
 
-        if (!mounted) return;
-
         if (error) {
-          console.error('Supabase error loading deals:', error);
-          // Still show the app — just with empty state
-          setDeals([]);
-          setDealsLoading(false);
+          console.warn('Supabase load failed (using demo data):', error.message);
           return;
         }
 
         if (data && data.length > 0) {
           setDeals(data.map(row => ({ ...row.data, id: row.id })));
-          setDealsLoading(false);
         } else {
-          // New user — show empty state immediately, seed demo in background
-          setDeals([]);
-          setDealsLoading(false);
-          // Seed demo deals in background
-          const demo = createDemoDeals();
+          // Seed demo deals for this user
           for (const deal of demo) {
             const { id, ...dealData } = deal;
-            const { error: insertError } = await supabase.from('deals').insert({
-              id,
-              user_id: user.id,
+            await supabase.from('deals').insert({
+              id, user_id: user.id,
               company_name: deal.companyName,
               status: deal.status,
               data: dealData
-            });
-            if (insertError) {
-              console.error('Demo insert error:', insertError);
-              break;
-            }
-          }
-          // Reload after seeding
-          if (mounted) {
-            const { data: seeded } = await supabase
-              .from('deals')
-              .select('id, data')
-              .eq('user_id', user.id);
-            if (mounted && seeded?.length > 0) {
-              setDeals(seeded.map(row => ({ ...row.data, id: row.id })));
-            }
+            }).then(({ error: e }) => { if (e) console.warn('Seed error:', e.message); });
           }
         }
       } catch (e) {
-        console.error('loadDeals exception:', e);
-        if (mounted) {
-          setDeals([]);
-          setDealsLoading(false);
-        }
+        console.warn('Supabase unavailable, using demo data:', e.message);
       }
     };
-    loadDeals();
-    // Hard timeout — if loading takes more than 5s something is wrong, unblock the UI
-    const timeout = setTimeout(() => {
-      if (mounted) {
-        console.warn('loadDeals timeout — unblocking UI');
-        setDealsLoading(false);
-      }
-    }, 5000);
-    return () => { mounted = false; clearTimeout(timeout); };
+
+    loadFromSupabase();
   }, [user?.id]);
 
   // Invested deals — used for health scoring and portfolio summary
