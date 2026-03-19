@@ -827,39 +827,237 @@ const FundraiseHistory = ({deal, onUpdate, setToast}) => {
   );
 };
 
-const SignalsSection = ({deal}) => {
-  const allMilestones = (deal.milestones||[])
-    .filter(m => ['fundraising','partnership','product','update'].includes(m.type))
-    .sort((a,b) => new Date(b.date)-new Date(a.date));
-  if (!allMilestones.length) return null;
-  const TYPE_CFG = {
-    fundraising:{color:'#5B6DC4',bg:'#FFFBEC',label:'Funding'},
-    partnership:{color:'#10b981',bg:'#f0fdf4',label:'Partnership'},
-    product:{color:'#f59e0b',bg:'#fffbeb',label:'Product'},
-    update:{color:'#78716c',bg:'#f5f5f4',label:'Update'},
+// ── EXTERNAL SIGNAL FETCHER ───────────────────────────────────────────────────
+const SIGNAL_CACHE_KEY = 'lucero_signals_v1';
+const SIGNAL_TTL = 12 * 60 * 60 * 1000; // 12 hours
+
+const loadSignalCache = () => { try { return JSON.parse(localStorage.getItem(SIGNAL_CACHE_KEY) || '{}'); } catch { return {}; } };
+const saveSignalCache = (c) => { try { localStorage.setItem(SIGNAL_CACHE_KEY, JSON.stringify(c)); } catch {} };
+
+const fetchExternalSignals = async (deal) => {
+  const prompt = `You are an investment research assistant. Search for recent information about "${deal.companyName}" and return a JSON object.
+
+Research tasks:
+1. Check if their website (${deal.website || 'unknown'}) is active and what it currently says
+2. Find any recent news, press coverage, or announcements (last 12 months)
+3. Look for funding rounds, investor announcements, or valuation changes
+4. Find any revenue figures, growth metrics, or customer wins mentioned publicly
+5. Check for leadership changes, product launches, or pivots
+6. Look for any negative signals: layoffs, shutdowns, pivots away from core business
+
+Return ONLY valid JSON (no markdown):
+{
+  "websiteStatus": "active" | "down" | "changed" | "unknown",
+  "websiteSummary": "brief description of what site says now",
+  "signals": [
+    {
+      "type": "funding" | "revenue" | "product" | "partnership" | "team" | "news" | "risk",
+      "title": "short title",
+      "description": "1-2 sentence summary",
+      "sentiment": "positive" | "neutral" | "negative",
+      "date": "ISO date string or approximate like 2024-06",
+      "source": "source name",
+      "url": "url if available or null"
+    }
+  ],
+  "summary": "2-3 sentence overall assessment of company trajectory based on public signals",
+  "lastFundingRound": "e.g. Series A $10M - 2024" or null,
+  "estimatedRevenue": "e.g. $2M ARR" or null,
+  "checkInRecommended": true | false,
+  "checkInReason": "specific reason" or null
+}
+
+If nothing found: return signals: [], summary: "No recent public signals found for this company."`;
+
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1000,
+      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+      messages: [{ role: 'user', content: prompt }]
+    })
+  });
+  if (!resp.ok) throw new Error(`API ${resp.status}`);
+  const data = await resp.json();
+  const text = data.content.filter(b => b.type === 'text').pop()?.text || '';
+  return JSON.parse(text.replace(/```json|```/g, '').trim());
+};
+
+const SignalsSection = ({ deal, onUpdate }) => {
+  const [state, setState] = useState('idle'); // idle | loading | done | error
+  const [data, setData] = useState(null);
+  const [lastFetched, setLastFetched] = useState(null);
+  const manualMilestones = (deal.milestones || [])
+    .filter(m => ['fundraising', 'partnership', 'product', 'update'].includes(m.type))
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  // Load from cache on mount
+  useEffect(() => {
+    const cache = loadSignalCache();
+    const cached = cache[deal.id];
+    if (cached && (Date.now() - new Date(cached.fetchedAt).getTime()) < SIGNAL_TTL) {
+      setData(cached);
+      setLastFetched(new Date(cached.fetchedAt));
+      setState('done');
+    }
+  }, [deal.id]);
+
+  const fetch = async () => {
+    setState('loading');
+    try {
+      const result = await fetchExternalSignals(deal);
+      const entry = { ...result, fetchedAt: new Date().toISOString(), dealId: deal.id };
+      const cache = loadSignalCache();
+      cache[deal.id] = entry;
+      saveSignalCache(cache);
+      setData(entry);
+      setLastFetched(new Date());
+      setState('done');
+
+      // If we found signals, save top ones as milestones on the deal
+      if (result.signals?.length > 0 && onUpdate) {
+        const existing = new Set((deal.milestones || []).map(m => m.title));
+        const newMilestones = result.signals
+          .filter(s => !existing.has(s.title))
+          .slice(0, 5)
+          .map(s => ({
+            id: genId(),
+            type: s.type === 'funding' ? 'fundraising' : s.type === 'partnership' ? 'partnership' : s.type === 'product' ? 'product' : 'update',
+            title: s.title,
+            description: s.description,
+            date: s.date ? new Date(s.date).toISOString() : new Date().toISOString(),
+            source: s.source,
+            sourceUrl: s.url,
+            fromAgent: true,
+            sentiment: s.sentiment,
+          }));
+        if (newMilestones.length > 0) {
+          onUpdate({ ...deal, milestones: [...(deal.milestones || []), ...newMilestones] });
+        }
+      }
+    } catch (e) {
+      console.error('Signal fetch failed:', e);
+      setState('error');
+    }
   };
+
+  const TYPE_CFG = {
+    funding: { color: '#5B6DC4', bg: '#FFFBEC', label: 'Funding' },
+    revenue: { color: '#10b981', bg: '#f0fdf4', label: 'Revenue' },
+    product: { color: '#f59e0b', bg: '#fffbeb', label: 'Product' },
+    partnership: { color: '#10b981', bg: '#f0fdf4', label: 'Partnership' },
+    team: { color: '#7c3aed', bg: '#f5f3ff', label: 'Team' },
+    news: { color: '#78716c', bg: '#f5f5f4', label: 'News' },
+    risk: { color: '#ef4444', bg: '#fef2f2', label: 'Risk' },
+    fundraising: { color: '#5B6DC4', bg: '#FFFBEC', label: 'Funding' },
+    update: { color: '#78716c', bg: '#f5f5f4', label: 'Update' },
+  };
+
+  const allSignals = data?.signals || [];
+  const hasAnyContent = state === 'done' || manualMilestones.length > 0;
+
   return (
-    <div style={{background:'white',borderRadius:16,padding:20,marginBottom:12}}>
-      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14}}>
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Signals</span>
-        <span style={{fontSize:12,color:'#9ca3af'}}>{allMilestones.length} logged</span>
+    <div style={{ background: 'white', borderRadius: 16, padding: 20, marginBottom: 12 }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>External Signals</span>
+          {lastFetched && <span style={{ fontSize: 11, color: '#9ca3af' }}>· {dAgo(lastFetched)}d ago</span>}
+        </div>
+        <button
+          onClick={fetch}
+          disabled={state === 'loading'}
+          style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600, background: state === 'loading' ? '#f3f4f6' : '#eef2ff', color: state === 'loading' ? '#9ca3af' : '#5B6DC4', border: 'none', cursor: state === 'loading' ? 'not-allowed' : 'pointer' }}
+        >
+          {state === 'loading'
+            ? <><div style={{ width: 10, height: 10, border: '1.5px solid #d1d5db', borderTopColor: '#5B6DC4', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }}/> Searching…</>
+            : <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.12-7.51"/></svg>{state === 'done' ? 'Refresh' : 'Fetch signals'}</>
+          }
+        </button>
       </div>
-      <div style={{display:'flex',flexDirection:'column',gap:8}}>
-        {allMilestones.slice(0,6).map((s,i)=>{
-          const cfg=TYPE_CFG[s.type]||TYPE_CFG.update;
-          return <div key={s.id||i} style={{display:'flex',alignItems:'flex-start',gap:10,padding:'10px 12px',borderRadius:12,background:cfg.bg}}>
-            <div style={{flexShrink:0,marginTop:2}}>
-              <Pill color={cfg.color} bg={cfg.color+'18'}>{cfg.label}</Pill>
-            </div>
-            <div style={{flex:1,minWidth:0}}>
-              <p style={{fontSize:13,fontWeight:500,color:'#111827',marginBottom:2}}>{s.title}</p>
-              {s.description&&<p style={{fontSize:12,color:'#6b7280',lineHeight:1.5}}>{s.description}</p>}
-            </div>
-            <span style={{fontSize:11,color:'#9ca3af',flexShrink:0,marginTop:2}}>{dAgo(s.date)}d ago</span>
-          </div>;
-        })}
-      </div>
+
+      {/* Idle state — prompt to fetch */}
+      {state === 'idle' && manualMilestones.length === 0 && (
+        <div style={{ textAlign: 'center', padding: '20px 0' }}>
+          <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 6 }}>No signals yet for {deal.companyName}</p>
+          <p style={{ fontSize: 12, color: '#9ca3af' }}>Click "Fetch signals" to search for news, funding rounds, revenue data, and website status.</p>
+        </div>
+      )}
+
+      {/* Error */}
+      {state === 'error' && (
+        <p style={{ fontSize: 13, color: '#ef4444', textAlign: 'center', padding: '8px 0' }}>Failed to fetch — check your connection and try again.</p>
+      )}
+
+      {/* Summary */}
+      {data?.summary && (
+        <div style={{ background: '#f9fafb', borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
+          <p style={{ fontSize: 13, color: '#374151', lineHeight: 1.6 }}>{data.summary}</p>
+          <div style={{ display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
+            {data.websiteStatus && data.websiteStatus !== 'unknown' && (
+              <span style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ width: 6, height: 6, borderRadius: 99, background: data.websiteStatus === 'active' ? '#10b981' : data.websiteStatus === 'down' ? '#ef4444' : '#f59e0b', display: 'inline-block' }}/>
+                <span style={{ color: '#6b7280' }}>Website {data.websiteStatus}</span>
+              </span>
+            )}
+            {data.lastFundingRound && <span style={{ fontSize: 11, color: '#5B6DC4' }}>💰 {data.lastFundingRound}</span>}
+            {data.estimatedRevenue && <span style={{ fontSize: 11, color: '#10b981' }}>📈 {data.estimatedRevenue}</span>}
+          </div>
+        </div>
+      )}
+
+      {/* Check-in recommendation */}
+      {data?.checkInRecommended && (
+        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '8px 12px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <p style={{ fontSize: 12, color: '#92400e' }}>{data.checkInReason}</p>
+        </div>
+      )}
+
+      {/* External signals from agent */}
+      {allSignals.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: manualMilestones.length ? 16 : 0 }}>
+          {allSignals.map((s, i) => {
+            const cfg = TYPE_CFG[s.type] || TYPE_CFG.news;
+            return (
+              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', borderRadius: 12, background: cfg.bg }}>
+                <Pill color={cfg.color} bg={cfg.color + '18'}>{cfg.label}</Pill>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: 13, fontWeight: 500, color: '#111827', marginBottom: 2 }}>{s.title}</p>
+                  <p style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.5 }}>{s.description}</p>
+                  {s.url && <a href={s.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: '#5B6DC4', marginTop: 3, display: 'inline-block' }}>View source →</a>}
+                </div>
+                <span style={{ fontSize: 11, color: '#9ca3af', flexShrink: 0 }}>{s.source || ''}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Manual milestones you've logged */}
+      {manualMilestones.length > 0 && (
+        <>
+          {allSignals.length > 0 && <p style={{ fontSize: 11, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: .6, marginBottom: 8 }}>Your notes</p>}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {manualMilestones.slice(0, 4).map((s, i) => {
+              const cfg = TYPE_CFG[s.type] || TYPE_CFG.update;
+              return (
+                <div key={s.id || i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', borderRadius: 12, background: cfg.bg }}>
+                  <Pill color={cfg.color} bg={cfg.color + '18'}>{cfg.label}</Pill>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 13, fontWeight: 500, color: '#111827', marginBottom: 2 }}>{s.title}</p>
+                    {s.description && <p style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.5 }}>{s.description}</p>}
+                  </div>
+                  <span style={{ fontSize: 11, color: '#9ca3af', flexShrink: 0 }}>{dAgo(s.date)}d ago</span>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 };
@@ -1359,7 +1557,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
         <FounderUpdates deal={deal} onUpdate={onUpdate} setToast={setToast}/>
 
         {/* Signals */}
-        <SignalsSection deal={deal}/>
+        <SignalsSection deal={deal} onUpdate={onUpdate}/>
 
         {/* Known investors */}
         {(deal.coInvestors||[]).length>0&&<div style={C.card}>
@@ -1515,7 +1713,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
 
       <FounderUpdates deal={deal} onUpdate={onUpdate} setToast={setToast} inv={inv} overdue={overdue} dUntilNext={dUntilNext} dSinceUpd={dSinceUpd}/>
 
-      <SignalsSection deal={deal}/>
+      <SignalsSection deal={deal} onUpdate={onUpdate}/>
 
       <CoInvestorsSection deal={deal} onUpdate={onUpdate} setToast={setToast}/>
       <FundraiseHistory deal={deal} onUpdate={onUpdate} setToast={setToast}/>
