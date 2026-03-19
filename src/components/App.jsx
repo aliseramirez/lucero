@@ -1177,7 +1177,7 @@ const AddPortfolioModal = ({ onClose, onAdd }) => {
     
     const now = new Date().toISOString();
     const baseFields = {
-      id: Date.now().toString(),
+      id: crypto.randomUUID(),
       companyName: form.companyName,
       logoUrl: null,
       status: form.companyStatus,
@@ -2689,13 +2689,18 @@ function ConvexApp({ userMenu, syncStatus, user }) {
 
   const addDeal = async (newDeal) => {
     const { id, ...dealData } = newDeal;
-    await supabase.from('deals').insert({
+    const { error } = await supabase.from('deals').insert({
       id,
       user_id: user.id,
       company_name: newDeal.companyName,
       status: newDeal.status,
       data: dealData
     });
+    if (error) {
+      console.error('Failed to save deal:', error);
+      setToast({ message: `Failed to save: ${error.message}`, type: 'error' });
+      return;
+    }
     setDeals(prev => [newDeal, ...prev]);
     const statusLabel = STATUS_CONFIG[newDeal.status]?.label || newDeal.status;
     setToast({ message: `${newDeal.companyName} added as ${statusLabel}`, type: 'success' });
