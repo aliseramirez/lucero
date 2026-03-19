@@ -835,54 +835,21 @@ const loadSignalCache = () => { try { return JSON.parse(localStorage.getItem(SIG
 const saveSignalCache = (c) => { try { localStorage.setItem(SIGNAL_CACHE_KEY, JSON.stringify(c)); } catch {} };
 
 const fetchExternalSignals = async (deal) => {
-  const prompt = `You are an investment research assistant. Search for recent information about "${deal.companyName}" and return a JSON object.
-
-Research tasks:
-1. Check if their website (${deal.website || 'unknown'}) is active and what it currently says
-2. Find any recent news, press coverage, or announcements (last 12 months)
-3. Look for funding rounds, investor announcements, or valuation changes
-4. Find any revenue figures, growth metrics, or customer wins mentioned publicly
-5. Check for leadership changes, product launches, or pivots
-6. Look for any negative signals: layoffs, shutdowns, pivots away from core business
-
-Return ONLY valid JSON (no markdown):
-{
-  "websiteStatus": "active" | "down" | "changed" | "unknown",
-  "websiteSummary": "brief description of what site says now",
-  "signals": [
-    {
-      "type": "funding" | "revenue" | "product" | "partnership" | "team" | "news" | "risk",
-      "title": "short title",
-      "description": "1-2 sentence summary",
-      "sentiment": "positive" | "neutral" | "negative",
-      "date": "ISO date string or approximate like 2024-06",
-      "source": "source name",
-      "url": "url if available or null"
-    }
-  ],
-  "summary": "2-3 sentence overall assessment of company trajectory based on public signals",
-  "lastFundingRound": "e.g. Series A $10M - 2024" or null,
-  "estimatedRevenue": "e.g. $2M ARR" or null,
-  "checkInRecommended": true | false,
-  "checkInReason": "specific reason" or null
-}
-
-If nothing found: return signals: [], summary: "No recent public signals found for this company."`;
-
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+  const resp = await fetch('/api/signals', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-      messages: [{ role: 'user', content: prompt }]
-    })
+      companyName: deal.companyName,
+      website: deal.website || null,
+      stage: deal.stage || null,
+      industry: deal.industry || null,
+    }),
   });
-  if (!resp.ok) throw new Error(`API ${resp.status}`);
-  const data = await resp.json();
-  const text = data.content.filter(b => b.type === 'text').pop()?.text || '';
-  return JSON.parse(text.replace(/```json|```/g, '').trim());
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${resp.status}`);
+  }
+  return resp.json();
 };
 
 const SignalsSection = ({ deal, onUpdate }) => {
