@@ -1694,6 +1694,26 @@ const AddModal = ({onClose,onAdd}) => {
 
 // ── ROOT APP ──────────────────────────────────────────────────────────────────
 
+// ── DELETE BUTTON ─────────────────────────────────────────────────────────────
+function DeleteButton({ onDelete }) {
+  const [confirm, setConfirm] = useState(false);
+  if (confirm) return (
+    <div style={{display:'flex',alignItems:'center',gap:6}}>
+      <span style={{fontSize:13,color:'#6b7280'}}>Remove company?</span>
+      <button onClick={onDelete} style={{padding:'5px 10px',borderRadius:8,fontSize:13,fontWeight:600,background:'#ef4444',color:'white',border:'none',cursor:'pointer'}}>Delete</button>
+      <button onClick={() => setConfirm(false)} style={{padding:'5px 10px',borderRadius:8,fontSize:13,color:'#6b7280',background:'#f3f4f6',border:'none',cursor:'pointer'}}>Cancel</button>
+    </div>
+  );
+  return (
+    <button onClick={() => setConfirm(true)} style={{display:'flex',alignItems:'center',gap:5,padding:'5px 10px',borderRadius:8,fontSize:13,color:'#9ca3af',background:'none',border:'1px solid #e5e7eb',cursor:'pointer'}}
+      onMouseEnter={e => { e.currentTarget.style.color='#ef4444'; e.currentTarget.style.borderColor='#fca5a5'; }}
+      onMouseLeave={e => { e.currentTarget.style.color='#9ca3af'; e.currentTarget.style.borderColor='#e5e7eb'; }}>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+      Delete
+    </button>
+  );
+}
+
 // ── LOGIN PAGE ────────────────────────────────────────────────────────────────
 function LoginPage({ onLogin }) {
   const [loading, setLoading] = useState(false);
@@ -2051,6 +2071,15 @@ export default function App() {
     if (error) console.error('Update failed:', error.message);
   };
 
+  const deleteDeal = async (id) => {
+    setDeals(prev => prev.filter(d => d.id !== id));
+    setPage('list');
+    setSelected(null);
+    const { error } = await supabase.from('deals').delete().eq('id', id).eq('user_id', user.id);
+    if (error) console.error('Delete failed:', error.message);
+    else setToast('Company removed');
+  };
+
   const addDeal = async (d) => {
     setDeals(prev => [d, ...prev]);
     setToast(`${d.companyName} added`);
@@ -2102,7 +2131,10 @@ export default function App() {
             Portfolio
           </button>
           <span style={{fontWeight:700,fontSize:14,color:'#111827'}}>{selected.companyName}</span>
-          <UserMenu user={user} onLogout={signOut}/>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <DeleteButton onDelete={() => deleteDeal(selected.id)}/>
+            <UserMenu user={user} onLogout={signOut}/>
+          </div>
         </div>
       </div>
       <DetailView deal={selected} onUpdate={updateDeal} setToast={setToast}/>
