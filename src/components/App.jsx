@@ -4193,32 +4193,53 @@ function ConvexApp({ userMenu, syncStatus, user }) {
   }, [settings.appearance]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user?.id) return;
+    let mounted = true;
     const loadDeals = async () => {
-      const { data, error } = await supabase
-        .from('deals')
-        .select('id, data')
-        .eq('user_id', user.id);
-      if (data && data.length > 0) {
-        setDeals(data.map(row => ({ ...row.data, id: row.id })));
-      } else {
-        const demo = createDemoDeals();
-        setDeals(demo);
-        for (const deal of demo) {
-          const { id, ...dealData } = deal;
-          await supabase.from('deals').insert({
-            id,
-            user_id: user.id,
-            company_name: deal.companyName,
-            status: deal.status,
-            data: dealData
-          });
+      try {
+        const { data, error } = await supabase
+          .from('deals')
+          .select('id, data')
+          .eq('user_id', user.id);
+
+        if (!mounted) return;
+
+        if (error) {
+          console.error('Error loading deals:', error);
+          setDealsLoading(false);
+          return;
         }
+
+        if (data && data.length > 0) {
+          setDeals(data.map(row => ({ ...row.data, id: row.id })));
+          setDealsLoading(false);
+        } else {
+          // New user — seed demo data
+          const demo = createDemoDeals();
+          if (mounted) {
+            setDeals(demo);
+            setDealsLoading(false);
+          }
+          // Write demo deals in background without blocking
+          for (const deal of demo) {
+            const { id, ...dealData } = deal;
+            await supabase.from('deals').insert({
+              id,
+              user_id: user.id,
+              company_name: deal.companyName,
+              status: deal.status,
+              data: dealData
+            });
+          }
+        }
+      } catch (e) {
+        console.error('loadDeals error:', e);
+        if (mounted) setDealsLoading(false);
       }
-      setDealsLoading(false);
     };
     loadDeals();
-  }, [user]);
+    return () => { mounted = false; };
+  }, [user?.id]);
 
   // Invested deals — used for health scoring and portfolio summary
   const portfolioDeals = deals.filter(d => d.status === 'invested');
@@ -4463,6 +4484,23 @@ function ConvexApp({ userMenu, syncStatus, user }) {
 
   // Onboarding
 
+  // Show minimal skeleton while deals are loading — prevents blank screen after OAuth
+  if (dealsLoading) return (
+    <div className="min-h-screen bg-stone-100 dark:bg-stone-900 flex items-center justify-center">
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ width: 40, height: 40, background: '#4A1942', borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+          <svg width="20" height="20" viewBox="0 0 38 38" fill="none">
+            <circle cx="19" cy="19" r="4.5" fill="#F5DFA0"/>
+            <line x1="19" y1="3" x2="19" y2="10" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/>
+            <line x1="19" y1="28" x2="19" y2="35" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/>
+            <line x1="3" y1="19" x2="10" y2="19" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/>
+            <line x1="28" y1="19" x2="35" y2="19" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/>
+          </svg>
+        </div>
+        <p style={{ color: '#78716c', fontSize: 14 }}>Loading your portfolio…</p>
+      </div>
+    </div>
+  );
 
   // Detail
   if (page === 'detail' && selected) {
