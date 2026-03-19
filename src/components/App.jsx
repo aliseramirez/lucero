@@ -105,7 +105,8 @@ const calcHealth = (deal, extSigs=[]) => {
 
   const lastUpd=inv.lastUpdateReceived||deal.lastUpdateReceived;
   const nextExp=inv.nextUpdateExpected||deal.nextUpdateExpected;
-  const dSinceUpd=lastUpd?dAgo(lastUpd):999;
+  const dealAge=deal.createdAt?dAgo(deal.createdAt):0;
+  const dSinceUpd=lastUpd?dAgo(lastUpd):(dealAge<7?0:999);
   const dUntilNext=nextExp?dUntil(nextExp):null;
   const overdueThr=mat==='lab'?60:30;
   const isOverdue=dUntilNext!==null&&dUntilNext<-overdueThr;
@@ -1529,7 +1530,6 @@ const InvestedCard = ({deal,onClick}) => {
   const health=calcHealth(deal,[]);
   const moic=calcMOIC(deal);
   const method=getMethod(deal);
-  const trl={'lab':'TRL 1–3','pilot':'TRL 4–6','scale':'TRL 7–8'}[health.mat]||null;
   const cb = getCB(deal.investment||{});
 
   // Realized deal — has liquidity events
@@ -1572,7 +1572,6 @@ const InvestedCard = ({deal,onClick}) => {
         <div style={{flex:1,minWidth:0}}>
           <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:2}}>
             <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>{deal.companyName}</span>
-            {trl&&<Pill>{trl}</Pill>}
           </div>
           <p style={{fontSize:12,color:'#6b7280'}}>{deal.industry} · {deal.stage}</p>
           {health.factors.filter(f=>f.t!=='info').slice(0,1).map((f,i)=><div key={i} style={{display:'flex',alignItems:'center',gap:6,marginTop:4}}><span style={{width:6,height:6,borderRadius:99,background:f.t==='positive'?'#10b981':f.t==='negative'?'#ef4444':'#f59e0b',display:'inline-block'}}/><span style={{fontSize:11,color:'#9ca3af'}}>{f.l}</span></div>)}
@@ -1899,7 +1898,8 @@ function ImportModal({ onClose, onImport }) {
       industry: market,
       website: null,
       founders: [],
-      coInvestors: row['lead'] ? [{ id: genId(), name: row['lead'], role: 'lead', fund: row['lead'] }] : [],
+      coInvestors: [],
+      dealSource: row['lead'] || '',  // syndicate/fund channel from AngelList
       liquidityEvents: [],
       documents: [],
       monitoring: { healthStatus: 'stable', fundraisingStatus: 'not-raising' },
@@ -1923,6 +1923,7 @@ function ImportModal({ onClose, onImport }) {
         } : {}),
       },
       source: { type: 'angellist', name: row['lead'] || 'AngelList' },
+      isFund: invType === 'fund' || (row['investment type']||'').toLowerCase() === 'fund',
       terms: {
         instrument: vehicle,
         ...(capRaw > 0 ? { cap: capRaw } : {}),
@@ -2192,7 +2193,8 @@ export default function App() {
 
   if (!isAuthenticated) return <LoginPage onLogin={() => signInWithProvider('google')} />;
 
-  const portfolio = deals.filter(d => d.status === 'invested');
+  const portfolio = deals.filter(d => d.status === 'invested' && !d.isFund);
+  const allInvested = deals.filter(d => d.status === 'invested');
   const ph = calcPortHealth(deals);
   const totalDep = portfolio.reduce((s, d) => s + getCB(d.investment || {}), 0);
 
@@ -2227,7 +2229,8 @@ export default function App() {
   const moic = totalDep > 0 ? (totalProceeds + totalUnrealizedImp) / totalDep : null;
   const dpi = totalDep > 0 ? totalProceeds / totalDep : 0;
   const filtered = search ? deals.filter(d => d.companyName.toLowerCase().includes(search.toLowerCase())) : deals;
-  const fInvested = filtered.filter(d => d.status === 'invested');
+  const fInvested = filtered.filter(d => d.status === 'invested' && !d.isFund);
+  const fFunds = filtered.filter(d => d.status === 'invested' && d.isFund);
   const fWatching = filtered.filter(d => d.status === 'watching');
 
   if (page === 'detail' && selected) return (
@@ -2330,7 +2333,7 @@ export default function App() {
         <div style={{display:'flex',flexDirection:'column',gap:16}}>
           {fInvested.length > 0 && (
             <div>
-              {/* Live investments */}
+              {/* Live startups */}
               {fInvested.filter(d => !(d.liquidityEvents||[]).length).length > 0 && (
                 <div style={{marginBottom:16}}>
                   <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
@@ -2342,9 +2345,9 @@ export default function App() {
                   </div>
                 </div>
               )}
-              {/* Realized investments */}
+              {/* Realized */}
               {fInvested.filter(d => (d.liquidityEvents||[]).length > 0).length > 0 && (
-                <div>
+                <div style={{marginBottom:16}}>
                   <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
                     <span style={{width:8,height:8,borderRadius:99,background:'#9ca3af',display:'inline-block'}}/>
                     <p style={{fontSize:11,fontWeight:600,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.8}}>Realized · {fInvested.filter(d => (d.liquidityEvents||[]).length > 0).length}</p>
@@ -2354,6 +2357,41 @@ export default function App() {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Fund LP positions */}
+          {fFunds.length > 0 && (
+            <div style={{marginBottom:16}}>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+                <span style={{width:8,height:8,borderRadius:99,background:'#7c3aed',display:'inline-block'}}/>
+                <p style={{fontSize:11,fontWeight:600,color:'#7c3aed',textTransform:'uppercase',letterSpacing:.8}}>Fund LP Positions · {fFunds.length}</p>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                {fFunds.map(d => {
+                  const cb = getCB(d.investment||{});
+                  return (
+                    <div key={d.id} onClick={() => { setSelected(d); setPage('detail'); }}
+                      style={{background:'white',borderRadius:16,border:'1px solid #ede9fe',cursor:'pointer',padding:'14px 16px',display:'flex',alignItems:'center',gap:14}}>
+                      <div style={{width:44,height:44,borderRadius:12,background:'#7c3aed20',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+                      </div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:2}}>
+                          <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>{d.companyName}</span>
+                          <Pill color="#7c3aed" bg="#f5f3ff">LP</Pill>
+                        </div>
+                        <p style={{fontSize:12,color:'#9ca3af'}}>{d.source?.name && d.source.name !== 'AngelList' ? d.source.name : 'Fund investment'}</p>
+                      </div>
+                      <div style={{textAlign:'right',flexShrink:0}}>
+                        <p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{fmtC(cb)}</p>
+                        <p style={{fontSize:12,color:'#9ca3af'}}>LP position</p>
+                      </div>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
           {fWatching.length > 0 && (
