@@ -2276,24 +2276,22 @@ export default function App() {
   const portfolio = deals.filter(d => d.status === 'invested' && !d.isFund);
   const allInvested = deals.filter(d => d.status === 'invested');
   const ph = calcPortHealth(deals);
-  const totalDep = portfolio.reduce((s, d) => s + getCB(d.investment || {}), 0);
 
-  // Split into live (still active) and realized (exited/written down)
-  const liveDeals = portfolio.filter(d => !(d.liquidityEvents || []).length && !d.source?.realized);
-  const realizedDeals = portfolio.filter(d => (d.liquidityEvents || []).length > 0);
+  // All invested including funds for financial totals
+  const totalDep = allInvested.reduce((s, d) => s + getCB(d.investment || {}), 0);
 
-  // Live implied value (unrealized marks)
-  const totalUnrealizedImp = portfolio.reduce((s, d) => {
+  // Live implied value (unrealized marks) — funds mark at cost
+  const totalUnrealizedImp = allInvested.reduce((s, d) => {
     const hasLiquidity = (d.liquidityEvents || []).length > 0;
     return s + (hasLiquidity ? 0 : calcIV(d));
   }, 0);
 
   // Realized proceeds (actual cash back from exits)
-  const totalProceeds = portfolio.reduce((s, d) =>
+  const totalProceeds = allInvested.reduce((s, d) =>
     (d.liquidityEvents || []).filter(e => e.type !== 'writedown').reduce((a, e) => a + (e.proceeds || 0), s), 0);
 
   // Realized losses (cost basis of writedowns with $0 back)
-  const totalWritedowns = portfolio.reduce((s, d) => {
+  const totalWritedowns = allInvested.reduce((s, d) => {
     const hasWritedown = (d.liquidityEvents || []).some(e => e.type === 'writedown');
     const hasExit = (d.liquidityEvents || []).some(e => e.type !== 'writedown' && (e.proceeds || 0) > 0);
     if (hasWritedown && !hasExit) return s + getCB(d.investment || {});
@@ -2405,7 +2403,7 @@ export default function App() {
           <div style={{background:'white',borderRadius:16,padding:20,marginBottom:16,border:'1px solid #e5e7eb'}}>
             <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
               <h2 style={{fontSize:15,fontWeight:700,color:'#111827'}}>Portfolio</h2>
-              <span style={{fontSize:12,color:'#9ca3af'}}>{portfolio.length} {portfolio.length === 1 ? 'company' : 'companies'}</span>
+              <span style={{fontSize:12,color:'#9ca3af'}}>{allInvested.length} {allInvested.length === 1 ? 'position' : 'positions'}</span>
             </div>
             {(() => {
               const statC = (v) => v > 0 ? '#10b981' : v < 0 ? '#ef4444' : '#9ca3af';
