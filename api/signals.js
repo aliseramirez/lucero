@@ -1,29 +1,52 @@
-// api/signals.js — Vercel serverless function
-// Proxies signal fetch to Anthropic API, keeping the API key server-side.
-// Deploy to Vercel: the ANTHROPIC_API_KEY env var is set in the Vercel dashboard.
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Vercel sometimes needs manual body parsing
-  let body = req.body;
-  if (typeof body === 'string') {
-    try { body = JSON.parse(body); } catch { body = {}; }
-  }
-  if (!body) body = {};
-
-  const { companyName, industry, website } = body;
+  const { companyName, website, stage, industry } = req.body;
 
   if (!companyName) {
-    return res.status(400).json({ error: 'companyName is required' });
+    return res.status(400).json({ error: 'companyName required' });
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
   }
+
+  const prompt = `You are an investment research assistant. Search for recent information about the company "${companyName}" (${industry || 'startup'}, ${stage || 'early stage'}${website ? `, website: ${website}` : ''}) and return a JSON object.
+
+Research tasks:
+1. Check if their website is active and what it currently says
+2. Find any recent news, press coverage, or announcements (last 12 months)
+3. Look for funding rounds, investor announcements, or valuation changes
+4. Find any revenue figures, growth metrics, or customer wins mentioned publicly
+5. Check for leadership changes, product launches, or pivots
+6. Look for any negative signals: layoffs, shutdowns, pivots away from core business
+
+Return ONLY valid JSON (no markdown):
+{
+  "websiteStatus": "active" | "down" | "changed" | "unknown",
+  "websiteSummary": "brief description of what site says now",
+  "signals": [
+    {
+      "type": "funding" | "revenue" | "product" | "partnership" | "team" | "news" | "risk",
+      "title": "short title",
+      "description": "1-2 sentence summary",
+      "sentiment": "positive" | "neutral" | "negative",
+      "date": "ISO date or approximate like 2024-06",
+      "source": "source name",
+      "url": "url or null"
+    }
+  ],
+  "summary": "2-3 sentence overall assessment of company trajectory",
+  "lastFundingRound": "e.g. Series A $10M - 2024 or null",
+  "estimatedRevenue": "e.g. $2M ARR or null",
+  "checkInRecommended": true | false,
+  "checkInReason": "specific reason or null"
+}
+
+If nothing found: return signals: [], summary: "No recent public signals found."`;
 
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -32,56 +55,30 @@ export default async function handler(req, res) {
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
-        'anthropic-beta': 'web-search-2025-03-05'
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 800,
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-        system: `Return ONLY a JSON array of 2-3 recent news signals about the company. No preamble, no markdown. Each object: {"title":"","description":"","type":"fundraising|hiring|product|partnership|press|growth","source":"","sourceUrl":"","date":"","sentiment":"positive|neutral|negative"}. If nothing found, return [].`,
-        messages: [{
-          role: 'user',
-          content: `Recent news (last 6 months) about ${companyName} (${industry || 'startup'}). JSON array only.`
-        }]
-      })
+        messages: [{ role: 'user', content: prompt }],
+      }),
     });
 
     if (!response.ok) {
       const err = await response.text();
-      console.error('Anthropic API error:', err);
-      return res.status(502).json({ error: err, signals: [] });
+      return res.status(response.status).json({ error: err });
     }
 
     const data = await response.json();
-
-    // Extract the final text block (after any tool-use blocks)
-    const textBlock = data.content?.find(b => b.type === 'text');
-    if (!textBlock) {
-      return res.status(200).json({ signals: [] });
+    const textBlock = data.content.filter(b => b.type === 'text').pop();
+    if (!textBlock?.text) {
+      return res.status(200).json({ signals: [], summary: 'No data returned.', websiteStatus: 'unknown' });
     }
 
-    const raw = textBlock.text.trim().replace(/```json|```/g, '').trim();
-
-    let signals = [];
-    try {
-      // First try direct parse
-      const parsed = JSON.parse(raw);
-      signals = Array.isArray(parsed) ? parsed : [];
-    } catch {
-      // If truncated, extract complete objects manually
-      try {
-        const matches = raw.match(/\{[^{}]*"title"[^{}]*"sentiment"[^{}]*\}/gs) || [];
-        signals = matches.map(m => { try { return JSON.parse(m); } catch { return null; } }).filter(Boolean);
-      } catch {
-        console.error('Failed to parse signals JSON:', raw.slice(0, 200));
-        signals = [];
-      }
-    }
-
-    return res.status(200).json({ signals });
-
-  } catch (err) {
-    console.error('Handler error:', err);
-    return res.status(500).json({ error: err.message, stack: err.stack, signals: [] });
+    const parsed = JSON.parse(textBlock.text.replace(/```json|```/g, '').trim());
+    return res.status(200).json(parsed);
+  } catch (e) {
+    console.error('Signals API error:', e);
+    return res.status(500).json({ error: e.message });
   }
 }
