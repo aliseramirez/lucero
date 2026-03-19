@@ -1557,14 +1557,6 @@ const TimeStamp = ({ label, date, warning }) => (
 );
 
 // Document Links Section
-const DOC_TYPES = [
-  { value: 'safe', label: 'SAFE', icon: '📄', color: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
-  { value: 'equity', label: 'Equity Doc', icon: '📋', color: 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
-  { value: 'tax', label: 'Tax Form', icon: '🧾', color: 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400' },
-  { value: 'cap-table', label: 'Cap Table', icon: '📊', color: 'bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' },
-  { value: 'update', label: 'Investor Update', icon: '📬', color: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' },
-  { value: 'other', label: 'Other', icon: '🔗', color: 'bg-stone-100 text-stone-600 dark:bg-stone-700 dark:text-stone-400' },
-];
 // Invested View - Clean confirmation design
 const WatchingView = ({ deal, onUpdate, setToast }) => {
   const [showDecisionLog, setShowDecisionLog] = useState(true);
