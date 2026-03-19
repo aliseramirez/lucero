@@ -1808,9 +1808,11 @@ function ImportModal({ onClose, onImport }) {
 
   const parseCSV = (text) => {
     const lines = text.trim().split('\n');
-    if (lines.length < 2) return [];
-    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, '').toLowerCase());
-    return lines.slice(1).map(line => {
+    // AngelList CSV has a disclaimer on row 1 — find the actual header row
+    const headerIdx = lines.findIndex(l => l.includes('Company/Fund') || l.includes('company/fund'));
+    if (headerIdx === -1) return null;
+    const headers = lines[headerIdx].split(',').map(h => h.trim().replace(/"/g, '').toLowerCase());
+    return lines.slice(headerIdx + 1).map(line => {
       const cols = []; let cur = '', inQ = false;
       for (const ch of line) {
         if (ch === '"') inQ = !inQ;
@@ -1821,25 +1823,41 @@ function ImportModal({ onClose, onImport }) {
       const row = {};
       headers.forEach((h, i) => { row[h] = (cols[i] || '').replace(/^"|"$/g, '').trim(); });
       return row;
-    }).filter(r => r['company'] || r['company name']);
+    }).filter(r => r['company/fund'] && r['company/fund'].length > 0);
+  };
+
+  const parseMoney = (val) => {
+    if (!val || val === 'Locked' || val === '$0') return 0;
+    return parseFloat(val.replace(/[$,\s]/g, '')) || 0;
   };
 
   const rowToDeal = (row) => {
-    const name = row['company'] || row['company name'] || '';
-    const amountRaw = (row['invested amount'] || row['amount'] || '').replace(/[$,\s]/g, '');
-    const amount = parseFloat(amountRaw) || 0;
-    const dateRaw = row['investment date'] || row['date'] || '';
+    const name = row['company/fund'] || '';
+    const amount = parseMoney(row['invested']);
+    const unrealized = parseMoney(row['unrealized value']);
+    const realized = parseMoney(row['realized value']);
+    const multiple = parseFloat(row['multiple']) || null;
+    const dateRaw = row['invest date'] || '';
     const date = dateRaw ? new Date(dateRaw).toISOString() : new Date().toISOString();
-    const round = (row['round'] || row['investment type'] || '').toLowerCase();
-    const market = row['market'] || row['industry'] || 'Other';
-    const note = row['note'] || '';
+    const round = (row['round'] || '').toLowerCase();
+    const invType = (row['investment type'] || '').toLowerCase();
+    const market = row['market'] || 'Other';
+    const instrument = (row['instrument'] || '').toLowerCase();
+    const isRealized = (row['status'] || '').toLowerCase() === 'realized';
+    const capRaw = parseMoney(row['valuation or cap']);
+    const discount = parseFloat((row['discount'] || '').replace('%', '')) || 0;
     const stageMap = {
       'pre-seed': 'pre-seed', 'preseed': 'pre-seed', 'seed': 'seed',
       'series a': 'series-a', 'series b': 'series-b', 'series c': 'series-c',
+      'series d': 'series-c', 'series e': 'series-c', 'series f': 'series-c',
       'growth': 'growth', 'late': 'growth', 'spv': 'seed',
-      'rolling fund': 'seed', 'syndicate': 'seed',
+      'rolling fund': 'seed', 'syndicate': 'seed', 'fund': 'seed',
     };
-    return {
+    const vehicle = instrument.includes('safe') ? 'SAFE'
+      : instrument.includes('note') ? 'Convertible Note'
+      : invType === 'fund' ? 'Fund'
+      : 'Equity';
+    const deal = {
       id: genId(),
       companyName: name,
       status: 'invested',
@@ -1847,7 +1865,7 @@ function ImportModal({ onClose, onImport }) {
       industry: market,
       website: null,
       founders: [],
-      coInvestors: [],
+      coInvestors: row['lead'] ? [{ id: genId(), name: row['lead'], role: 'lead', fund: row['lead'] }] : [],
       liquidityEvents: [],
       documents: [],
       monitoring: { healthStatus: 'stable', fundraisingStatus: 'not-raising' },
@@ -1855,18 +1873,35 @@ function ImportModal({ onClose, onImport }) {
       metricsToWatch: [],
       metricsLog: {},
       revenueLog: [],
-      notesLog: note ? [{ id: genId(), text: note, date }] : [],
-      memo: note || '',
+      notesLog: [],
+      memo: '',
       founderUpdates: [],
       createdAt: date,
       statusEnteredAt: date,
       investment: {
-        amount, costBasis: amount,
-        vehicle: round.includes('safe') ? 'SAFE' : round.includes('note') ? 'Convertible Note' : 'Equity',
-        date, lastUpdateReceived: date,
+        amount, costBasis: amount, vehicle, date,
+        lastUpdateReceived: date,
+        ...(capRaw > 0 ? { impliedValuation: capRaw } : {}),
+        ...(discount > 0 ? { discount } : {}),
+        ...(multiple && multiple > 0 && multiple !== 1 ? {
+          impliedValue: Math.round(amount * multiple),
+          lastValuationDate: date,
+        } : {}),
       },
       source: { type: 'angellist', name: row['lead'] || 'AngelList' },
+      terms: {
+        instrument: vehicle,
+        ...(capRaw > 0 ? { cap: capRaw } : {}),
+        ...(discount > 0 ? { discount } : {}),
+        capType: row['valuation or cap type'] || '',
+      },
     };
+    if (isRealized && realized > 0) {
+      deal.liquidityEvents = [{ id: genId(), type: 'exit', date, proceeds: realized, notes: 'Imported from AngelList' }];
+    } else if (isRealized) {
+      deal.liquidityEvents = [{ id: genId(), type: 'writedown', date, writedownAmount: amount, proceeds: 0, notes: 'Realized $0 — imported from AngelList' }];
+    }
+    return deal;
   };
 
   const handleFile = (e) => {
@@ -1877,7 +1912,8 @@ function ImportModal({ onClose, onImport }) {
     reader.onload = (ev) => {
       try {
         const parsed = parseCSV(ev.target.result);
-        if (!parsed.length) { setError("No investments found. Make sure this is an AngelList portfolio export."); return; }
+        if (!parsed) { setError("Couldn't find the header row. Make sure this is an AngelList portfolio export."); return; }
+        if (!parsed.length) { setError("No investments found in this file."); return; }
         setRows(parsed.map(r => ({ raw: r, deal: rowToDeal(r), selected: true })));
         setStage('preview');
         setError('');
@@ -1897,6 +1933,8 @@ function ImportModal({ onClose, onImport }) {
   };
 
   const selected = rows.filter(r => r.selected).length;
+  const liveCount = rows.filter(r => r.selected && (r.raw['status'] || '').toLowerCase() === 'live').length;
+  const realizedCount = rows.filter(r => r.selected && (r.raw['status'] || '').toLowerCase() === 'realized').length;
   const btn = { padding: '10px 20px', borderRadius: 12, fontSize: 14, fontWeight: 600, cursor: 'pointer', border: 'none' };
 
   return (
@@ -1945,7 +1983,10 @@ function ImportModal({ onClose, onImport }) {
           {stage === 'preview' && (
             <div style={{display:'flex',flexDirection:'column',gap:14}}>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                <p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{selected} of {rows.length} selected</p>
+                <div>
+                  <p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{selected} of {rows.length} selected</p>
+                  <p style={{fontSize:12,color:'#9ca3af',marginTop:2}}>{liveCount} live · {realizedCount} realized/exited</p>
+                </div>
                 <button
                   onClick={() => setRows(r => r.map(x => ({ ...x, selected: !rows.every(r => r.selected) })))}
                   style={{fontSize:12,color:'#5B6DC4',background:'none',border:'none',cursor:'pointer'}}
@@ -1954,22 +1995,28 @@ function ImportModal({ onClose, onImport }) {
                 </button>
               </div>
               <div style={{display:'flex',flexDirection:'column',gap:8}}>
-                {rows.map((r, i) => (
-                  <div
-                    key={i}
-                    onClick={() => setRows(prev => prev.map((x, j) => j === i ? { ...x, selected: !x.selected } : x))}
-                    style={{display:'flex',alignItems:'center',gap:12,padding:'10px 14px',borderRadius:12,border:`1.5px solid ${r.selected ? '#5B6DC4' : '#e5e7eb'}`,background:r.selected ? '#f5f7ff' : 'white',cursor:'pointer'}}
-                  >
-                    <div style={{width:18,height:18,borderRadius:5,border:`2px solid ${r.selected ? '#5B6DC4' : '#d1d5db'}`,background:r.selected ? '#5B6DC4' : 'white',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                      {r.selected && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+                {rows.map((r, i) => {
+                  const isLive = (r.raw['status'] || '').toLowerCase() === 'live';
+                  const amt = parseMoney(r.raw['invested']);
+                  return (
+                    <div
+                      key={i}
+                      onClick={() => setRows(prev => prev.map((x, j) => j === i ? { ...x, selected: !x.selected } : x))}
+                      style={{display:'flex',alignItems:'center',gap:12,padding:'10px 14px',borderRadius:12,border:`1.5px solid ${r.selected ? '#5B6DC4' : '#e5e7eb'}`,background:r.selected ? '#f5f7ff' : 'white',cursor:'pointer'}}
+                    >
+                      <div style={{width:18,height:18,borderRadius:5,border:`2px solid ${r.selected ? '#5B6DC4' : '#d1d5db'}`,background:r.selected ? '#5B6DC4' : 'white',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                        {r.selected && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+                      </div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <p style={{fontWeight:600,fontSize:13,color:'#111827',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.deal.companyName}</p>
+                        <p style={{fontSize:12,color:'#6b7280'}}>{r.deal.stage}{r.deal.industry !== 'Other' ? ` · ${r.deal.industry}` : ''}{amt > 0 ? ` · ${fmtC(amt)}` : ''}</p>
+                      </div>
+                      <span style={{fontSize:11,padding:'2px 8px',borderRadius:99,background:isLive?'#ecfdf5':'#f3f4f6',color:isLive?'#059669':'#6b7280',fontWeight:500,flexShrink:0}}>
+                        {isLive ? 'Live' : 'Realized'}
+                      </span>
                     </div>
-                    <div style={{flex:1,minWidth:0}}>
-                      <p style={{fontWeight:600,fontSize:13,color:'#111827',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.deal.companyName}</p>
-                      <p style={{fontSize:12,color:'#6b7280'}}>{r.deal.stage} · {r.deal.industry}{r.deal.investment.amount > 0 ? ` · ${fmtC(r.deal.investment.amount)}` : ''}</p>
-                    </div>
-                    <span style={{fontSize:11,padding:'2px 8px',borderRadius:99,background:'#ecfdf5',color:'#059669',fontWeight:500,flexShrink:0}}>invested</span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
