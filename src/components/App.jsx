@@ -1837,6 +1837,7 @@ function ImportModal({ onClose, onImport }) {
   const [rows, setRows] = useState([]);
   const [error, setError] = useState('');
   const [progress, setProgress] = useState(0);
+  const [importSummary, setImportSummary] = useState({ updated: 0, added: 0 });
   const fileRef = useRef(null);
 
   const parseCSV = (text) => {
@@ -1960,10 +1961,15 @@ function ImportModal({ onClose, onImport }) {
   const handleImport = async () => {
     const toImport = rows.filter(r => r.selected).map(r => r.deal);
     setStage('importing');
+    let updated = 0, added = 0;
     for (let i = 0; i < toImport.length; i++) {
-      await onImport(toImport[i]);
+      const d = toImport[i];
+      const isExisting = deals.find(x => x.companyName.toLowerCase() === d.companyName.toLowerCase());
+      if (isExisting) updated++; else added++;
+      await onImport(d, true);
       setProgress(Math.round(((i + 1) / toImport.length) * 100));
     }
+    setImportSummary({ updated, added });
     setStage('done');
   };
 
@@ -2072,8 +2078,11 @@ function ImportModal({ onClose, onImport }) {
               <div style={{width:56,height:56,background:'#ecfdf5',borderRadius:99,display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 16px'}}>
                 <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
               </div>
-              <p style={{fontWeight:700,fontSize:16,color:'#111827',marginBottom:6}}>{selected} investments imported</p>
-              <p style={{fontSize:13,color:'#6b7280',marginBottom:24}}>Your AngelList portfolio is in Lucero. Add more details to each company from its deal page.</p>
+              <p style={{fontWeight:700,fontSize:16,color:'#111827',marginBottom:6}}>{selected} investments synced</p>
+              <div style={{display:'flex',justifyContent:'center',gap:16,marginBottom:20}}>
+                {importSummary.added > 0 && <p style={{fontSize:13,color:'#10b981'}}>✦ {importSummary.added} new</p>}
+                {importSummary.updated > 0 && <p style={{fontSize:13,color:'#5B6DC4'}}>↻ {importSummary.updated} updated</p>}
+              </div>
               <button onClick={onClose} style={{...btn, background:'#5B6DC4', color:'white', width:'100%'}}>View Portfolio</button>
             </div>
           )}
@@ -2120,7 +2129,22 @@ export default function App() {
         if (!mounted) return;
         if (error) { console.warn('Load error:', error.message); setDealsReady(true); return; }
         if (data && data.length > 0) {
-          setDeals(data.map(row => ({ ...row.data, id: row.id })));
+          setDeals(data.map(row => {
+            const d = { ...row.data, id: row.id };
+            // Compute isFund at runtime for existing deals that predate the flag
+            if (!('isFund' in d)) {
+              const name = (d.companyName || '').toLowerCase();
+              const src = (d.source?.name || '').toLowerCase();
+              const vehicle = (d.investment?.vehicle || '').toLowerCase();
+              d.isFund = vehicle === 'fund'
+                || name.includes('ventures')
+                || name.includes(' fund')
+                || name.includes('capital')
+                || name.includes('partners')
+                || src.includes('fund');
+            }
+            return d;
+          }));
           setDealsReady(true);
         } else {
           // New user — seed demo deals then show them
@@ -2162,7 +2186,21 @@ export default function App() {
     else setToast('Company removed');
   };
 
-  const addDeal = async (d) => {
+  const addDeal = async (d, upsert = false) => {
+    // In upsert mode: check if a deal with same company name already exists
+    if (upsert) {
+      const existing = deals.find(x => x.companyName.toLowerCase() === d.companyName.toLowerCase());
+      if (existing) {
+        // Replace existing deal with fresh imported data, keep same id
+        const merged = { ...d, id: existing.id };
+        setDeals(prev => prev.map(x => x.id === existing.id ? merged : x));
+        const { id, ...dealData } = merged;
+        await supabase.from('deals')
+          .update({ data: dealData, company_name: merged.companyName, status: merged.status })
+          .eq('id', id).eq('user_id', user.id);
+        return;
+      }
+    }
     setDeals(prev => [d, ...prev]);
     setToast(`${d.companyName} added`);
     const { id, ...dealData } = d;
