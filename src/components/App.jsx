@@ -1204,307 +1204,328 @@ const SignalsSection = ({ deal, onUpdate }) => {
 
 // ── INVESTMENT MEMO ───────────────────────────────────────────────────────────
 // Written once at the moment of decision. The thesis. Editable anytime.
-const InvestmentMemo = ({deal, onUpdate, setToast}) => {
-  const isWatching = deal.status === 'watching';
-  const label = isWatching ? 'Why I am watching' : 'Investment memo';
-  const placeholder = isWatching
-    ? 'Why are you watching this company? What would move you to invest? What risks are you tracking?'
-    : 'Why did you invest? What is your thesis? What are the key risks? What would make this a winner?';
-  const memo = deal.memo || '';
-  const [editing, setEditing] = useState(!memo);
-  const [draft, setDraft] = useState(memo);
-  const [open, setOpen] = useState(false);
-
-  const save = () => {
-    onUpdate({...deal, memo:draft.trim()});
-    setEditing(false);
-    setToast('Memo saved');
-  };
-
-  return (
-    <div style={{background:'white',borderRadius:16,overflow:'hidden',marginBottom:12}}>
-      <button onClick={()=>setOpen(v=>!v)} style={{width:'100%',padding:'14px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'none',border:'none',cursor:'pointer'}}>
-        <div style={{display:'flex',alignItems:'center',gap:8}}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-          <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>{label}</span>
-        </div>
-        <div style={{display:'flex',alignItems:'center',gap:8}}>
-          {memo&&!editing&&open&&<button onClick={e=>{e.stopPropagation();setDraft(memo);setEditing(true);}} style={{fontSize:12,color:'#5B6DC4',background:'none',border:'none',cursor:'pointer',padding:'2px 8px'}}>Edit</button>}
-          {!memo&&<span style={{fontSize:12,color:'#9ca3af'}}>Not written yet</span>}
-          <span style={{color:'#9ca3af',fontSize:11}}>{open?'▲':'▼'}</span>
-        </div>
-      </button>
-      {open&&<div style={{padding:'0 20px 20px',borderTop:'1px solid #f3f4f6'}}>
-        {editing?(
-          <div style={{paddingTop:14}}>
-            <textarea value={draft} onChange={e=>setDraft(e.target.value)} placeholder={placeholder} rows={6}
-              style={{width:'100%',padding:'10px 12px',border:'1px solid #5B6DC4',borderRadius:12,fontSize:13,resize:'vertical',outline:'none',boxSizing:'border-box',fontFamily:'inherit',lineHeight:1.7}}
-              autoFocus/>
-            <div style={{display:'flex',gap:8,marginTop:8}}>
-              <button onClick={save} disabled={draft.trim().length<5} style={{flex:1,padding:'8px',background:'#5B6DC4',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',opacity:draft.trim().length>=5?1:.4}}>Save memo</button>
-              {memo&&<button onClick={()=>setEditing(false)} style={{padding:'8px 14px',background:'none',border:'none',color:'#6b7280',fontSize:13,cursor:'pointer'}}>Cancel</button>}
-            </div>
-          </div>
-        ):memo?(
-          <p style={{fontSize:13,color:'#374151',lineHeight:1.8,whiteSpace:'pre-wrap',paddingTop:12}}>{memo}</p>
-        ):null}
-      </div>}
-    </div>
-  );
-};
-
-// ── FOUNDER UPDATES ───────────────────────────────────────────────────────────
-// Recurring log of founder communications. Paste text or upload file.
-// Signal extraction runs on each entry and surfaces tags.
-const FounderUpdates = ({deal, onUpdate, setToast, inv={}, overdue=false, dUntilNext=null, dSinceUpd=null}) => {
+// ── PRIMARY INSIGHT ───────────────────────────────────────────────────────────
+// The most valuable section. Paste founder emails, call notes, or upload docs.
+// Claude extracts structured insights — confirm before saving to deal.
+const PrimaryInsight = ({ deal, onUpdate, setToast }) => {
   const [open, setOpen] = useState(true);
-  const [adding, setAdding] = useState(false);
+  const [inputMode, setInputMode] = useState(null); // null | 'text' | 'file'
   const [draft, setDraft] = useState('');
-  const [fileInfo, setFileInfo] = useState(null); // {name, type}
-  const fileRef = useState(null);
+  const [extracting, setExtracting] = useState(false);
+  const [extracted, setExtracted] = useState(null); // pending confirmation
+  const [approved, setApproved] = useState({}); // which items user approved
+  const fileRef = useRef(null);
+  const updates = (deal.founderUpdates || []).sort((a,b) => new Date(b.date) - new Date(a.date));
 
-  const [editingId, setEditingId] = useState(null);
-  const [editDraft, setEditDraft] = useState('');
-  const updates = (deal.founderUpdates||[]).sort((a,b)=>new Date(b.date)-new Date(a.date));
-
-  const deleteUpdate = (id) => onUpdate({...deal, founderUpdates:(deal.founderUpdates||[]).filter(u=>u.id!==id)});
-
-  const saveEdit = (id) => {
-    const now = new Date().toISOString();
-    const sigs = parseNote(editDraft.trim(), now);
-    onUpdate({...deal, founderUpdates:(deal.founderUpdates||[]).map(u=>
-      u.id===id ? {...u, content:editDraft.trim(), signals:sigs.map(s=>s.type), editedAt:now} : u
-    )});
-    setEditingId(null); setEditDraft('');
-  };
-
-  const addText = () => {
-    if(draft.trim().length < 5) return;
-    const now = new Date().toISOString();
-    const sigs = parseNote(draft.trim(), now);
-    const entry = {id:genId(), type:'text', content:draft.trim(), date:now, signals:sigs.map(s=>s.type)};
-    onUpdate({...deal,
-      founderUpdates:[...(deal.founderUpdates||[]), entry],
-      investment:{...inv, lastUpdateReceived:now}
-    });
-    setDraft(''); setAdding(false);
-    const hasFundingSig = sigs.some(s=>s.type==='funding_signal');
-    if (hasFundingSig && deal.monitoring?.fundraisingStatus !== 'raising') {
-      setToast('Funding signal detected — consider adding an active raise entry');
-    } else {
-      setToast(sigs.length ? `Update logged · ${sigs.length} signal${sigs.length>1?'s':''} detected` : 'Update logged');
+  const extract = async (content) => {
+    if (!content?.trim()) return;
+    setExtracting(true);
+    setInputMode(null);
+    try {
+      const resp = await fetch('/api/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content,
+          dealName: deal.companyName,
+          existingData: { revenueLog: deal.revenueLog, fundraiseHistory: deal.fundraiseHistory },
+        }),
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const result = await resp.json();
+      // Pre-approve all findings
+      const initial = {};
+      (result.revenuePoints||[]).forEach((_,i) => initial[`rev_${i}`] = true);
+      (result.fundingSignals||[]).forEach((_,i) => initial[`fund_${i}`] = true);
+      (result.risks||[]).forEach((_,i) => initial[`risk_${i}`] = true);
+      (result.positives||[]).forEach((_,i) => initial[`pos_${i}`] = true);
+      (result.teamChanges||[]).forEach((_,i) => initial[`team_${i}`] = true);
+      setExtracted({ ...result, rawContent: content });
+      setApproved(initial);
+    } catch (e) {
+      setToast('Extraction failed — saved as plain note');
+      saveRaw(content);
+    } finally {
+      setExtracting(false);
     }
   };
 
-  const addFile = (file) => {
-    if(!file) return;
+  const saveRaw = (content) => {
+    const entry = { id: genId(), type: 'text', content, date: new Date().toISOString() };
+    onUpdate({ ...deal, founderUpdates: [...(deal.founderUpdates||[]), entry] });
+    setDraft('');
+  };
+
+  const confirmExtracted = () => {
+    if (!extracted) return;
+    let updated = { ...deal };
     const now = new Date().toISOString();
-    const entry = {id:genId(), type:'file', fileName:file.name, fileType:file.type, date:now, signals:[]};
-    onUpdate({...deal,
-      founderUpdates:[...(deal.founderUpdates||[]), entry],
-      investment:{...inv, lastUpdateReceived:now}
+
+    // Save raw entry
+    const entry = { id: genId(), type: 'text', content: extracted.rawContent, date: now,
+      sentiment: extracted.sentiment, keyTakeaway: extracted.keyTakeaway };
+    updated.founderUpdates = [...(updated.founderUpdates||[]), entry];
+    updated.investment = { ...(updated.investment||{}), lastUpdateReceived: now };
+
+    // Apply approved revenue points
+    (extracted.revenuePoints||[]).forEach((r, i) => {
+      if (!approved[`rev_${i}`]) return;
+      const date = r.date ? new Date(r.date).toISOString() : now;
+      const existingDates = new Set((updated.revenueLog||[]).map(x => x.date?.substring(0,7)));
+      if (existingDates.has(date.substring(0,7))) return;
+      updated.revenueLog = [...(updated.revenueLog||[]),
+        { id: genId(), date, metric: r.metric, value: r.value, numericValue: r.numericValue, source: 'Founder update', fromPrimary: true }
+      ].sort((a,b) => new Date(a.date)-new Date(b.date));
     });
-    setFileInfo(null); setAdding(false);
-    setToast(`${file.name} uploaded`);
+
+    // Apply approved funding signals
+    (extracted.fundingSignals||[]).forEach((f, i) => {
+      if (!approved[`fund_${i}`]) return;
+      if (f.type === 'active_raise' || f.type === 'exploring') {
+        updated.activeRaise = {
+          roundName: f.roundName || '',
+          targetAmount: f.amount || null,
+          leadInvestor: f.leadInvestor || '',
+          leadStatus: f.leadInvestor ? 'rumored' : 'none',
+          participants: (f.participants||[]).join(', '),
+          timeline: f.timeline || '',
+          dilutionPct: '20',
+        };
+        updated.monitoring = { ...(updated.monitoring||{}), fundraisingStatus: 'raising' };
+      } else if (f.type === 'closed_round') {
+        const round = {
+          id: genId(), roundName: f.roundName||'Unknown round', date: now,
+          amountRaised: f.amount||null, leadInvestor: f.leadInvestor||null,
+          followOns: f.participants||[], source: 'Founder update', fromPrimary: true,
+        };
+        updated.fundraiseHistory = [...(updated.fundraiseHistory||[]), round];
+      }
+    });
+
+    // Apply risks + positives + team changes as milestones
+    const newMilestones = [];
+    const existing = new Set((updated.milestones||[]).map(m => m.title));
+    (extracted.risks||[]).forEach((r, i) => {
+      if (!approved[`risk_${i}`] || existing.has(r.title)) return;
+      newMilestones.push({ id: genId(), type: 'update', title: r.title, description: r.description,
+        date: now, sentiment: 'negative', fromPrimary: true });
+    });
+    (extracted.positives||[]).forEach((p, i) => {
+      if (!approved[`pos_${i}`] || existing.has(p.title)) return;
+      newMilestones.push({ id: genId(), type: 'update', title: p.title, description: p.description,
+        date: now, sentiment: 'positive', fromPrimary: true });
+    });
+    (extracted.teamChanges||[]).forEach((t, i) => {
+      if (!approved[`team_${i}`] || existing.has(t.title)) return;
+      newMilestones.push({ id: genId(), type: 'update', title: `${t.type === 'hire' ? 'New hire' : t.type === 'departure' ? 'Departure' : 'Promotion'}: ${t.role}`,
+        description: t.description, date: now, sentiment: t.type === 'departure' ? 'negative' : 'positive', fromPrimary: true });
+    });
+    if (newMilestones.length) updated.milestones = [...(updated.milestones||[]), ...newMilestones];
+
+    onUpdate(updated);
+    setExtracted(null);
+    setApproved({});
+    setDraft('');
+    setToast('Primary insight saved');
   };
 
-  const SIG_COLORS = {
-    funding_signal:{l:'Funding',c:'#5B6DC4',bg:'#FFFBEC'},
-    hardware_milestone:{l:'Milestone',c:'#f59e0b',bg:'#fffbeb'},
-    offtake:{l:'Customer',c:'#10b981',bg:'#f0fdf4'},
-    team_risk:{l:'Team risk',c:'#ef4444',bg:'#fef2f2'},
-    policy_risk:{l:'Policy risk',c:'#ef4444',bg:'#fef2f2'},
-    policy_positive:{l:'Policy',c:'#10b981',bg:'#f0fdf4'},
-    risk:{l:'Risk',c:'#f59e0b',bg:'#fffbeb'},
-  };
+  const toggle = (key) => setApproved(prev => ({ ...prev, [key]: !prev[key] }));
 
-  // Detect if any update mentions revenue/traction — prompt to log metric
-  const hasRevenueSignal = updates.some(u => u.type==='text' && /revenue|arr|mrr|\$\d|million|customers|users/i.test(u.content));
-  const hasRecentMetric = (deal.metricsToWatch||[]).some(m=>(deal.metricsLog||{})[m]?.some(e=>dAgo(e.date)<=90));
-  const hasRecentRevenue = (deal.revenueLog||[]).some(e=>dAgo(e.date)<=90);
-  const showMetricPrompt = hasRevenueSignal && !hasRecentMetric && !hasRecentRevenue;
-  const hasFundingUpdate = updates.some(u => u.type==='text' && u.signals?.includes('funding_signal'));
+  const sentColor = { positive: '#10b981', negative: '#ef4444', neutral: '#9ca3af', mixed: '#f59e0b' };
 
   return (
-    <div style={{background:'white',borderRadius:16,overflow:'hidden',marginBottom:12}}>
-      {overdue&&<div style={{padding:'9px 16px',background:'#fffbeb',borderBottom:'1px solid #fde68a',display:'flex',gap:8,alignItems:'center'}}>
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        <p style={{fontSize:12,color:'#92400e'}}>Founder update overdue by {Math.abs(dUntilNext)} days</p>
-      </div>}
-      <button onClick={()=>setOpen(v=>!v)} style={{width:'100%',padding:'14px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'none',border:'none',cursor:'pointer'}}>
-        <div style={{display:'flex',alignItems:'center',gap:8}}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-          <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Founder updates</span>
-          {updates.length>0&&<span style={{fontSize:12,color:'#9ca3af'}}>({updates.length})</span>}
-          
+    <div style={{ background: 'white', borderRadius: 16, overflow: 'hidden', marginBottom: 12 }}>
+      <button onClick={() => setOpen(v => !v)}
+        style={{ width: '100%', padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'none', border: 'none', cursor: 'pointer' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>Primary Insight</span>
+          <span style={{ fontSize: 11, color: '#9ca3af' }}>founder updates · call notes · emails</span>
+          {updates.length > 0 && <span style={{ fontSize: 12, color: '#9ca3af' }}>({updates.length})</span>}
         </div>
-        <span style={{color:'#9ca3af',fontSize:11}}>{open?'▲':'▼'}</span>
+        <span style={{ color: '#9ca3af', fontSize: 11 }}>{open ? '▲' : '▼'}</span>
       </button>
 
-      {open&&<div style={{padding:'0 20px 20px',borderTop:'1px solid #f3f4f6'}}>
-        {/* Prompts */}
-        {showMetricPrompt&&<div style={{margin:'12px 0',padding:'10px 14px',background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:12,display:'flex',gap:10,alignItems:'center'}}>
-          <span style={{fontSize:14}}>📊</span>
-          <p style={{fontSize:13,color:'#166534',flex:1}}>A recent update mentions revenue or customers — log a metric reading to track progress</p>
-        </div>}
-        {hasFundingUpdate&&deal.monitoring?.fundraisingStatus!=='raising'&&<div style={{margin:'12px 0',padding:'10px 14px',background:'#FFFBEC',border:'1px solid #c7d2fe',borderRadius:12,display:'flex',gap:10,alignItems:'center'}}>
-          <span style={{fontSize:14}}>💰</span>
-          <p style={{fontSize:13,color:'#5B6DC4',flex:1}}>A recent update mentions a fundraise — add an active raise entry to track dilution</p>
-        </div>}
+      {open && <div style={{ padding: '0 20px 20px', borderTop: '1px solid #f3f4f6' }}>
 
-        {/* Update entries */}
-        {updates.length===0&&!adding&&<p style={{fontSize:13,color:'#9ca3af',textAlign:'center',padding:'12px 0'}}>No updates yet — paste a founder email or upload a PDF</p>}
-          {updates.map((u,i)=>{
-          const sigs = u.type==='text' ? parseNote(u.content, u.date) : [];
-          const hasNeg = sigs.some(s=>s.sentiment==='negative');
-          const isEditing = editingId === u.id;
-          return (
-            <div key={u.id} style={{paddingTop:12,marginTop:i===0?4:0,borderTop:i===0?'none':'1px solid #f3f4f6'}}>
-              {u.type==='file'?(
-                <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',background:'#f9fafb',borderRadius:10}}>
-                  <span style={{fontSize:16}}>{u.fileType?.includes('pdf')?'📄':'📝'}</span>
-                  <div style={{flex:1,minWidth:0}}>
-                    <p style={{fontSize:13,fontWeight:500,color:'#374151',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{u.fileName}</p>
-                    <p style={{fontSize:11,color:'#9ca3af',marginTop:2}}>{new Date(u.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</p>
-                  </div>
-                  <button onClick={()=>deleteUpdate(u.id)} style={{color:'#d1d5db',background:'none',border:'none',cursor:'pointer',padding:4}}>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
-                  </button>
-                </div>
-              ):isEditing?(
-                <div>
-                  <textarea value={editDraft} onChange={e=>setEditDraft(e.target.value)} rows={4}
-                    style={{width:'100%',padding:'10px 12px',border:'1px solid #5B6DC4',borderRadius:12,fontSize:13,resize:'none',outline:'none',boxSizing:'border-box',fontFamily:'inherit',lineHeight:1.6}}
-                    autoFocus/>
-                  <div style={{display:'flex',gap:8,marginTop:8}}>
-                    <button onClick={()=>saveEdit(u.id)} disabled={editDraft.trim().length<5} style={{flex:1,padding:'7px',background:'#5B6DC4',color:'white',border:'none',borderRadius:9,fontWeight:600,fontSize:13,cursor:'pointer',opacity:editDraft.trim().length>=5?1:.4}}>Save</button>
-                    <button onClick={()=>setEditingId(null)} style={{padding:'7px 12px',background:'none',border:'none',color:'#6b7280',fontSize:13,cursor:'pointer'}}>Cancel</button>
-                  </div>
-                </div>
-              ):(
-                <div>
-                  <p style={{fontSize:13,color:'#374151',lineHeight:1.7}}>{u.content}</p>
-                  <div style={{display:'flex',alignItems:'center',gap:8,marginTop:6,flexWrap:'wrap'}}>
-                    <span style={{fontSize:11,color:'#9ca3af'}}>{new Date(u.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}{u.editedAt&&<span style={{color:'#d1d5db'}}> · edited</span>}</span>
-                    {sigs.map((s,si)=>{
-                      const cfg=SIG_COLORS[s.type]||{l:s.type,c:'#78716c',bg:'#f5f5f4'};
-                      return <span key={si} style={{fontSize:10,fontWeight:700,color:cfg.c,background:cfg.bg,padding:'2px 7px',borderRadius:99}}>{cfg.l}</span>;
-                    })}
-                    {hasNeg&&<span style={{fontSize:10,color:'#ef4444',fontWeight:600}}>⚠ needs attention</span>}
-                    <div style={{marginLeft:'auto',display:'flex',gap:6}}>
-                      <button onClick={()=>{setEditingId(u.id);setEditDraft(u.content);}} style={{fontSize:11,color:'#9ca3af',background:'none',border:'none',cursor:'pointer',padding:0}}>Edit</button>
-                      <button onClick={()=>deleteUpdate(u.id)} style={{fontSize:11,color:'#d1d5db',background:'none',border:'none',cursor:'pointer',padding:0}}>Delete</button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        })}
+        {/* Input buttons */}
+        {!inputMode && !extracting && !extracted && (
+          <div style={{ display: 'flex', gap: 8, paddingTop: 14, marginBottom: updates.length ? 16 : 0 }}>
+            <button onClick={() => setInputMode('text')}
+              style={{ flex: 1, padding: '10px', background: '#eef2ff', color: '#5B6DC4', border: 'none', borderRadius: 10, fontWeight: 600, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              Paste update / notes
+            </button>
+            <button onClick={() => fileRef.current?.click()}
+              style={{ flex: 1, padding: '10px', background: '#f0fdf4', color: '#10b981', border: 'none', borderRadius: 10, fontWeight: 600, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              Upload file
+            </button>
+            <input ref={fileRef} type="file" accept=".txt,.pdf,.md,.eml" style={{ display: 'none' }}
+              onChange={e => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = ev => extract(ev.target.result);
+                reader.readAsText(file);
+                e.target.value = '';
+              }}/>
+          </div>
+        )}
 
-        {/* Add entry */}
-        {adding?(
-          <div style={{marginTop:14,paddingTop:14,borderTop:'1px solid #f3f4f6'}}>
-            <textarea value={draft} onChange={e=>setDraft(e.target.value)}
-              placeholder="Paste the founder email, quarterly update, or summarize what they shared..."
-              rows={5} style={{width:'100%',padding:'10px 12px',border:'1px solid #e5e7eb',borderRadius:12,fontSize:13,resize:'none',outline:'none',boxSizing:'border-box',fontFamily:'inherit',lineHeight:1.6}}
-              autoFocus/>
-            <div style={{display:'flex',alignItems:'center',gap:8,marginTop:10}}>
-              <button onClick={addText} disabled={draft.trim().length<5} style={{flex:1,padding:'8px',background:'#5B6DC4',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',opacity:draft.trim().length>=5?1:.4}}>Log update</button>
-              <span style={{fontSize:12,color:'#9ca3af'}}>or</span>
-              <label style={{padding:'8px 14px',border:'1px solid #e5e7eb',borderRadius:10,fontSize:13,color:'#374151',cursor:'pointer',background:'white',fontWeight:500}}>
-                Upload file
-                <input type="file" accept=".pdf,.doc,.docx" style={{display:'none'}} onChange={e=>{const f=e.target.files[0];if(f)addFile(f);}}/>
-              </label>
-              <button onClick={()=>{setAdding(false);setDraft('');}} style={{padding:'8px 12px',background:'none',border:'none',color:'#9ca3af',fontSize:13,cursor:'pointer'}}>Cancel</button>
+        {/* Text input */}
+        {inputMode === 'text' && (
+          <div style={{ paddingTop: 14 }}>
+            <textarea value={draft} onChange={e => setDraft(e.target.value)} autoFocus
+              placeholder={"Paste a founder email, call notes, or any update here...
+
+Claude will extract revenue figures, funding signals, risks, and key highlights for you to confirm."}
+              rows={8} style={{ width: '100%', padding: '10px 12px', border: '1px solid #5B6DC4', borderRadius: 12, fontSize: 13, resize: 'vertical', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit', lineHeight: 1.7 }}/>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <button onClick={() => extract(draft)} disabled={draft.trim().length < 10}
+                style={{ flex: 2, padding: '9px', background: '#5B6DC4', color: 'white', border: 'none', borderRadius: 10, fontWeight: 600, fontSize: 13, cursor: 'pointer', opacity: draft.trim().length >= 10 ? 1 : .4 }}>
+                Extract insights
+              </button>
+              <button onClick={() => saveRaw(draft)} disabled={draft.trim().length < 5}
+                style={{ flex: 1, padding: '9px', background: '#f3f4f6', color: '#6b7280', border: 'none', borderRadius: 10, fontWeight: 500, fontSize: 13, cursor: 'pointer', opacity: draft.trim().length >= 5 ? 1 : .4 }}>
+                Save as-is
+              </button>
+              <button onClick={() => { setInputMode(null); setDraft(''); }}
+                style={{ padding: '9px 14px', background: 'none', border: 'none', color: '#9ca3af', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
             </div>
           </div>
-        ):(
-          <button onClick={()=>setAdding(true)} style={{marginTop:12,background:'none',border:'none',color:'#5B6DC4',fontSize:13,fontWeight:500,cursor:'pointer',padding:0,display:'flex',alignItems:'center',gap:6}}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add founder update
-          </button>
+        )}
+
+        {/* Extracting spinner */}
+        {extracting && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '16px 0', color: '#6b7280' }}>
+            <div style={{ width: 16, height: 16, border: '2px solid #e5e7eb', borderTopColor: '#5B6DC4', borderRadius: '50%', animation: 'spin 0.8s linear infinite', flexShrink: 0 }}/>
+            <span style={{ fontSize: 13 }}>Extracting insights from update…</span>
+          </div>
+        )}
+
+        {/* Confirmation card */}
+        {extracted && !extracting && (
+          <div style={{ paddingTop: 14 }}>
+            {/* Key takeaway */}
+            <div style={{ background: '#f9fafb', borderRadius: 12, padding: '10px 14px', marginBottom: 14, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 99, background: sentColor[extracted.sentiment] || '#9ca3af', display: 'inline-block', marginTop: 4, flexShrink: 0 }}/>
+              <p style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, flex: 1 }}>{extracted.keyTakeaway || 'Update logged.'}</p>
+            </div>
+
+            {/* Extracted items to confirm */}
+            {[
+              ...(extracted.revenuePoints||[]).map((r,i) => ({
+                key: `rev_${i}`, icon: '📈', label: 'Revenue data point',
+                title: r.value, sub: `${r.metric} · ${r.date} · ${r.confidence} confidence`,
+                color: '#10b981', bg: '#f0fdf4',
+              })),
+              ...(extracted.fundingSignals||[]).map((f,i) => ({
+                key: `fund_${i}`, icon: '💰', label: f.type === 'active_raise' ? 'Active raise → Fundraise History' : 'Funding signal',
+                title: `${f.roundName || 'Round'}${f.amount ? ` · ${fmtC(f.amount)}` : ''}`,
+                sub: `${f.leadInvestor ? `Lead: ${f.leadInvestor} · ` : ''}${f.timeline || ''}`,
+                color: '#5B6DC4', bg: '#eef2ff',
+              })),
+              ...(extracted.positives||[]).map((p,i) => ({
+                key: `pos_${i}`, icon: '✦', label: 'Positive signal',
+                title: p.title, sub: p.description,
+                color: '#10b981', bg: '#f0fdf4',
+              })),
+              ...(extracted.risks||[]).map((r,i) => ({
+                key: `risk_${i}`, icon: '⚠', label: `Risk · ${r.severity}`,
+                title: r.title, sub: r.description,
+                color: '#ef4444', bg: '#fef2f2',
+              })),
+              ...(extracted.teamChanges||[]).map((t,i) => ({
+                key: `team_${i}`, icon: '👤', label: `Team · ${t.type}`,
+                title: `${t.role}${t.name ? ` — ${t.name}` : ''}`, sub: t.description,
+                color: '#7c3aed', bg: '#f5f3ff',
+              })),
+            ].length === 0 ? (
+              <p style={{ fontSize: 13, color: '#9ca3af', textAlign: 'center', padding: '8px 0' }}>No structured data found — update will be saved as a note.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+                <p style={{ fontSize: 11, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: .6, marginBottom: 4 }}>Confirm what to save</p>
+                {[
+                  ...(extracted.revenuePoints||[]).map((r,i) => ({
+                    key: `rev_${i}`, icon: '📈', label: 'Revenue data point',
+                    title: r.value, sub: `${r.metric} · ${r.date} · ${r.confidence} confidence`,
+                    color: '#10b981', bg: '#f0fdf4',
+                  })),
+                  ...(extracted.fundingSignals||[]).map((f,i) => ({
+                    key: `fund_${i}`, icon: '💰', label: f.type === 'active_raise' ? 'Active raise → Fundraise History' : 'Funding signal',
+                    title: `${f.roundName || 'Round'}${f.amount ? ` · ${fmtC(f.amount)}` : ''}`,
+                    sub: `${f.leadInvestor ? `Lead: ${f.leadInvestor} · ` : ''}${f.timeline || ''}`,
+                    color: '#5B6DC4', bg: '#eef2ff',
+                  })),
+                  ...(extracted.positives||[]).map((p,i) => ({
+                    key: `pos_${i}`, icon: '✦', label: 'Positive signal',
+                    title: p.title, sub: p.description,
+                    color: '#10b981', bg: '#f0fdf4',
+                  })),
+                  ...(extracted.risks||[]).map((r,i) => ({
+                    key: `risk_${i}`, icon: '⚠', label: `Risk · ${r.severity}`,
+                    title: r.title, sub: r.description,
+                    color: '#ef4444', bg: '#fef2f2',
+                  })),
+                  ...(extracted.teamChanges||[]).map((t,i) => ({
+                    key: `team_${i}`, icon: '👤', label: `Team · ${t.type}`,
+                    title: `${t.role}${t.name ? ` — ${t.name}` : ''}`, sub: t.description,
+                    color: '#7c3aed', bg: '#f5f3ff',
+                  })),
+                ].map(item => (
+                  <div key={item.key} onClick={() => toggle(item.key)}
+                    style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', borderRadius: 12,
+                      background: approved[item.key] ? item.bg : '#f9fafb',
+                      border: `1.5px solid ${approved[item.key] ? item.color + '40' : '#e5e7eb'}`,
+                      cursor: 'pointer', opacity: approved[item.key] ? 1 : 0.5 }}>
+                    <div style={{ width: 18, height: 18, borderRadius: 5, border: `2px solid ${approved[item.key] ? item.color : '#d1d5db'}`,
+                      background: approved[item.key] ? item.color : 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>
+                      {approved[item.key] && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                        <span style={{ fontSize: 10, color: item.color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .5 }}>{item.label}</span>
+                      </div>
+                      <p style={{ fontSize: 13, fontWeight: 600, color: '#111827', marginBottom: 2 }}>{item.title}</p>
+                      {item.sub && <p style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.5 }}>{item.sub}</p>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={confirmExtracted}
+                style={{ flex: 2, padding: '9px', background: '#5B6DC4', color: 'white', border: 'none', borderRadius: 10, fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+                Save {Object.values(approved).filter(Boolean).length} item{Object.values(approved).filter(Boolean).length !== 1 ? 's' : ''} + note
+              </button>
+              <button onClick={() => { setExtracted(null); setApproved({}); }}
+                style={{ padding: '9px 14px', background: '#f3f4f6', color: '#6b7280', border: 'none', borderRadius: 10, fontSize: 13, cursor: 'pointer' }}>Discard</button>
+            </div>
+          </div>
+        )}
+
+        {/* Past updates log */}
+        {updates.length > 0 && !extracted && !extracting && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: inputMode ? 0 : 4 }}>
+            {updates.slice(0, 5).map((u, i) => (
+              <div key={u.id || i} style={{ padding: '10px 12px', borderRadius: 12, background: '#f9fafb', display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                {u.sentiment && <span style={{ width: 6, height: 6, borderRadius: 99, background: sentColor[u.sentiment] || '#9ca3af', display: 'inline-block', marginTop: 5, flexShrink: 0 }}/>}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {u.keyTakeaway && <p style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 3 }}>{u.keyTakeaway}</p>}
+                  <p style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.5, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{u.content}</p>
+                </div>
+                <span style={{ fontSize: 11, color: '#d1d5db', flexShrink: 0 }}>{dAgo(u.date)}d</span>
+              </div>
+            ))}
+          </div>
         )}
       </div>}
     </div>
   );
 };
 
-// ── PROMOTE TO INVESTED MODAL ─────────────────────────────────────────────────
-const PromoteModal = ({deal, onClose, onPromote}) => {
-  const [f, setF] = useState({amount:'', vehicle:'SAFE', date:new Date().toISOString().slice(0,10), notes:''});
-  const inp = {width:'100%', padding:'9px 12px', border:'1px solid #e5e7eb', borderRadius:10, fontSize:13, boxSizing:'border-box'};
-  const lbl = {fontSize:12, color:'#6b7280', display:'block', marginBottom:4};
-
-  const submit = () => {
-    if (!f.amount) return;
-    const now = new Date(f.date).toISOString();
-    const promoted = {
-      ...deal,
-      status: 'invested',
-      statusEnteredAt: now,
-      investment: {
-        amount: Number(f.amount),
-        costBasis: Number(f.amount),
-        vehicle: f.vehicle,
-        date: now,
-        lastUpdateReceived: now,
-      },
-      // Append invest note to memo if provided
-      memo: f.notes.trim()
-        ? (deal.memo ? `${deal.memo}\n\n---\nInvestment note (${new Date(f.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}): ${f.notes.trim()}` : f.notes.trim())
-        : deal.memo || '',
-      monitoring: {...(deal.monitoring||{}), fundraisingStatus:'not-raising'},
-    };
-    onPromote(promoted);
-    onClose();
-  };
-
-  return (
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
-      <div style={{background:'white',borderRadius:20,width:'100%',maxWidth:400,overflow:'hidden'}}>
-        <div style={{padding:'14px 20px',borderBottom:'1px solid #f3f4f6',display:'flex',justifyContent:'space-between',alignItems:'center',background:'#5B6DC4'}}>
-          <div>
-            <p style={{fontWeight:700,fontSize:15,color:'white'}}>Invest in {deal.companyName}</p>
-            <p style={{fontSize:12,color:'rgba(255,255,255,.75)',marginTop:2}}>Converts to portfolio company — all notes and history preserved</p>
-          </div>
-          <button onClick={onClose} style={{background:'rgba(255,255,255,.2)',border:'none',cursor:'pointer',color:'white',borderRadius:8,padding:'4px 8px'}}>✕</button>
-        </div>
-        <div style={{padding:20,display:'flex',flexDirection:'column',gap:14}}>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-            <div>
-              <label style={lbl}>Amount ($) *</label>
-              <input type="number" value={f.amount} onChange={e=>setF(p=>({...p,amount:e.target.value}))} placeholder="25000" style={inp} autoFocus/>
-            </div>
-            <div>
-              <label style={lbl}>Vehicle</label>
-              <select value={f.vehicle} onChange={e=>setF(p=>({...p,vehicle:e.target.value}))} style={inp}>
-                <option value="SAFE">SAFE</option>
-                <option value="Convertible Note">Conv. Note</option>
-                <option value="Equity">Equity</option>
-              </select>
-            </div>
-          </div>
-          <div>
-            <label style={lbl}>Investment date</label>
-            <input type="date" value={f.date} onChange={e=>setF(p=>({...p,date:e.target.value}))} style={inp}/>
-          </div>
-          <div>
-            <label style={lbl}>Investment note <span style={{fontWeight:400,color:'#9ca3af'}}>(optional — appended to memo)</span></label>
-            <textarea value={f.notes} onChange={e=>setF(p=>({...p,notes:e.target.value}))}
-              placeholder="Why you decided to invest now, what changed your mind..."
-              rows={3} style={{...inp,resize:'none',outline:'none',fontFamily:'inherit',lineHeight:1.6}}/>
-          </div>
-        </div>
-        <div style={{padding:'12px 20px',borderTop:'1px solid #f3f4f6',display:'flex',gap:8}}>
-          <button onClick={submit} disabled={!f.amount} style={{flex:1,padding:'11px',background:'#5B6DC4',color:'white',border:'none',borderRadius:12,fontWeight:700,fontSize:14,cursor:'pointer',opacity:f.amount?1:.4}}>
-            Invest — move to portfolio
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-};
 
 const CoInvestorsSection = ({deal,onUpdate,setToast}) => {
   const [open,setOpen]=useState(true);
@@ -1623,6 +1644,57 @@ const DetailView = ({deal,onUpdate,setToast}) => {
   const dUntilNext=inv.nextUpdateExpected?dUntil(inv.nextUpdateExpected):null;
   const overdue=dUntilNext!==null&&dUntilNext<-7;
   const health=calcHealth(deal,[]);
+  const [generatingMemo, setGeneratingMemo] = useState(false);
+  const [memo, setMemo] = useState(deal.memo || '');
+  const [showMemo, setShowMemo] = useState(!!deal.memo);
+
+  const generateMemo = async () => {
+    setGeneratingMemo(true);
+    setShowMemo(true);
+    try {
+      const signalCache = loadSignalCache()[deal.id];
+      const context = {
+        company: deal.companyName,
+        stage: deal.stage,
+        industry: deal.industry,
+        invested: getCB(inv),
+        vehicle: inv.vehicle,
+        date: inv.date,
+        cap: deal.terms?.cap,
+        revenueLog: deal.revenueLog,
+        fundraiseHistory: deal.fundraiseHistory,
+        founderUpdates: (deal.founderUpdates||[]).slice(0,3).map(u=>u.content?.substring(0,500)),
+        signals: signalCache ? { activity: signalCache.activity?.status, momentum: signalCache.momentum?.trend, risk: signalCache.risk?.level, summary: signalCache.summary } : null,
+        milestones: (deal.milestones||[]).slice(0,5),
+      };
+      const resp = await fetch('/api/extract', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: `Generate an investment memo for: ${JSON.stringify(context)}`,
+          dealName: deal.companyName,
+          existingData: {},
+          mode: 'memo',
+        }),
+      });
+      // Use signals API instead for memo generation
+      const memoResp = await fetch('/api/memo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deal: context }),
+      });
+      if (!memoResp.ok) throw new Error('Memo generation failed');
+      const { memo: generated } = await memoResp.json();
+      setMemo(generated);
+      onUpdate({ ...deal, memo: generated });
+      setToast('Investment memo generated');
+    } catch (e) {
+      console.error('Memo generation failed:', e);
+      setToast('Memo generation failed — check API connection');
+    } finally {
+      setGeneratingMemo(false);
+    }
+  };
 
   // Ownership + implied value: fundraise history takes precedence over manual fields
   const currentOwnership = getCurrentOwnership(deal);
@@ -1690,10 +1762,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
         {/* Traction metrics — same as invested */}
         <MetricsTracker deal={deal} onUpdate={onUpdate}/>
 
-        {/* Notes */}
-        <InvestmentMemo deal={deal} onUpdate={onUpdate} setToast={setToast}/>
-
-        <FounderUpdates deal={deal} onUpdate={onUpdate} setToast={setToast}/>
+        <PrimaryInsight deal={deal} onUpdate={onUpdate} setToast={setToast}/>
 
         {/* Signals */}
         <SignalsSection deal={deal} onUpdate={onUpdate}/>
@@ -1738,7 +1807,6 @@ const DetailView = ({deal,onUpdate,setToast}) => {
               {deal.website&&<a href={deal.website} target="_blank" rel="noopener noreferrer" style={{color:'#9ca3af'}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>}
             </div>
             <p style={{fontSize:13,color:'#6b7280',marginBottom:6}}>{deal.stage} · {deal.industry}</p>
-            {/* 3-bucket status dots from cached signal data */}
             {(()=>{
               const cached = loadSignalCache()[deal.id];
               if (!cached) return null;
@@ -1751,7 +1819,31 @@ const DetailView = ({deal,onUpdate,setToast}) => {
               );
             })()}
           </div>
+          {/* Generate Memo button — top right */}
+          <button onClick={generatingMemo ? undefined : generateMemo} disabled={generatingMemo}
+            style={{flexShrink:0,padding:'7px 12px',background:generatingMemo?'#f3f4f6':'#f5f3ff',color:generatingMemo?'#9ca3af':'#7c3aed',border:`1px solid ${generatingMemo?'#e5e7eb':'#e9d5ff'}`,borderRadius:10,fontWeight:600,fontSize:12,cursor:generatingMemo?'not-allowed':'pointer',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}}>
+            {generatingMemo
+              ? <><div style={{width:10,height:10,border:'1.5px solid #d1d5db',borderTopColor:'#7c3aed',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}/> Generating…</>
+              : <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>{memo ? 'Regenerate memo' : 'Generate memo'}</>
+            }
+          </button>
         </div>
+
+        {/* Memo display — shows after generation */}
+        {showMemo && memo && (
+          <div style={{background:'#faf5ff',border:'1px solid #e9d5ff',borderRadius:12,padding:'12px 16px',marginBottom:12}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+              <span style={{fontSize:11,color:'#7c3aed',fontWeight:700,textTransform:'uppercase',letterSpacing:.6}}>Investment Memo</span>
+              <button onClick={()=>setShowMemo(false)} style={{background:'none',border:'none',color:'#c4b5fd',cursor:'pointer',fontSize:11}}>hide</button>
+            </div>
+            <p style={{fontSize:13,color:'#374151',lineHeight:1.8,whiteSpace:'pre-wrap'}}>{memo}</p>
+          </div>
+        )}
+        {!showMemo && memo && (
+          <button onClick={()=>setShowMemo(true)} style={{fontSize:12,color:'#7c3aed',background:'none',border:'none',cursor:'pointer',padding:0,marginBottom:12,display:'block'}}>
+            Show investment memo ↓
+          </button>
+        )}
 
         {deal.overview&&<p style={{fontSize:14,color:'#374151',lineHeight:1.6,marginBottom:12}}>{deal.overview}</p>}
 
@@ -1857,34 +1949,11 @@ const DetailView = ({deal,onUpdate,setToast}) => {
 
       <MetricsTracker deal={deal} onUpdate={onUpdate}/>
 
-
-
-      {/* Proactive prompts — grounded in real data gaps */}
-      {(()=>{
-        const prompts=[];
-        const allMetrics=deal.metricsToWatch||[];
-        const hasRecentMetric=allMetrics.some(m=>(deal.metricsLog||{})[m]?.some(e=>dAgo(e.date)<=90));
-        const hasRecentRevenue=(deal.revenueLog||[]).some(e=>dAgo(e.date)<=90);
-        if(allMetrics.length>0&&!hasRecentMetric&&!hasRecentRevenue) prompts.push({icon:'📊',text:'No metrics logged in 90+ days — log a reading after your next founder call'});
-        const staleness=getStaleness(deal);
-        if(staleness==='very-stale'&&getMethod(deal)!=='mark-at-cost') prompts.push({icon:'📅',text:'Valuation mark is over a year old — worth refreshing with the founder'});
-        if(!prompts.length) return null;
-        return <div style={{marginBottom:12,display:'flex',flexDirection:'column',gap:8}}>
-          {prompts.map((p,i)=>(
-            <div key={i} style={{padding:'10px 14px',background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:12,display:'flex',alignItems:'center',gap:10}}>
-              <span style={{fontSize:15,flexShrink:0}}>{p.icon}</span>
-              <p style={{fontSize:13,color:'#374151',flex:1,lineHeight:1.5}}>{p.text}</p>
-            </div>
-          ))}
-        </div>;
-      })()}
-
-      <FounderUpdates deal={deal} onUpdate={onUpdate} setToast={setToast} inv={inv} overdue={overdue} dUntilNext={dUntilNext}/>
+      <PrimaryInsight deal={deal} onUpdate={onUpdate} setToast={setToast}/>
 
       <SignalsSection deal={deal} onUpdate={onUpdate}/>
 
       <FundraiseHistory deal={deal} onUpdate={onUpdate} setToast={setToast}/>
-      <InvestmentMemo deal={deal} onUpdate={onUpdate} setToast={setToast}/>
       <div style={{marginTop:12}}><DocumentsSection deal={deal} onUpdate={onUpdate} setToast={setToast}/></div>
     </div>
   );
