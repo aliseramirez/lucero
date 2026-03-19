@@ -1213,7 +1213,7 @@ const InvestmentMemo = ({deal, onUpdate, setToast}) => {
   const memo = deal.memo || '';
   const [editing, setEditing] = useState(!memo);
   const [draft, setDraft] = useState(memo);
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
 
   const save = () => {
     onUpdate({...deal, memo:draft.trim()});
@@ -1336,7 +1336,7 @@ const FounderUpdates = ({deal, onUpdate, setToast, inv={}, overdue=false, dUntil
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
           <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Founder updates</span>
           {updates.length>0&&<span style={{fontSize:12,color:'#9ca3af'}}>({updates.length})</span>}
-          {dSinceUpd!==null&&<Pill color={overdue?'#b45309':'#6b7280'} bg={overdue?'#fef3c7':'#f5f5f4'}>Last {dSinceUpd}d ago</Pill>}
+          
         </div>
         <span style={{color:'#9ca3af',fontSize:11}}>{open?'▲':'▼'}</span>
       </button>
@@ -1619,7 +1619,6 @@ const DetailView = ({deal,onUpdate,setToast}) => {
   const inv=deal.investment||{};
   const method=getMethod(deal);
   const staleness=getStaleness(deal);
-  const [showInvDetails,setShowInvDetails]=useState(false);
   const dSinceUpd=inv.lastUpdateReceived?dAgo(inv.lastUpdateReceived):null;
   const dUntilNext=inv.nextUpdateExpected?dUntil(inv.nextUpdateExpected):null;
   const overdue=dUntilNext!==null&&dUntilNext<-7;
@@ -1858,27 +1857,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
 
       <MetricsTracker deal={deal} onUpdate={onUpdate}/>
 
-      <div style={{background:'white',borderRadius:16,overflow:'hidden',marginBottom:12}}>
-        <button onClick={()=>setShowInvDetails(v=>!v)} style={{width:'100%',padding:'14px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'none',border:'none',cursor:'pointer'}}>
-          <div style={{display:'flex',alignItems:'center',gap:8}}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="6" x2="12" y2="18"/><path d="M15 9.5c0-1.5-1.5-2.5-3-2.5s-3 .5-3 2.5c0 1.5 1.5 2 3 2.5s3 1 3 2.5c0 1.5-1.5 2.5-3 2.5s-3-1-3-2.5"/></svg>
-            <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Investment details</span>
-          </div>
-          <div style={{display:'flex',alignItems:'center',gap:10}}>
-            {!showInvDetails&&<span style={{fontSize:12,color:'#9ca3af'}}>{[inv.amount&&fmtC(inv.amount),inv.vehicle,inv.date&&new Date(inv.date).toLocaleDateString('en-US',{month:'short',year:'numeric'})].filter(Boolean).join(' · ')}</span>}
-            <span style={{color:'#9ca3af',fontSize:11}}>{showInvDetails?'▲':'▼'}</span>
-          </div>
-        </button>
-        {showInvDetails&&<div style={{padding:'0 20px 20px',borderTop:'1px solid #f3f4f6'}}>
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,paddingTop:16}}>
-            {inv.amount&&<div><p style={C.label}>Amount in</p><p style={C.val}>{fmtC(inv.amount)}</p></div>}
-            {inv.vehicle&&<div><p style={C.label}>Vehicle</p><p style={{...C.sm,fontWeight:600}}>{inv.vehicle}</p></div>}
-            {inv.ownershipPercent&&<div><p style={C.label}>Ownership</p><p style={{...C.sm,fontWeight:600}}>{inv.ownershipPercent}%</p></div>}
-            {inv.date&&<div><p style={C.label}>Date</p><p style={{...C.sm,fontWeight:600}}>{new Date(inv.date).toLocaleDateString('en-US',{month:'short',year:'numeric'})}</p></div>}
-            {inv.entryPostMoneyValuation&&<div><p style={C.label}>Entry post-money</p><p style={{...C.sm,fontWeight:600}}>{fmtC(inv.entryPostMoneyValuation)}</p></div>}
-          </div>
-        </div>}
-      </div>
+
 
       {/* Proactive prompts — grounded in real data gaps */}
       {(()=>{
@@ -1900,14 +1879,12 @@ const DetailView = ({deal,onUpdate,setToast}) => {
         </div>;
       })()}
 
-      <InvestmentMemo deal={deal} onUpdate={onUpdate} setToast={setToast}/>
-
-      <FounderUpdates deal={deal} onUpdate={onUpdate} setToast={setToast} inv={inv} overdue={overdue} dUntilNext={dUntilNext} dSinceUpd={dSinceUpd}/>
+      <FounderUpdates deal={deal} onUpdate={onUpdate} setToast={setToast} inv={inv} overdue={overdue} dUntilNext={dUntilNext}/>
 
       <SignalsSection deal={deal} onUpdate={onUpdate}/>
 
       <FundraiseHistory deal={deal} onUpdate={onUpdate} setToast={setToast}/>
-      <div style={{marginTop:12}}><LiquiditySection deal={deal} onUpdate={onUpdate} setToast={setToast}/></div>
+      <InvestmentMemo deal={deal} onUpdate={onUpdate} setToast={setToast}/>
       <div style={{marginTop:12}}><DocumentsSection deal={deal} onUpdate={onUpdate} setToast={setToast}/></div>
     </div>
   );
