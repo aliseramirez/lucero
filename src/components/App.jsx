@@ -1693,12 +1693,12 @@ const AddModal = ({onClose,onAdd}) => {
 };
 
 // ── ROOT APP ──────────────────────────────────────────────────────────────────
+
 // ── LOGIN PAGE ────────────────────────────────────────────────────────────────
 function LoginPage({ onLogin }) {
   const [loading, setLoading] = useState(false);
-  const handleClick = async () => { setLoading(true); await onLogin(); };
   return (
-    <div style={{minHeight:'100vh',background:'linear-gradient(to bottom right,#fafaf9,#e7e5e4)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+    <div style={{minHeight:'100vh',background:'linear-gradient(135deg,#fafaf9,#e7e5e4)',display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
       <div style={{width:'100%',maxWidth:400}}>
         <div style={{textAlign:'center',marginBottom:32}}>
           <div style={{width:72,height:72,background:'#4A1942',borderRadius:20,display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 20px',boxShadow:'0 20px 40px rgba(74,25,66,.25)'}}>
@@ -1718,7 +1718,11 @@ function LoginPage({ onLogin }) {
           <p style={{color:'#78716c',fontSize:15}}>Your angel portfolio, all in one place</p>
         </div>
         <div style={{background:'white',borderRadius:20,padding:32,border:'1px solid #e7e5e4',boxShadow:'0 4px 24px rgba(0,0,0,.06)'}}>
-          <button onClick={handleClick} disabled={loading} style={{width:'100%',display:'flex',alignItems:'center',justifyContent:'center',gap:12,padding:'13px 16px',borderRadius:12,border:'1px solid #d1d5db',background:'white',color:'#374151',fontWeight:500,fontSize:15,cursor:loading?'not-allowed':'pointer',opacity:loading?0.6:1}}>
+          <button
+            onClick={async () => { setLoading(true); await onLogin(); }}
+            disabled={loading}
+            style={{width:'100%',display:'flex',alignItems:'center',justifyContent:'center',gap:12,padding:'13px 16px',borderRadius:12,border:'1px solid #d1d5db',background:'white',color:'#374151',fontWeight:500,fontSize:15,cursor:loading?'not-allowed':'pointer',opacity:loading?0.6:1}}
+          >
             {loading
               ? <div style={{width:20,height:20,border:'2px solid #d1d5db',borderTopColor:'#374151',borderRadius:'50%',animation:'spin 1s linear infinite'}}/>
               : <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
@@ -1738,9 +1742,9 @@ function UserMenu({ user, onLogout }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
-    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    if (open) document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    if (open) document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
   }, [open]);
   if (!user) return null;
   const name = user.user_metadata?.full_name || user.user_metadata?.name || user.email || 'User';
@@ -1748,23 +1752,245 @@ function UserMenu({ user, onLogout }) {
     `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=4A1942&color=F5DFA0`;
   return (
     <div ref={ref} style={{position:'relative'}}>
-      <button onClick={()=>setOpen(v=>!v)} style={{display:'flex',alignItems:'center',gap:6,background:'none',border:'none',cursor:'pointer',padding:4,borderRadius:99}}>
-        <img src={avatar} alt={name} style={{width:32,height:32,borderRadius:99}}/>
+      <button onClick={() => setOpen(v => !v)} style={{display:'flex',alignItems:'center',gap:6,background:'none',border:'none',cursor:'pointer',padding:4,borderRadius:99}}>
+        <img src={avatar} alt={name} style={{width:32,height:32,borderRadius:99,objectFit:'cover'}}/>
         <span style={{fontSize:13,color:'#374151',fontWeight:500,maxWidth:100,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{name.split(' ')[0]}</span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
-      {open&&<div style={{position:'absolute',right:0,top:'calc(100% + 8px)',width:210,background:'white',borderRadius:14,boxShadow:'0 10px 25px rgba(0,0,0,.12)',border:'1px solid #e5e7eb',zIndex:999,overflow:'hidden'}}>
-        <div style={{padding:'12px 16px',borderBottom:'1px solid #f3f4f6'}}>
-          <p style={{fontWeight:600,fontSize:13,color:'#111827',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{name}</p>
-          <p style={{fontSize:12,color:'#9ca3af',marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{user.email}</p>
+      {open && (
+        <div style={{position:'absolute',right:0,top:'calc(100% + 8px)',width:210,background:'white',borderRadius:14,boxShadow:'0 10px 25px rgba(0,0,0,.12)',border:'1px solid #e5e7eb',zIndex:999,overflow:'hidden'}}>
+          <div style={{padding:'12px 16px',borderBottom:'1px solid #f3f4f6'}}>
+            <p style={{fontWeight:600,fontSize:13,color:'#111827',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{name}</p>
+            <p style={{fontSize:12,color:'#9ca3af',marginTop:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{user.email}</p>
+          </div>
+          <button
+            onClick={() => { setOpen(false); onLogout(); }}
+            style={{width:'100%',padding:'10px 16px',textAlign:'left',fontSize:13,color:'#ef4444',background:'none',border:'none',cursor:'pointer',display:'flex',alignItems:'center',gap:8}}
+            onMouseEnter={e => e.currentTarget.style.background='#fef2f2'}
+            onMouseLeave={e => e.currentTarget.style.background='none'}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Sign out
+          </button>
         </div>
-        <button onClick={()=>{setOpen(false);onLogout();}} style={{width:'100%',padding:'10px 16px',textAlign:'left',fontSize:13,color:'#ef4444',background:'none',border:'none',cursor:'pointer',display:'flex',alignItems:'center',gap:8}}
-          onMouseEnter={e=>e.currentTarget.style.background='#fef2f2'}
-          onMouseLeave={e=>e.currentTarget.style.background='none'}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-          Sign out
-        </button>
-      </div>}
+      )}
+    </div>
+  );
+}
+
+// ── ANGELLIST CSV IMPORT MODAL ────────────────────────────────────────────────
+function ImportModal({ onClose, onImport }) {
+  const [stage, setStage] = useState('upload'); // upload | preview | importing | done
+  const [rows, setRows] = useState([]);
+  const [error, setError] = useState('');
+  const [progress, setProgress] = useState(0);
+  const fileRef = useRef(null);
+
+  const parseCSV = (text) => {
+    const lines = text.trim().split('\n');
+    if (lines.length < 2) return [];
+    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, '').toLowerCase());
+    return lines.slice(1).map(line => {
+      const cols = []; let cur = '', inQ = false;
+      for (const ch of line) {
+        if (ch === '"') inQ = !inQ;
+        else if (ch === ',' && !inQ) { cols.push(cur.trim()); cur = ''; }
+        else cur += ch;
+      }
+      cols.push(cur.trim());
+      const row = {};
+      headers.forEach((h, i) => { row[h] = (cols[i] || '').replace(/^"|"$/g, '').trim(); });
+      return row;
+    }).filter(r => r['company'] || r['company name']);
+  };
+
+  const rowToDeal = (row) => {
+    const name = row['company'] || row['company name'] || '';
+    const amountRaw = (row['invested amount'] || row['amount'] || '').replace(/[$,\s]/g, '');
+    const amount = parseFloat(amountRaw) || 0;
+    const dateRaw = row['investment date'] || row['date'] || '';
+    const date = dateRaw ? new Date(dateRaw).toISOString() : new Date().toISOString();
+    const round = (row['round'] || row['investment type'] || '').toLowerCase();
+    const market = row['market'] || row['industry'] || 'Other';
+    const note = row['note'] || '';
+    const stageMap = {
+      'pre-seed': 'pre-seed', 'preseed': 'pre-seed', 'seed': 'seed',
+      'series a': 'series-a', 'series b': 'series-b', 'series c': 'series-c',
+      'growth': 'growth', 'late': 'growth', 'spv': 'seed',
+      'rolling fund': 'seed', 'syndicate': 'seed',
+    };
+    return {
+      id: genId(),
+      companyName: name,
+      status: 'invested',
+      stage: stageMap[round] || 'seed',
+      industry: market,
+      website: null,
+      founders: [],
+      coInvestors: [],
+      liquidityEvents: [],
+      documents: [],
+      monitoring: { healthStatus: 'stable', fundraisingStatus: 'not-raising' },
+      milestones: [],
+      metricsToWatch: [],
+      metricsLog: {},
+      revenueLog: [],
+      notesLog: note ? [{ id: genId(), text: note, date }] : [],
+      memo: note || '',
+      founderUpdates: [],
+      createdAt: date,
+      statusEnteredAt: date,
+      investment: {
+        amount, costBasis: amount,
+        vehicle: round.includes('safe') ? 'SAFE' : round.includes('note') ? 'Convertible Note' : 'Equity',
+        date, lastUpdateReceived: date,
+      },
+      source: { type: 'angellist', name: row['lead'] || 'AngelList' },
+    };
+  };
+
+  const handleFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!file.name.endsWith('.csv')) { setError('Please upload a .csv file'); return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const parsed = parseCSV(ev.target.result);
+        if (!parsed.length) { setError("No investments found. Make sure this is an AngelList portfolio export."); return; }
+        setRows(parsed.map(r => ({ raw: r, deal: rowToDeal(r), selected: true })));
+        setStage('preview');
+        setError('');
+      } catch (err) { setError('Failed to parse CSV: ' + err.message); }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleImport = async () => {
+    const toImport = rows.filter(r => r.selected).map(r => r.deal);
+    setStage('importing');
+    for (let i = 0; i < toImport.length; i++) {
+      await onImport(toImport[i]);
+      setProgress(Math.round(((i + 1) / toImport.length) * 100));
+    }
+    setStage('done');
+  };
+
+  const selected = rows.filter(r => r.selected).length;
+  const btn = { padding: '10px 20px', borderRadius: 12, fontSize: 14, fontWeight: 600, cursor: 'pointer', border: 'none' };
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+      <div style={{background:'white',borderRadius:20,width:'100%',maxWidth:520,maxHeight:'85vh',display:'flex',flexDirection:'column',overflow:'hidden'}}>
+
+        <div style={{padding:'16px 20px',borderBottom:'1px solid #f3f4f6',display:'flex',justifyContent:'space-between',alignItems:'center',flexShrink:0}}>
+          <div>
+            <p style={{fontWeight:700,fontSize:15,color:'#111827'}}>Import from AngelList</p>
+            <p style={{fontSize:12,color:'#9ca3af',marginTop:2}}>Upload your AngelList portfolio CSV export</p>
+          </div>
+          <button onClick={onClose} style={{background:'none',border:'none',cursor:'pointer',color:'#9ca3af'}}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        <div style={{padding:20,overflowY:'auto',flex:1}}>
+          {stage === 'upload' && (
+            <div style={{display:'flex',flexDirection:'column',gap:20}}>
+              <div style={{background:'#eef2ff',borderRadius:12,padding:16}}>
+                <p style={{fontWeight:600,fontSize:13,color:'#3730a3',marginBottom:10}}>How to export from AngelList</p>
+                {['Go to venture.angellist.com', 'Click Portfolio → Dashboard', 'Scroll to the Investments table', 'Click Export CSV'].map((step, i) => (
+                  <div key={i} style={{display:'flex',alignItems:'center',gap:10,marginBottom:i<3?7:0}}>
+                    <span style={{width:22,height:22,borderRadius:99,background:'#5B6DC4',color:'white',fontSize:11,fontWeight:700,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>{i + 1}</span>
+                    <span style={{fontSize:13,color:'#374151'}}>{step}</span>
+                  </div>
+                ))}
+              </div>
+              <div
+                onClick={() => fileRef.current?.click()}
+                style={{border:'2px dashed #d1d5db',borderRadius:14,padding:'36px 20px',textAlign:'center',cursor:'pointer',background:'white',transition:'all .15s'}}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = '#5B6DC4'; e.currentTarget.style.background = '#f5f7ff'; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = '#d1d5db'; e.currentTarget.style.background = 'white'; }}
+              >
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="1.5" style={{margin:'0 auto 12px',display:'block'}}>
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <p style={{fontWeight:600,fontSize:14,color:'#374151',marginBottom:4}}>Click to upload your CSV</p>
+                <p style={{fontSize:12,color:'#9ca3af'}}>AngelList portfolio export (.csv)</p>
+                <input ref={fileRef} type="file" accept=".csv" onChange={handleFile} style={{display:'none'}}/>
+              </div>
+              {error && <p style={{color:'#ef4444',fontSize:13,textAlign:'center'}}>{error}</p>}
+            </div>
+          )}
+
+          {stage === 'preview' && (
+            <div style={{display:'flex',flexDirection:'column',gap:14}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                <p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{selected} of {rows.length} selected</p>
+                <button
+                  onClick={() => setRows(r => r.map(x => ({ ...x, selected: !rows.every(r => r.selected) })))}
+                  style={{fontSize:12,color:'#5B6DC4',background:'none',border:'none',cursor:'pointer'}}
+                >
+                  {rows.every(r => r.selected) ? 'Deselect all' : 'Select all'}
+                </button>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                {rows.map((r, i) => (
+                  <div
+                    key={i}
+                    onClick={() => setRows(prev => prev.map((x, j) => j === i ? { ...x, selected: !x.selected } : x))}
+                    style={{display:'flex',alignItems:'center',gap:12,padding:'10px 14px',borderRadius:12,border:`1.5px solid ${r.selected ? '#5B6DC4' : '#e5e7eb'}`,background:r.selected ? '#f5f7ff' : 'white',cursor:'pointer'}}
+                  >
+                    <div style={{width:18,height:18,borderRadius:5,border:`2px solid ${r.selected ? '#5B6DC4' : '#d1d5db'}`,background:r.selected ? '#5B6DC4' : 'white',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                      {r.selected && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+                    </div>
+                    <div style={{flex:1,minWidth:0}}>
+                      <p style={{fontWeight:600,fontSize:13,color:'#111827',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r.deal.companyName}</p>
+                      <p style={{fontSize:12,color:'#6b7280'}}>{r.deal.stage} · {r.deal.industry}{r.deal.investment.amount > 0 ? ` · ${fmtC(r.deal.investment.amount)}` : ''}</p>
+                    </div>
+                    <span style={{fontSize:11,padding:'2px 8px',borderRadius:99,background:'#ecfdf5',color:'#059669',fontWeight:500,flexShrink:0}}>invested</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {stage === 'importing' && (
+            <div style={{textAlign:'center',padding:'40px 20px'}}>
+              <div style={{width:44,height:44,border:'3px solid #e5e7eb',borderTopColor:'#5B6DC4',borderRadius:'50%',animation:'spin 0.8s linear infinite',margin:'0 auto 16px'}}/>
+              <p style={{fontWeight:600,fontSize:15,color:'#111827',marginBottom:10}}>Importing {selected} investments…</p>
+              <div style={{height:6,background:'#f3f4f6',borderRadius:99,overflow:'hidden',maxWidth:220,margin:'0 auto'}}>
+                <div style={{height:'100%',background:'#5B6DC4',borderRadius:99,width:`${progress}%`,transition:'width .3s'}}/>
+              </div>
+              <p style={{fontSize:12,color:'#9ca3af',marginTop:8}}>{progress}%</p>
+            </div>
+          )}
+
+          {stage === 'done' && (
+            <div style={{textAlign:'center',padding:'40px 20px'}}>
+              <div style={{width:56,height:56,background:'#ecfdf5',borderRadius:99,display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 16px'}}>
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+              </div>
+              <p style={{fontWeight:700,fontSize:16,color:'#111827',marginBottom:6}}>{selected} investments imported</p>
+              <p style={{fontSize:13,color:'#6b7280',marginBottom:24}}>Your AngelList portfolio is in Lucero. Add more details to each company from its deal page.</p>
+              <button onClick={onClose} style={{...btn, background:'#5B6DC4', color:'white', width:'100%'}}>View Portfolio</button>
+            </div>
+          )}
+        </div>
+
+        {(stage === 'upload' || stage === 'preview') && (
+          <div style={{padding:'14px 20px',borderTop:'1px solid #f3f4f6',display:'flex',gap:10,flexShrink:0}}>
+            <button onClick={stage === 'preview' ? () => setStage('upload') : onClose} style={{...btn, background:'#f3f4f6', color:'#374151', flex:1}}>
+              {stage === 'preview' ? 'Back' : 'Cancel'}
+            </button>
+            {stage === 'preview' && (
+              <button onClick={handleImport} disabled={selected === 0} style={{...btn, background: selected > 0 ? '#5B6DC4' : '#e5e7eb', color: selected > 0 ? 'white' : '#9ca3af', flex:2}}>
+                Import {selected} investment{selected !== 1 ? 's' : ''}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
 }
@@ -1779,8 +2005,9 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
-  // Load deals from Supabase — never show demo data flash
+  // Load deals — wait for real data, never flash demo
   useEffect(() => {
     if (!user?.id) return;
     let mounted = true;
@@ -1789,25 +2016,24 @@ export default function App() {
         const { data, error } = await supabase
           .from('deals').select('id, data').eq('user_id', user.id);
         if (!mounted) return;
-        if (error) { console.warn('Supabase load error:', error.message); setDealsReady(true); return; }
+        if (error) { console.warn('Load error:', error.message); setDealsReady(true); return; }
         if (data && data.length > 0) {
           setDeals(data.map(row => ({ ...row.data, id: row.id })));
           setDealsReady(true);
         } else {
-          // New user — show empty portfolio immediately, seed demo in background
+          // New user — seed demo deals then show them
           setDealsReady(true);
           for (const deal of DEALS) {
             const { id, ...dealData } = deal;
             await supabase.from('deals').insert({ id, user_id: user.id, company_name: deal.companyName, status: deal.status, data: dealData });
           }
-          // Now load what was just seeded
           if (mounted) {
             const { data: seeded } = await supabase.from('deals').select('id, data').eq('user_id', user.id);
-            if (mounted && seeded?.length > 0) setDeals(seeded.map(row => ({ ...row.data, id: row.id })));
+            if (mounted && seeded?.length) setDeals(seeded.map(row => ({ ...row.data, id: row.id })));
           }
         }
-      } catch(e) {
-        console.warn('Supabase unavailable:', e.message);
+      } catch (e) {
+        console.warn('Supabase error:', e.message);
         if (mounted) setDealsReady(true);
       }
     };
@@ -1816,10 +2042,8 @@ export default function App() {
   }, [user?.id]);
 
   const updateDeal = async (updated) => {
-    // Optimistic update
     setDeals(prev => prev.map(d => d.id === updated.id ? updated : d));
     setSelected(updated);
-    // Persist
     const { id, ...dealData } = updated;
     const { error } = await supabase.from('deals')
       .update({ data: dealData, company_name: updated.companyName, status: updated.status })
@@ -1839,9 +2063,9 @@ export default function App() {
     }
   };
 
-  // Single loading screen covers both auth resolving and deals fetching
+  // Loading state — covers both auth and data fetching
   if (isLoading || (isAuthenticated && !dealsReady)) return (
-    <div style={{minHeight:'100vh',background:'#f9fafb',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:16}}>
+    <div style={{minHeight:'100vh',background:'#f9fafb',display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column',gap:14}}>
       <div style={{width:40,height:40,background:'#4A1942',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center'}}>
         <svg width="20" height="20" viewBox="0 0 38 38" fill="none">
           <circle cx="19" cy="19" r="4.5" fill="#F5DFA0"/>
@@ -1851,19 +2075,19 @@ export default function App() {
           <line x1="28" y1="19" x2="35" y2="19" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/>
         </svg>
       </div>
-      <div style={{width:20,height:20,border:'2px solid #e5e7eb',borderTopColor:'#4A1942',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}/>
+      <div style={{width:18,height:18,border:'2px solid #e5e7eb',borderTopColor:'#4A1942',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}/>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
+
   if (!isAuthenticated) return <LoginPage onLogin={() => signInWithProvider('google')} />;
-  if (!dealsReady) return null;
 
   const portfolio = deals.filter(d => d.status === 'invested');
   const ph = calcPortHealth(deals);
-  const totalDep = portfolio.reduce((s,d) => s + getCB(d.investment||{}), 0);
-  const totalImp = portfolio.reduce((s,d) => s + calcIV(d), 0);
+  const totalDep = portfolio.reduce((s, d) => s + getCB(d.investment || {}), 0);
+  const totalImp = portfolio.reduce((s, d) => s + calcIV(d), 0);
   const moic = totalDep > 0 ? totalImp / totalDep : null;
-  const realized = portfolio.reduce((s,d) => (d.liquidityEvents||[]).filter(e=>e.type!=='writedown').reduce((a,e)=>a+(e.proceeds||0),s), 0);
+  const realized = portfolio.reduce((s, d) => (d.liquidityEvents || []).filter(e => e.type !== 'writedown').reduce((a, e) => a + (e.proceeds || 0), s), 0);
   const dpi = totalDep > 0 ? realized / totalDep : 0;
   const filtered = search ? deals.filter(d => d.companyName.toLowerCase().includes(search.toLowerCase())) : deals;
   const fInvested = filtered.filter(d => d.status === 'invested');
@@ -1872,21 +2096,24 @@ export default function App() {
   if (page === 'detail' && selected) return (
     <div style={{minHeight:'100vh',background:'#f9fafb',fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif'}}>
       <div style={{background:'white',borderBottom:'1px solid #e5e7eb',position:'sticky',top:0,zIndex:10}}>
-        <div style={{padding:'14px 32px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-          <button onClick={()=>{setPage('list');setSelected(null);}} style={{display:'flex',alignItems:'center',gap:6,background:'none',border:'none',cursor:'pointer',color:'#6b7280',fontSize:14,fontWeight:500}}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>Portfolio</button>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 32px'}}>
+          <button onClick={() => { setPage('list'); setSelected(null); }} style={{display:'flex',alignItems:'center',gap:6,background:'none',border:'none',cursor:'pointer',color:'#6b7280',fontSize:14,fontWeight:500}}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
+            Portfolio
+          </button>
           <span style={{fontWeight:700,fontSize:14,color:'#111827'}}>{selected.companyName}</span>
           <UserMenu user={user} onLogout={signOut}/>
         </div>
       </div>
-      <div style={{padding:'0'}}><DetailView deal={selected} onUpdate={updateDeal} setToast={setToast}/></div>
-      {toast&&<Toast msg={toast} onClose={()=>setToast(null)}/>}
+      <DetailView deal={selected} onUpdate={updateDeal} setToast={setToast}/>
+      {toast && <Toast msg={typeof toast === 'string' ? toast : toast.message} onClose={() => setToast(null)}/>}
     </div>
   );
 
   return (
     <div style={{minHeight:'100vh',background:'#f9fafb',fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif'}}>
       <div style={{background:'white',borderBottom:'1px solid #e5e7eb',position:'sticky',top:0,zIndex:10}}>
-        <div style={{padding:'14px 32px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 32px'}}>
           <div style={{display:'flex',alignItems:'center',gap:10}}>
             <div style={{width:34,height:34,borderRadius:10,background:'#4A1942',display:'flex',alignItems:'center',justifyContent:'center'}}>
               <svg width="18" height="18" viewBox="0 0 38 38" fill="none">
@@ -1904,66 +2131,97 @@ export default function App() {
             <span style={{fontWeight:800,fontSize:16,color:'#111827',letterSpacing:'-0.3px'}}>Lucero</span>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:10}}>
-            <button onClick={()=>setShowAdd(true)} style={{padding:'8px 14px',background:'#5B6DC4',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}><span style={{fontSize:16,lineHeight:1}}>+</span>Add Company</button>
+            <button onClick={() => setShowImport(true)} style={{padding:'8px 14px',background:'white',color:'#374151',border:'1px solid #e5e7eb',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Import CSV
+            </button>
+            <button onClick={() => setShowAdd(true)} style={{padding:'8px 14px',background:'#5B6DC4',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}>
+              <span style={{fontSize:16,lineHeight:1}}>+</span>Add Company
+            </button>
             <UserMenu user={user} onLogout={signOut}/>
           </div>
         </div>
       </div>
 
       <div style={{padding:'24px 32px'}}>
-        {portfolio.length>0&&<div style={{background:'white',borderRadius:16,padding:20,marginBottom:16,border:'1px solid #e5e7eb'}}>
-          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
-            <h2 style={{fontSize:15,fontWeight:700,color:'#111827'}}>Portfolio</h2>
-            <span style={{fontSize:12,color:'#9ca3af'}}>{portfolio.length} {portfolio.length===1?'company':'companies'}</span>
+        {portfolio.length > 0 && (
+          <div style={{background:'white',borderRadius:16,padding:20,marginBottom:16,border:'1px solid #e5e7eb'}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+              <h2 style={{fontSize:15,fontWeight:700,color:'#111827'}}>Portfolio</h2>
+              <span style={{fontSize:12,color:'#9ca3af'}}>{portfolio.length} {portfolio.length === 1 ? 'company' : 'companies'}</span>
+            </div>
+            {(() => {
+              const unrealizedGain = totalImp - totalDep;
+              const statC = (v) => v > 0 ? '#10b981' : v < 0 ? '#ef4444' : '#9ca3af';
+              const stats = [
+                { l: 'Deployed', v: fmtC(totalDep), sub: 'cost basis', c: '#111827' },
+                { l: 'Implied', v: fmtC(totalImp), sub: 'marked value', c: totalImp >= totalDep ? '#10b981' : '#ef4444' },
+                { l: 'Gain', v: unrealizedGain === 0 ? '—' : (unrealizedGain > 0 ? `+${fmtC(unrealizedGain)}` : `−${fmtC(Math.abs(unrealizedGain))}`), sub: 'unrealized', c: statC(unrealizedGain) },
+                { l: 'MOIC', v: moic ? `${moic.toFixed(2)}x` : '—', sub: 'blended', c: moic >= 1.5 ? '#10b981' : moic >= 1 ? '#5B6DC4' : '#9ca3af' },
+                { l: 'DPI', v: dpi > 0 ? `${dpi.toFixed(2)}x` : '0.00x', sub: 'distributed/paid-in', c: dpi >= 1 ? '#10b981' : dpi > 0 ? '#5B6DC4' : '#9ca3af' },
+                { l: 'Watching', v: String(deals.filter(d => d.status === 'watching').length), sub: `${portfolio.length} invested`, c: '#5B6DC4' },
+              ];
+              return (
+                <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10}}>
+                  {stats.map(({ l, v, sub, c }) => (
+                    <div key={l} style={{background:'#f9fafb',borderRadius:12,padding:'10px 12px'}}>
+                      <p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.7,marginBottom:4}}>{l}</p>
+                      <p style={{fontSize:16,fontWeight:700,color:c,lineHeight:1.2}}>{v}</p>
+                      <p style={{fontSize:10,color:'#c4c4c4',marginTop:3}}>{sub}</p>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
-          {(()=>{
-            const unrealizedGain = totalImp - totalDep;
-            const statC = (v, pos='#10b981', neg='#ef4444', neu='#9ca3af') => v > 0 ? pos : v < 0 ? neg : neu;
-            const stats = [
-              { l:'Deployed', v:fmtC(totalDep), sub:'cost basis', c:'#111827' },
-              { l:'Implied', v:fmtC(totalImp), sub:'marked value', c:totalImp>=totalDep?'#10b981':'#ef4444' },
-              { l:'Gain', v:unrealizedGain===0?'—':(unrealizedGain>0?`+${fmtC(unrealizedGain)}`:`−${fmtC(Math.abs(unrealizedGain))}`), sub:'unrealized', c:statC(unrealizedGain) },
-              { l:'MOIC', v:moic?`${moic.toFixed(2)}x`:'—', sub:'blended', c:moic>=1.5?'#10b981':moic>=1?'#5B6DC4':'#9ca3af' },
-              { l:'DPI', v:dpi>0?`${dpi.toFixed(2)}x`:'0.00x', sub:'distributed/paid-in', c:dpi>=1?'#10b981':dpi>0?'#5B6DC4':'#9ca3af' },
-              { l:'Watching', v:String(deals.filter(d=>d.status==='watching').length), sub:`${portfolio.length} invested`, c:'#5B6DC4' },
-            ];
-            return (
-              <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10}}>
-                {stats.map(({l,v,sub,c})=>(
-                  <div key={l} style={{background:'#f9fafb',borderRadius:12,padding:'10px 12px'}}>
-                    <p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.7,marginBottom:4}}>{l}</p>
-                    <p style={{fontSize:16,fontWeight:700,color:c,lineHeight:1.2}}>{v}</p>
-                    <p style={{fontSize:10,color:'#c4c4c4',marginTop:3}}>{sub}</p>
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
-        </div>}
+        )}
 
         <div style={{marginBottom:14}}>
           <div style={{background:'white',borderRadius:14,border:'1px solid #e5e7eb',padding:'6px 12px',display:'flex',alignItems:'center',gap:10}}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search companies..." style={{border:'none',outline:'none',fontSize:14,flex:1,color:'#111827'}}/>
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search companies..." style={{border:'none',outline:'none',fontSize:14,flex:1,color:'#111827',background:'transparent'}}/>
           </div>
         </div>
 
         <div style={{display:'flex',flexDirection:'column',gap:16}}>
-          {fInvested.length>0&&<div>
-            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}><span style={{width:8,height:8,borderRadius:99,background:'#10b981',display:'inline-block'}}/><p style={{fontSize:11,fontWeight:600,color:'#6b7280',textTransform:'uppercase',letterSpacing:.8}}>Invested · {fInvested.length}</p></div>
-            <div style={{display:'flex',flexDirection:'column',gap:10}}>{fInvested.map(d=><InvestedCard key={d.id} deal={d} onClick={()=>{setSelected(d);setPage('detail');}}/>)}</div>
-          </div>}
-          {fWatching.length>0&&<div>
-            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}><span style={{width:8,height:8,borderRadius:99,background:'#9ca3af',display:'inline-block'}}/><p style={{fontSize:11,fontWeight:600,color:'#6b7280',textTransform:'uppercase',letterSpacing:.8}}>Watching · {fWatching.length}</p></div>
-            <div style={{display:'flex',flexDirection:'column',gap:10}}>{fWatching.map(d=><WatchingCard key={d.id} deal={d} onClick={()=>{setSelected(d);setPage('detail');}}/>)}</div>
-          </div>}
-          {filtered.length===0&&<p style={{textAlign:'center',color:'#9ca3af',padding:40}}>No companies yet — add your first deal</p>}
+          {fInvested.length > 0 && (
+            <div>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+                <span style={{width:8,height:8,borderRadius:99,background:'#10b981',display:'inline-block'}}/>
+                <p style={{fontSize:11,fontWeight:600,color:'#6b7280',textTransform:'uppercase',letterSpacing:.8}}>Invested · {fInvested.length}</p>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                {fInvested.map(d => <InvestedCard key={d.id} deal={d} onClick={() => { setSelected(d); setPage('detail'); }}/>)}
+              </div>
+            </div>
+          )}
+          {fWatching.length > 0 && (
+            <div>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+                <span style={{width:8,height:8,borderRadius:99,background:'#9ca3af',display:'inline-block'}}/>
+                <p style={{fontSize:11,fontWeight:600,color:'#6b7280',textTransform:'uppercase',letterSpacing:.8}}>Watching · {fWatching.length}</p>
+              </div>
+              <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                {fWatching.map(d => <WatchingCard key={d.id} deal={d} onClick={() => { setSelected(d); setPage('detail'); }}/>)}
+              </div>
+            </div>
+          )}
+          {filtered.length === 0 && (
+            <div style={{textAlign:'center',padding:'60px 20px',color:'#9ca3af'}}>
+              <p style={{fontWeight:500,marginBottom:4}}>No companies yet</p>
+              <p style={{fontSize:13}}>Add your first investment or import from AngelList</p>
+            </div>
+          )}
         </div>
-        <p style={{textAlign:'center',fontSize:12,color:'#9ca3af',marginTop:28}}>{portfolio.length} investment{portfolio.length!==1?'s':''}</p>
+
+        <p style={{textAlign:'center',fontSize:12,color:'#9ca3af',marginTop:28}}>
+          {portfolio.length} investment{portfolio.length !== 1 ? 's' : ''}
+        </p>
       </div>
 
-      {showAdd&&<AddModal onClose={()=>setShowAdd(false)} onAdd={addDeal}/>}
-      {toast&&<Toast msg={typeof toast==='string'?toast:toast.message} onClose={()=>setToast(null)}/>}
+      {showAdd && <AddModal onClose={() => setShowAdd(false)} onAdd={addDeal}/>}
+      {showImport && <ImportModal onClose={() => setShowImport(false)} onImport={addDeal}/>}
+      {toast && <Toast msg={typeof toast === 'string' ? toast : toast.message} onClose={() => setToast(null)}/>}
     </div>
   );
 }
