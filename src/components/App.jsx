@@ -4504,9 +4504,7 @@ function ConvexApp({ userMenu, syncStatus, user }) {
           </div>
         </header>
         <main className="px-6 py-6">
-          {selected.status === 'invested'
-            <DetailView deal={selected} onUpdate={updateDeal} setToast={setToast} />
-          }
+          <DetailView deal={selected} onUpdate={updateDeal} setToast={setToast} />
         </main>
         {toast && <Toast message={typeof toast === "string" ? toast : toast.message} type={typeof toast === "string" ? "success" : (toast.type || "success")} onClose={() => setToastRaw(null)} />}
       </div>
