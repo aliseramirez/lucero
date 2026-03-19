@@ -2455,6 +2455,7 @@ const dAgo = daysAgo;
 const genId = generateId;
 const dUntil = daysUntil;
 const STAGE_MAT = STAGE_MATURITY;
+const getCB = getEffectiveCostBasis;
 
 const METRIC_DEFAULTS = {
   lab:   ['TRL level (1–9)', 'Grant / non-dilutive funding ($)', 'Key technical milestone hit'],
@@ -4878,6 +4879,31 @@ function ConvexApp({ userMenu, syncStatus, user }) {
 // ROOT APP WITH PROVIDERS
 // ============================================================================
 
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error('App crash:', error, info); }
+  render() {
+    if (this.state.error) return (
+      <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'#fafaf9',padding:24}}>
+        <div style={{maxWidth:480,textAlign:'center'}}>
+          <div style={{width:48,height:48,background:'#4A1942',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',margin:'0 auto 16px'}}>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#F5DFA0" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          </div>
+          <h2 style={{fontSize:18,fontWeight:700,color:'#111827',marginBottom:8}}>Something went wrong</h2>
+          <p style={{fontSize:13,color:'#6b7280',marginBottom:16,fontFamily:'monospace',background:'#f3f4f6',padding:'8px 12px',borderRadius:8,textAlign:'left',whiteSpace:'pre-wrap',wordBreak:'break-all'}}>
+            {this.state.error?.message || String(this.state.error)}
+          </p>
+          <button onClick={()=>window.location.reload()} style={{padding:'8px 20px',background:'#4A1942',color:'white',border:'none',borderRadius:10,cursor:'pointer',fontSize:14}}>
+            Reload
+          </button>
+        </div>
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
 const App = () => {
   const { user, isLoading, isAuthenticated, signInWithProvider, signOut } = useAuth();
 
@@ -4899,11 +4925,13 @@ const App = () => {
   if (!isAuthenticated) return <SimpleLoginPage onLogin={handleLogin} />;
 
   return (
-    <ConvexApp
-      userMenu={<SimpleUserMenu user={user} onLogout={handleLogout} />}
-      syncStatus={null}
-      user={user}
-    />
+    <ErrorBoundary>
+      <ConvexApp
+        userMenu={<SimpleUserMenu user={user} onLogout={handleLogout} />}
+        syncStatus={null}
+        user={user}
+      />
+    </ErrorBoundary>
   );
 };
 
