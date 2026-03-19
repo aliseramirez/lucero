@@ -4205,7 +4205,9 @@ function ConvexApp({ userMenu, syncStatus, user }) {
         if (!mounted) return;
 
         if (error) {
-          console.error('Error loading deals:', error);
+          console.error('Supabase error loading deals:', error);
+          // Still show the app — just with empty state
+          setDeals([]);
           setDealsLoading(false);
           return;
         }
@@ -4214,31 +4216,53 @@ function ConvexApp({ userMenu, syncStatus, user }) {
           setDeals(data.map(row => ({ ...row.data, id: row.id })));
           setDealsLoading(false);
         } else {
-          // New user — seed demo data
+          // New user — show empty state immediately, seed demo in background
+          setDeals([]);
+          setDealsLoading(false);
+          // Seed demo deals in background
           const demo = createDemoDeals();
-          if (mounted) {
-            setDeals(demo);
-            setDealsLoading(false);
-          }
-          // Write demo deals in background without blocking
           for (const deal of demo) {
             const { id, ...dealData } = deal;
-            await supabase.from('deals').insert({
+            const { error: insertError } = await supabase.from('deals').insert({
               id,
               user_id: user.id,
               company_name: deal.companyName,
               status: deal.status,
               data: dealData
             });
+            if (insertError) {
+              console.error('Demo insert error:', insertError);
+              break;
+            }
+          }
+          // Reload after seeding
+          if (mounted) {
+            const { data: seeded } = await supabase
+              .from('deals')
+              .select('id, data')
+              .eq('user_id', user.id);
+            if (mounted && seeded?.length > 0) {
+              setDeals(seeded.map(row => ({ ...row.data, id: row.id })));
+            }
           }
         }
       } catch (e) {
-        console.error('loadDeals error:', e);
-        if (mounted) setDealsLoading(false);
+        console.error('loadDeals exception:', e);
+        if (mounted) {
+          setDeals([]);
+          setDealsLoading(false);
+        }
       }
     };
     loadDeals();
-    return () => { mounted = false; };
+    // Hard timeout — if loading takes more than 5s something is wrong, unblock the UI
+    const timeout = setTimeout(() => {
+      if (mounted) {
+        console.warn('loadDeals timeout — unblocking UI');
+        setDealsLoading(false);
+      }
+    }, 5000);
+    return () => { mounted = false; clearTimeout(timeout); };
   }, [user?.id]);
 
   // Invested deals — used for health scoring and portfolio summary
