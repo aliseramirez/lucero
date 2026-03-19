@@ -1177,7 +1177,7 @@ const AddPortfolioModal = ({ onClose, onAdd }) => {
     
     const now = new Date().toISOString();
     const baseFields = {
-      id: crypto.randomUUID(),
+      id: Date.now().toString(),
       companyName: form.companyName,
       logoUrl: null,
       status: form.companyStatus,
@@ -2471,102 +2471,1709 @@ const InvestedView = ({ deal, onUpdate, setToast }) => {
 // Portfolio Monitor Page - Health tracking and news feed for invested companies
 // Main App (internal, wrapped by auth)
 // ── Deal list card components — defined at module level so React reconciler is stable ──
-const DealInvestedCard = ({ deal, onSelect }) => {
-  const agentCache = getAgentCache();
-  const founderName = deal.founders?.[0]?.name || '';
-  // Use agent signals only — update log signals are merged inside calcDealHealth automatically
-  const signals = agentCache[deal.id]?.signals || [];
-  const health = calcDealHealth(deal, signals);
-  const moic = calcMOIC(deal);
-  const method = getValuationMethod(deal);
-  const trlLabel = {'lab':'TRL 1–3','pilot':'TRL 4–6','scale':'TRL 7–8','deploy':'TRL 9','fund':'Fund'}[health.maturity] || health.maturity;
+
+// Aliases so preview components work in production context
+const fmtC = formatCurrency;
+const dAgo = daysAgo;
+const genId = generateId;
+const dUntil = daysUntil;
+const STAGE_MAT = STAGE_MATURITY;
+
+const METRIC_DEFAULTS = {
+  lab:   ['TRL level (1–9)', 'Grant / non-dilutive funding ($)', 'Key technical milestone hit'],
+  pilot: ['Pilot throughput vs spec (%)', 'Cost per unit vs target ($)', 'LOIs or pilot customers signed'],
+  scale: ['Commercial customers', 'Cost per unit ($)', 'ARR ($)'],
+  deploy:[], // revenue only
+  fund:  [],
+};
+const getMethod = (deal) => { const inv=deal.investment||{}; if(inv.valuationMethod) return inv.valuationMethod; const m=STAGE_MAT[deal.stage]||'lab'; return m==='lab'||m==='pilot'?'mark-at-cost':m==='fund'?'nav-lp':'last-round'; };
+const getMethodLabel = (m) => ({'mark-at-cost':'Mark at cost','last-round':'Last round','safe-cap':'SAFE cap','nav-lp':'Fund NAV'}[m]||m);
+const calcIV = (deal) => { const inv=deal.investment||{}; const m=getMethod(deal); const cb=getCB(inv); if(m==='mark-at-cost') return cb; if(inv.impliedValue>0) return inv.impliedValue; if(inv.ownershipPercent&&inv.impliedValuation) return Math.round((inv.ownershipPercent/100)*inv.impliedValuation); return cb; };
+const calcMOIC = (deal) => { const cb=getCB(deal.investment||{}); return cb?calcIV(deal)/cb:null; };
+const calcMarkup = (deal) => { const inv=deal.investment||{}; const m=getMethod(deal); if(m==='mark-at-cost'||m==='nav-lp') return null; const cur=inv.impliedValuation; if(!cur) return null; if(inv.vehicle==='SAFE'&&deal.terms?.cap) return cur/deal.terms.cap; if(inv.entryPostMoneyValuation>0) return cur/inv.entryPostMoneyValuation; return null; };
+const getStaleness = (deal) => { const d=deal.investment?.lastValuationDate; if(!d) return 'unknown'; const x=dAgo(d); return x<90?'fresh':x<180?'ok':x<365?'stale':'very-stale'; };
+const STALE_COL = { fresh:'#10b981',ok:'#5B6DC4',stale:'#f59e0b','very-stale':'#ef4444',unknown:'#78716c' };
+
+// Derive current ownership from latest fundraise history entry
+const getCurrentOwnership = (deal) => {
+  const history = (deal.fundraiseHistory||[]).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  if (!history.length) return deal.investment?.ownershipPercent||null;
+  const latest = history[history.length-1];
+  return latest.ownershipAfter || deal.investment?.ownershipPercent || null;
+};
+
+// Derive implied value from latest priced round post-money val × ownership
+const getHistoryImpliedValue = (deal) => {
+  const history = (deal.fundraiseHistory||[]).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const cb = getCB(deal.investment||{});
+  for (let i=history.length-1; i>=0; i--) {
+    const r = history[i];
+    if (r.postMoneyVal && r.ownershipAfter) {
+      return Math.round(r.postMoneyVal * (r.ownershipAfter/100));
+    }
+    if (r.postMoneyVal && deal.investment?.ownershipPercent) {
+      // apply cumulative dilution from this round to now
+      const laterRounds = history.slice(i+1);
+      const cumDilution = laterRounds.reduce((acc,lr)=>acc*(1-(lr.dilutionPct||20)/100),1);
+      const currentOwn = (deal.investment.ownershipPercent/100) * cumDilution;
+      return Math.round(r.postMoneyVal * currentOwn);
+    }
+  }
+  return null;
+};
+
+// Project ownership + implied value after active raise closes
+const getProjected = (deal) => {
+  const raise = deal.activeRaise;
+  if (!raise?.dilutionPct) return null;
+  const currentOwn = getCurrentOwnership(deal);
+  if (!currentOwn) return null;
+  const dilPct = Number(raise.dilutionPct)||20;
+  const projectedOwn = currentOwn * (1 - dilPct/100);
+  // If raise has a target amount and we know current post-money, project new post-money
+  const history = (deal.fundraiseHistory||[]).sort((a,b)=>new Date(a.date)-new Date(b.date));
+  const latestRound = history[history.length-1];
+  const currentPostMoney = latestRound?.postMoneyVal || deal.investment?.impliedValuation || null;
+  const projectedPostMoney = currentPostMoney && raise.targetAmount
+    ? currentPostMoney + Number(raise.targetAmount) : null;
+  const projectedIV = projectedPostMoney
+    ? Math.round(projectedPostMoney * (projectedOwn/100))
+    : null;
+  const cb = getCB(deal.investment||{});
+  const projectedMOIC = projectedIV && cb ? projectedIV/cb : null;
+  return {projectedOwn, projectedIV, projectedMOIC, dilPct, projectedPostMoney};
+};
+
+// ── HEALTH ENGINE ────────────────────────────────────────────────────────────
+const SIG_KW = {
+  hardware_milestone:['pilot','commissioning','operational','plant','demonstration','megawatt','gigawatt','mwh','gwh'],
+  policy_positive:['ira','doe loan','arpa-e','sbir','45q','45v','48c','investment tax credit'],
+  policy_risk:['rollback','repeal','tariff','ira repeal','epa reversal','permit denied'],
+  offtake:['offtake','ppa','supply agreement','loi','letter of intent','mou','anchor customer'],
+  team_risk:['ceo departure','cto left','co-founder left','founder resigned'],
+  funding_signal:['series a','series b','seed round','raised','closed funding'],
+};
+const SIG_PATS = [
+  { pat:/raised|closed.{0,15}round|new.{0,10}funding/i, s:'positive', t:'funding_signal', l:'Funding event mentioned' },
+  { pat:/customer|signed|offtake|ppa|loi|mou/i, s:'positive', t:'offtake', l:'Customer or offtake signal' },
+  { pat:/launched|deployed|operational|commission|on.track/i, s:'positive', t:'hardware_milestone', l:'Milestone progress' },
+  { pat:/grant|award|doe|arpa|sbir/i, s:'positive', t:'policy_positive', l:'Grant or public funding' },
+  { pat:/delay|behind.{0,10}schedule|push.{0,10}back/i, s:'negative', t:'risk', l:'Delay or setback' },
+  { pat:/left.{0,10}(company|team)|resigned|departed/i, s:'negative', t:'team_risk', l:'Team departure' },
+];
+const parseNote = (text,date) => { if(!text||text.length<20) return []; const seen=new Set(); return SIG_PATS.filter(({pat,s,t})=>{ if(!pat.test(text)||seen.has(t+s)) return false; seen.add(t+s); return true; }).map(({s,t,l})=>({type:t,title:l,description:text.slice(0,100),sentiment:s,date:date||new Date().toISOString(),fromUpdate:true})); };
+const getUpdateSigs = (deal) => (deal.milestones||[]).filter(m=>m.type==='update'&&dAgo(m.date)<180).flatMap(m=>parseNote(m.description,m.date));
+const classifySig = (sig) => { const txt=`${sig.title} ${sig.description}`.toLowerCase(); return Object.entries(SIG_KW).filter(([,kws])=>kws.some(k=>txt.includes(k))).map(([t])=>t); };
+
+const calcHealth = (deal, extSigs=[]) => {
+  const inv=deal.investment||{}; const mat=STAGE_MAT[deal.stage]||'lab';
+  const sigs=[...extSigs,...getUpdateSigs(deal)].map(s=>({...s,tags:classifySig(s)}));
+  const cb=getCB(inv); const iv=calcIV(deal); const moic=cb>0?iv/cb:null; const method=getMethod(deal);
+  let score=50; const factors=[]; let needsCheckIn=false; let checkInReason=null;
+
+  const lastUpd=inv.lastUpdateReceived||deal.lastUpdateReceived;
+  const nextExp=inv.nextUpdateExpected||deal.nextUpdateExpected;
+  const dSinceUpd=lastUpd?dAgo(lastUpd):999;
+  const dUntilNext=nextExp?dUntil(nextExp):null;
+  const overdueThr=mat==='lab'?60:30;
+  const isOverdue=dUntilNext!==null&&dUntilNext<-overdueThr;
+
+  // ── Grounded check-in triggers (real data only) ───────────────────────────
+  if(isOverdue){needsCheckIn=true;checkInReason=`Update ${Math.abs(dUntilNext)}d overdue`;}
+  else if(dSinceUpd>(mat==='lab'?180:90)&&dSinceUpd!==999){needsCheckIn=true;checkInReason=`No contact in ${Math.round(dSinceUpd/30)} months`;}
+
+  // No metric logged in 90 days
+  const allMetrics=[...(deal.metricsToWatch||[])];
+  const hasRecentMetric = allMetrics.some(m=>{
+    const log=(deal.metricsLog||{})[m]||[];
+    return log.some(e=>dAgo(e.date)<=90);
+  });
+  const hasRecentRevenue=(deal.revenueLog||[]).some(e=>dAgo(e.date)<=90);
+  if(allMetrics.length>0&&!hasRecentMetric&&!hasRecentRevenue){
+    if(!needsCheckIn){needsCheckIn=true;checkInReason='No metrics logged in 90 days';}
+  }
+
+  // Stale mark for priced rounds
+  const staleness=getStaleness(deal);
+  if((staleness==='very-stale')&&method!=='mark-at-cost'){
+    if(!needsCheckIn){needsCheckIn=true;checkInReason='Valuation mark is over a year old';}
+  }
+
+  // Team risk signal from updates
+  sigs.forEach(s=>{
+    const pos=s.sentiment==='positive'; const neg=s.sentiment==='negative';
+    if(s.tags.includes('hardware_milestone')){const v=pos?15:-18;score+=v;factors.push({l:pos?'Hardware milestone confirmed':'Hardware setback',v,t:pos?'positive':'negative'});if(neg&&!needsCheckIn){needsCheckIn=true;checkInReason='Hardware setback in recent update';}}
+    if(s.tags.includes('policy_positive')&&pos){score+=12;factors.push({l:'Policy tailwind / federal funding',v:12,t:'positive'});}
+    if(s.tags.includes('policy_risk')){score-=15;if(!needsCheckIn){needsCheckIn=true;checkInReason='Policy risk signal';}factors.push({l:'Policy risk signal',v:-15,t:'negative'});}
+    if(s.tags.includes('offtake')&&pos){score+=14;factors.push({l:'Offtake / customer signal',v:14,t:'positive'});}
+    if(s.tags.includes('team_risk')){score-=14;if(!needsCheckIn){needsCheckIn=true;checkInReason='Team risk in recent update';}factors.push({l:'Team / leadership risk',v:-14,t:'negative'});}
+    if(s.tags.includes('funding_signal')&&pos){score+=10;factors.push({l:'New funding signal',v:10,t:'positive'});}
+  });
+
+  if(isOverdue){score-=12;factors.push({l:'Update overdue',v:-12,t:'warning'});}
+  else if(dSinceUpd<45){score+=8;factors.push({l:'Recent founder update',v:8,t:'positive'});}
+  if(dSinceUpd>(mat==='lab'?180:90)){score-=8;factors.push({l:`${Math.round(dSinceUpd/30)}mo silence`,v:-8,t:'warning'});}
+  if(mat==='lab'){const ms=(deal.milestones||[]).filter(m=>dAgo(m.date)<180&&['product','partnership','fundraising'].includes(m.type)).length;if(ms>=1){score+=10;factors.push({l:'Recent technical milestone',v:10,t:'positive'});}factors.push({l:'Lab stage — marked at cost, TRL 1–3',v:0,t:'info'});}
+  if(mat==='pilot'){const ps=(deal.milestones||[]).filter(m=>dAgo(m.date)<180&&m.type!=='update').length;if(ps>=2){score+=12;factors.push({l:'Active pilot cadence',v:12,t:'positive'});}factors.push({l:'Pilot stage — TRL 4–6',v:0,t:'info'});}
+  if(mat==='scale'&&moic!==null){if(moic>=2){score+=18;factors.push({l:`${moic.toFixed(1)}x last-round mark`,v:18,t:'positive'});}else if(moic>=1.3){score+=8;factors.push({l:`${moic.toFixed(1)}x last-round mark`,v:8,t:'positive'});}else if(moic<0.8){score-=18;factors.push({l:`${moic.toFixed(1)}x — below cost`,v:-18,t:'negative'});}}
+  if(mat==='deploy'&&moic!==null){if(moic>=3){score+=22;factors.push({l:`${moic.toFixed(1)}x — deployment premium`,v:22,t:'positive'});}else if(moic>=1.5){score+=12;factors.push({l:`${moic.toFixed(1)}x last-round mark`,v:12,t:'positive'});}else if(moic<1){score-=20;factors.push({l:`${moic.toFixed(1)}x — late-stage below cost`,v:-20,t:'negative'});}}
+  const ms2=deal.monitoring||{};
+  if(ms2.healthStatus==='thriving'){score+=8;factors.push({l:'Founder reports on track',v:8,t:'positive'});}
+  if(ms2.healthStatus==='struggling'){score-=15;if(!needsCheckIn){needsCheckIn=true;checkInReason='Self-reported struggling';}factors.push({l:'Self-reported struggling',v:-15,t:'negative'});}
+  if(ms2.runwayMonths&&ms2.runwayMonths<9){score-=12;if(!needsCheckIn){needsCheckIn=true;checkInReason=`${ms2.runwayMonths}mo runway`;}factors.push({l:`${ms2.runwayMonths}mo runway`,v:-12,t:'negative'});}
+
+  score=Math.max(0,Math.min(100,score));
+  const seen2=new Set(); const deduped=factors.filter(f=>{if(seen2.has(f.l)) return false;seen2.add(f.l);return true;});
+  const label=score>=80?'On Track':score>=62?'Steady':score>=42?'Investigate':'Critical';
+  const color=score>=80?'#10b981':score>=62?'#5B6DC4':score>=42?'#f59e0b':'#ef4444';
+  const bg=score>=80?'#f0fdf4':score>=62?'#FFFBEC':score>=42?'#fffbeb':'#fef2f2';
+  return {score,label,color,bg,factors:deduped,needsCheckIn,checkInReason,mat,moic,method};
+};
+
+const calcPortHealth = (deals) => {
+  const inv=deals.filter(d=>d.status==='invested');
+  if(!inv.length) return {score:0,label:'No data',color:'#78716c'};
+  const scores=inv.map(d=>calcHealth(d,[]));
+  const total=inv.reduce((s,d)=>s+getCB(d.investment||{}),0);
+  const ws=scores.reduce((s,h,i)=>{const w=total>0?getCB(inv[i].investment||{})/total:1/scores.length;return s+h.score*w;},0);
+  const score=Math.round(ws);
+  return {score,label:score>=80?'On Track':score>=62?'Steady':score>=42?'Investigate':'Critical',color:score>=80?'#10b981':score>=62?'#5B6DC4':score>=42?'#f59e0b':'#ef4444'};
+};
+
+// ── DEMO DATA ────────────────────────────────────────────────────────────────
+const DEALS = [
+  {id:'1',companyName:'Form Energy',status:'invested',stage:'series-e',industry:'Long-Duration Storage',website:'https://formenergy.com',overview:'Iron-air battery technology enabling multi-day energy storage at 1/10th the cost of lithium-ion.',founders:[{name:'Mateo Jaramillo',role:'CEO'},{name:'Yet-Ming Chiang',role:'Co-Founder'}],terms:{instrument:'Equity'},investment:{amount:25000,costBasis:25000,vehicle:'Equity',date:new Date(Date.now()-365*864e5).toISOString(),ownershipPercent:0.01,entryPostMoneyValuation:800000000,impliedValuation:1500000000,impliedValue:45000,lastValuationDate:new Date(Date.now()-90*864e5).toISOString(),valuationMethod:'last-round',trlAtInvestment:8,lastUpdateReceived:new Date(Date.now()-14*864e5).toISOString(),nextUpdateExpected:new Date(Date.now()+20*864e5).toISOString()},coInvestors:[{id:'a',name:'ArcelorMittal',fund:'XCarb',role:'lead'},{id:'b',name:'GIC',fund:'GIC',role:'co-investor'},{id:'c',name:'Bill Gates',fund:'Breakthrough Energy',role:'co-investor'}],liquidityEvents:[],monitoring:{healthStatus:'thriving',fundraisingStatus:'not-raising',runwayMonths:24},memo:'Invested at Series E because iron-air is the only credible path to multi-day storage at grid scale. ArcelorMittal as lead investor is the key signal — they are a direct customer and strategic buyer, not just financial. Core bet: if they hit $50/kWh at scale, they win the long-duration market outright. Key risks: manufacturing scale-up, competition from other chemistries, utility procurement cycles are slow.',founderUpdates:[{id:'fu1',type:'text',content:'Q3 update from Mateo: first battery systems are rolling off the Weirton line. On track for Georgia Power delivery in Q3. Cost curve tracking ahead of plan at $142/kWh — targeting $100 by end of 2025. Team is 280 people now, hiring 40 more in manufacturing.',date:new Date(Date.now()-14*864e5).toISOString(),signals:['hardware_milestone']},{id:'fu2',type:'text',content:'Q2 update: Georgia Power offtake signed for 1.5 GWh. This is the first utility-scale agreement. Woodside also in late-stage discussions for Australian deployment. Revenue recognized on first delivery expected Q4.',date:new Date(Date.now()-90*864e5).toISOString(),signals:['offtake','funding_signal']},],
+    metricsToWatch:['GWh capacity installed','Cost per kWh','Utility offtake contracts'],
+    metricsLog:{
+      'GWh capacity installed':[{v:0,date:new Date(Date.now()-365*864e5).toISOString()},{v:0.5,date:new Date(Date.now()-180*864e5).toISOString()},{v:1.2,date:new Date(Date.now()-60*864e5).toISOString()}],
+      'Cost per kWh':[{v:180,date:new Date(Date.now()-365*864e5).toISOString()},{v:155,date:new Date(Date.now()-180*864e5).toISOString()},{v:130,date:new Date(Date.now()-60*864e5).toISOString()}],
+      'Utility offtake contracts':[{v:0,date:new Date(Date.now()-365*864e5).toISOString()},{v:1,date:new Date(Date.now()-180*864e5).toISOString()},{v:1,date:new Date(Date.now()-60*864e5).toISOString()}],
+    },
+    fundraiseHistory:[
+      {id:'fh1',roundName:'Seed',date:'2018-06-01',amountRaised:9000000,preMoneyVal:16000000,postMoneyVal:25000000,leadInvestor:'Breakthrough Energy Ventures',followOns:['Prelude Ventures'],dilutionPct:20,ownershipBefore:null,ownershipAfter:null},
+      {id:'fh2',roundName:'Series A',date:'2019-08-01',amountRaised:20000000,preMoneyVal:80000000,postMoneyVal:100000000,leadInvestor:'Breakthrough Energy Ventures',followOns:['MIT','"The Engine"'],dilutionPct:20,ownershipBefore:null,ownershipAfter:null},
+      {id:'fh3',roundName:'Series B',date:'2020-12-01',amountRaised:50000000,preMoneyVal:200000000,postMoneyVal:250000000,leadInvestor:'ArcelorMittal',followOns:['Breakthrough Energy','Prelude'],dilutionPct:20,ownershipBefore:0.012,ownershipAfter:0.0096},
+      {id:'fh4',roundName:'Series C',date:'2021-08-01',amountRaised:200000000,preMoneyVal:600000000,postMoneyVal:800000000,leadInvestor:'GIC',followOns:['ArcelorMittal','Bill Gates','Capricorn'],dilutionPct:20,ownershipBefore:0.0096,ownershipAfter:0.0077},
+      {id:'fh5',roundName:'Series E',date:'2023-03-01',amountRaised:450000000,preMoneyVal:1050000000,postMoneyVal:1500000000,leadInvestor:'ArcelorMittal',followOns:['GIC','Bill Gates','Breakthrough Energy'],dilutionPct:18,ownershipBefore:0.011,ownershipAfter:0.0091},
+    ],
+    revenueLog:[{v:0,date:new Date(Date.now()-365*864e5).toISOString()},{v:1200000,date:new Date(Date.now()-180*864e5).toISOString()},{v:4800000,date:new Date(Date.now()-60*864e5).toISOString()}],
+    documents:[
+      {id:'d1',label:'Series E Term Sheet',type:'Term Sheet',url:'https://drive.google.com/file/example1',addedAt:new Date(Date.now()-365*864e5).toISOString()},
+      {id:'d2',label:'Equity Agreement',type:'SAFE',url:'https://drive.google.com/file/example2',addedAt:new Date(Date.now()-364*864e5).toISOString()},
+      {id:'d3',label:'Form Energy Pitch Deck 2023',type:'Pitch Deck',url:'https://drive.google.com/file/example3',addedAt:new Date(Date.now()-300*864e5).toISOString()},
+    ],healthHistory:[{date:new Date(Date.now()-300*864e5).toISOString(),score:72,label:'Steady'},{date:new Date(Date.now()-180*864e5).toISOString(),score:82,label:'On Track'},{date:new Date(Date.now()-60*864e5).toISOString(),score:80,label:'On Track'},{date:new Date(Date.now()-14*864e5).toISOString(),score:74,label:'Steady'}],milestones:[{id:'m1',type:'fundraising',title:'Series E — $450M',description:'Led by ArcelorMittal and GIC. Total raised over $1B.',date:new Date(Date.now()-300*864e5).toISOString()},{id:'m2',type:'partnership',title:'Georgia Power offtake',description:'First utility-scale deployment agreement.',date:new Date(Date.now()-180*864e5).toISOString()},{id:'m4',type:'update',title:'Founder update',description:'First battery systems rolling off the line. On track for utility delivery Q3.',date:new Date(Date.now()-14*864e5).toISOString()}]},
+  {id:'2',companyName:'Exowatt',status:'invested',stage:'seed',industry:'AI Energy Infrastructure',website:'https://exowatt.com',overview:'Modular solar thermal energy storage for AI data centers. Firm, low-cost power without grid dependency.',founders:[{name:'Joey Kline',role:'CEO'}],terms:{instrument:'SAFE',cap:85000000,proRata:true},investment:{amount:10000,costBasis:10000,vehicle:'SAFE',date:new Date(Date.now()-200*864e5).toISOString(),ownershipPercent:0.02,entryPostMoneyValuation:85000000,impliedValuation:85000000,impliedValue:11800,lastValuationDate:new Date(Date.now()-190*864e5).toISOString(),valuationMethod:'safe-cap',trlAtInvestment:5,lastUpdateReceived:new Date(Date.now()-45*864e5).toISOString(),nextUpdateExpected:new Date(Date.now()-10*864e5).toISOString()},coInvestors:[{id:'a',name:'Marc Andreessen',fund:'a16z',role:'lead'},{id:'b',name:'Sam Altman',fund:'Personal',role:'co-investor'}],liquidityEvents:[],monitoring:{healthStatus:'stable',fundraisingStatus:'exploring',runwayMonths:18},
+    metricsToWatch:['MW contracted','Data center pilots','Cost per MWh firm'],
+    metricsLog:{
+      'MW contracted':[{v:0,date:new Date(Date.now()-200*864e5).toISOString()},{v:5,date:new Date(Date.now()-100*864e5).toISOString()}],
+      'Data center pilots':[{v:0,date:new Date(Date.now()-200*864e5).toISOString()},{v:1,date:new Date(Date.now()-100*864e5).toISOString()}],
+      'Cost per MWh firm':[{v:95,date:new Date(Date.now()-200*864e5).toISOString()},{v:88,date:new Date(Date.now()-100*864e5).toISOString()}],
+    },healthHistory:[{date:new Date(Date.now()-200*864e5).toISOString(),score:58,label:'Steady'},{date:new Date(Date.now()-100*864e5).toISOString(),score:60,label:'Steady'},{date:new Date(Date.now()-50*864e5).toISOString(),score:52,label:'Investigate'},{date:new Date(Date.now()-20*864e5).toISOString(),score:46,label:'Investigate'}],milestones:[{id:'m1',type:'fundraising',title:'Seed — $20M',description:'Led by a16z with Sam Altman.',date:new Date(Date.now()-190*864e5).toISOString()},{id:'m2',type:'partnership',title:'Meta pilot',description:'First hyperscaler agreement for off-grid AI compute.',date:new Date(Date.now()-100*864e5).toISOString()}]},
+  {id:'3',companyName:'Ammobia',status:'invested',stage:'seed',industry:'Green Ammonia',website:'https://ammobia.com',overview:'Electrochemical green ammonia at the point of use. Eliminates Haber-Bosch — fertilizer from air, water, and renewables.',founders:[{name:'Travis Sherck',role:'CEO'}],terms:{instrument:'SAFE',cap:20000000,mfn:true},investment:{amount:10000,costBasis:10000,vehicle:'SAFE',date:new Date(Date.now()-150*864e5).toISOString(),ownershipPercent:0.05,entryPostMoneyValuation:20000000,impliedValuation:null,impliedValue:null,lastValuationDate:null,valuationMethod:'mark-at-cost',trlAtInvestment:3,lastUpdateReceived:new Date(Date.now()-30*864e5).toISOString(),nextUpdateExpected:new Date(Date.now()+45*864e5).toISOString()},coInvestors:[{id:'a',name:'Prelude Ventures',fund:'Prelude',role:'lead'}],liquidityEvents:[],monitoring:{healthStatus:'stable',fundraisingStatus:'not-raising',runwayMonths:20},
+    metricsToWatch:['Energy efficiency (MWh/tonne NH3)','Pilot farm deployments','Cost vs conventional ($/tonne)'],
+    metricsLog:{
+      'Energy efficiency (MWh/tonne NH3)':[{v:11.2,date:new Date(Date.now()-150*864e5).toISOString()},{v:9.8,date:new Date(Date.now()-120*864e5).toISOString()},{v:8.5,date:new Date(Date.now()-30*864e5).toISOString()}],
+      'Pilot farm deployments':[{v:0,date:new Date(Date.now()-150*864e5).toISOString()},{v:1,date:new Date(Date.now()-45*864e5).toISOString()}],
+      'Cost vs conventional ($/tonne)':[{v:820,date:new Date(Date.now()-150*864e5).toISOString()},{v:710,date:new Date(Date.now()-30*864e5).toISOString()}],
+    },healthHistory:[{date:new Date(Date.now()-150*864e5).toISOString(),score:55,label:'Steady'},{date:new Date(Date.now()-100*864e5).toISOString(),score:60,label:'Steady'},{date:new Date(Date.now()-20*864e5).toISOString(),score:65,label:'Steady'}],milestones:[{id:'m1',type:'product',title:'Bench-scale demo',description:'8.5 MWh/tonne NH3 at lab scale.',date:new Date(Date.now()-120*864e5).toISOString()},{id:'m3',type:'update',title:'Founder update',description:'Pilot running well. Yield 12% above projection. Starting conversations with two more co-ops.',date:new Date(Date.now()-30*864e5).toISOString()}]},
+  {id:'4',companyName:'Rondo Energy',status:'watching',stage:'series-b',industry:'Industrial Heat',website:'https://rondoenergy.com',overview:'Electric thermal energy storage (ETES) that converts renewable electricity into industrial heat at 1500°C. Targets the 20% of global emissions from industrial processes that cannot be electrified directly.',founders:[{name:"John O'Donnell",role:'CEO',background:'Ex-Alphabet/Google X, energy storage pioneer'},{name:'John Sakamoto',role:'CTO',background:'Thermal systems engineering'}],terms:{},monitoring:{healthStatus:'stable',fundraisingStatus:'raising'},
+    activeRaise:{roundName:'Series B',targetAmount:100000000,leadInvestor:'Microsoft Climate Innovation Fund',leadStatus:'confirmed',participants:'Rio Tinto,Breakthrough Energy',expectedClose:'2026-06-01',dilutionPct:20},
+    fundraiseHistory:[
+      {id:'rh1',roundName:'Series A',date:'2022-01-01',amountRaised:22000000,preMoneyVal:58000000,postMoneyVal:80000000,leadInvestor:'Breakthrough Energy Ventures',followOns:['Congruent Ventures'],dilutionPct:20,ownershipBefore:null,ownershipAfter:null},
+    ],watchingNotes:"Strong team and real industrial demand. Watching Series B close — if IRA manufacturing credits get locked in for their heat blocks, the unit economics get dramatically better. Want to see one more named customer before committing.",memo:"Passing for now. Sales cycle for industrial customers feels long relative to current valuation. Woodside is one data point — want a second named customer before committing. Technology is validated but commercial traction is the open question. Watching: if a tier-1 climate fund leads the Series B and a second customer is named, I am in.",decisionReasoning:"Strong team and real industrial demand. Technology is validated — the question is whether the sales cycle for industrial customers is fast enough to justify the current valuation. Woodside partnership is promising but one data point isn't enough. Watching the Series B investor quality closely.",revisitDate:new Date(Date.now()+30*864e5).toISOString(),investmentTriggers:["Second named industrial customer signs contract","IRA 48C credits confirmed applicable to heat blocks","Series B closes with a tier-1 climate fund leading"],convictionLog:[{date:new Date(Date.now()-60*864e5).toISOString(),level:'medium'},{date:new Date(Date.now()-30*864e5).toISOString(),level:'medium'},{date:new Date(Date.now()-5*864e5).toISOString(),level:'high'}],coInvestors:[{id:'ci1',name:'Microsoft',fund:'Microsoft Climate Innovation Fund',role:'strategic'},{id:'ci2',name:'Rio Tinto',fund:'Rio Tinto Ventures',role:'strategic'}],milestones:[{id:'m1',type:'fundraising',title:'Series B — raising $100M',description:'Microsoft and Rio Tinto as strategic investors. Round not yet closed.',date:new Date(Date.now()-30*864e5).toISOString()},{id:'m2',type:'partnership',title:'Woodside Energy partnership',description:'First industrial deployment at LNG facility — heat block system replacing gas burners',date:new Date(Date.now()-50*864e5).toISOString()},{id:'m3',type:'product',title:'First commercial heat block shipped',description:'Initial unit delivered to Woodside facility. Performance data expected in 90 days.',date:new Date(Date.now()-10*864e5).toISOString()}]},
+];
+
+// ── SMALL COMPONENTS ─────────────────────────────────────────────────────────
+const TRLBadge = ({trl}) => {
+  if (!trl) return null;
+  const c=trl<=3?'#78716c':trl<=6?'#5B6DC4':trl<=8?'#f59e0b':'#10b981';
+  const l=trl<=3?'Lab':trl<=6?'Pilot':trl<=8?'Scale':'Deploy';
+  return <span style={{display:'inline-flex',alignItems:'center',gap:4,fontSize:11,padding:'2px 8px',borderRadius:99,fontWeight:600,backgroundColor:c+'20',color:c}}><span style={{width:6,height:6,borderRadius:99,backgroundColor:c,display:'inline-block'}}/>TRL {trl} · {l}</span>;
+};
+
+const ROLE_CFG = {lead:{l:'Lead',c:'#5B6DC4',bg:'#FFFBEC'},'co-investor':{l:'Co-investor',c:'#10b981',bg:'#f0fdf4'},'follow-on':{l:'Follow-on',c:'#f59e0b',bg:'#fefce8'},strategic:{l:'Strategic',c:'#7c3aed',bg:'#f5f3ff'}};
+const LIQ_TYPES = {exit:{l:'Exit / Acquisition',i:'🏆',c:'#10b981',bg:'#f0fdf4'},secondary:{l:'Secondary sale',i:'🔄',c:'#5B6DC4',bg:'#FFFBEC'},distribution:{l:'Distribution',i:'💸',c:'#f59e0b',bg:'#fefce8'},writedown:{l:'Write-down',i:'📉',c:'#ef4444',bg:'#fef2f2'}};
+
+// Toast defined above
+
+const Pill = ({children,color='#78716c',bg='#f5f5f4'}) => <span style={{fontSize:11,padding:'2px 8px',borderRadius:99,fontWeight:600,color,backgroundColor:bg}}>{children}</span>;
+
+// Known logo URLs — direct from company CDNs or public sources
+const KNOWN_LOGOS = {
+  'formenergy.com': 'https://formenergy.com/wp-content/uploads/2021/09/FE-Logo-Black.png',
+  'exowatt.com': 'https://exowatt.com/img/logo.svg',
+  'ammobia.com': 'https://ammobia.com/assets/logo.svg',
+  'rondoenergy.com': 'https://rondoenergy.com/wp-content/uploads/2022/09/rondo-logo.svg',
+};
+
+const CompanyLogo = ({name, website, size=44, radius=12, fallbackBg='#f3f4f6', fallbackColor='#6b7280'}) => {
+  const [failed, setFailed] = useState(false);
+
+  let src = null;
+  if (website && !failed) {
+    try {
+      const domain = new URL(website).hostname.replace('www.', '');
+      src = KNOWN_LOGOS[domain] || `https://logo.clearbit.com/${domain}`;
+    } catch {}
+  }
+
+  if (src && !failed) return (
+    <div style={{width:size,height:size,borderRadius:radius,overflow:'hidden',flexShrink:0,background:'white',border:'1px solid #f3f4f6',display:'flex',alignItems:'center',justifyContent:'center'}}>
+      <img src={src} onError={()=>setFailed(true)} alt={name}
+        style={{width:'80%',height:'80%',objectFit:'contain'}}/>
+    </div>
+  );
   return (
-    <div
-      onClick={onSelect}
-      className="bg-white dark:bg-stone-800 rounded-2xl border cursor-pointer transition-all hover:shadow-md"
-      style={{ borderColor: health.shouldCheckIn ? '#f59e0b60' : '#e7e5e4' }}
-    >
-      {health.shouldCheckIn && (
-        <div className="px-4 py-1.5 rounded-t-2xl flex items-center gap-2" style={{ backgroundColor: '#fef3c7', borderBottom: '1px solid #fde68a' }}>
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          <span className="text-xs font-medium text-amber-800">{health.checkInReason}</span>
+    <div style={{width:size,height:size,borderRadius:radius,background:fallbackBg,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:800,fontSize:size*0.4,color:fallbackColor,flexShrink:0}}>
+      {name?.[0]?.toUpperCase()}
+    </div>
+  );
+};
+
+const MetricsTracker = ({deal, onUpdate}) => {
+  const metrics = deal.metricsToWatch || [];
+  const log = deal.metricsLog || {};
+  const revenue = deal.revenueLog || [];
+  const [active, setActive] = useState(null);
+  const [inputVal, setInputVal] = useState('');
+  const [inputDate, setInputDate] = useState(new Date().toISOString().slice(0,10));
+  const [showReadings, setShowReadings] = useState(null); // key of expanded readings
+
+  const logEntry = (key, isRevenue=false) => {
+    if (!inputVal || isNaN(Number(inputVal))) return;
+    const entry = { v: Number(inputVal), date: new Date(inputDate).toISOString() };
+    const updated = isRevenue
+      ? { ...deal, revenueLog: [...revenue, entry].sort((a,b)=>new Date(a.date)-new Date(b.date)) }
+      : { ...deal, metricsLog: { ...log, [key]: [...(log[key]||[]), entry].sort((a,b)=>new Date(a.date)-new Date(b.date)) }};
+    onUpdate(updated);
+    setActive(null); setInputVal(''); setInputDate(new Date().toISOString().slice(0,10));
+  };
+
+  const deleteReading = (key, idx, isRevenue=false) => {
+    if (isRevenue) {
+      onUpdate({...deal, revenueLog: revenue.filter((_,i)=>i!==idx)});
+    } else {
+      const updated = [...(log[key]||[])];
+      updated.splice(idx,1);
+      onUpdate({...deal, metricsLog:{...log,[key]:updated}});
+    }
+  };
+
+  const MiniLine = ({ readings, color='#5B6DC4', wide=false }) => {
+    if (!readings || readings.length < 2) return <span style={{fontSize:11,color:'#d1d5db'}}>no readings yet</span>;
+    const W=wide?200:80, H=wide?44:28, P=3;
+    const vals = readings.map(r=>r.v);
+    const mn=Math.min(...vals), mx=Math.max(...vals), rng=mx-mn||1;
+    const pts = readings.map((r,i)=>[P+(i/(readings.length-1))*(W-P*2), P+((mx-r.v)/rng)*(H-P*2)]);
+    const poly = pts.map(([x,y])=>`${x},${y}`).join(' ');
+    const area = wide ? `M${pts[0][0]},${H} `+pts.map(([x,y])=>`L${x},${y}`).join(' ')+` L${pts[pts.length-1][0]},${H} Z` : null;
+    const latest = readings[readings.length-1];
+    const prev = readings[readings.length-2];
+    const dir = latest.v > prev.v ? '↑' : latest.v < prev.v ? '↓' : '→';
+    const dirColor = latest.v > prev.v ? '#10b981' : latest.v < prev.v ? '#ef4444' : '#9ca3af';
+    return (
+      <div style={{display:'flex',alignItems:'center',gap:10}}>
+        <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+          {area&&<defs><linearGradient id={`rg${color.replace('#','')}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity=".15"/><stop offset="100%" stopColor={color} stopOpacity="0"/></linearGradient></defs>}
+          {area&&<path d={area} fill={`url(#rg${color.replace('#','')})`}/>}
+          <polyline points={poly} fill="none" stroke={color} strokeWidth={wide?"2":"1.5"} strokeLinejoin="round" strokeLinecap="round"/>
+          <circle cx={pts[pts.length-1][0]} cy={pts[pts.length-1][1]} r={wide?"3":"2.5"} fill={color}/>
+        </svg>
+        <div>
+          <div style={{display:'flex',alignItems:'baseline',gap:4}}>
+            <span style={{fontSize:wide?16:13,fontWeight:700,color:'#111827'}}>{wide?fmtC(latest.v):latest.v.toLocaleString()}</span>
+            <span style={{fontSize:wide?14:13,fontWeight:600,color:dirColor}}>{dir}</span>
+          </div>
+          {wide&&<p style={{fontSize:11,color:'#9ca3af',marginTop:1}}>{readings.length} readings · last {dAgo(latest.date)}d ago</p>}
+        </div>
+      </div>
+    );
+  };
+
+  const hasRevenue = revenue.length > 0;
+  const isLoggingRevenue = active === '__revenue__';
+
+  return (
+    <div style={{background:'white',borderRadius:16,padding:20,marginBottom:12}}>
+      {/* Revenue — primary, always shown */}
+      <div style={{marginBottom:metrics.length?16:0}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:hasRevenue?10:6}}>
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Revenue</span>
+            {!hasRevenue&&<span style={{fontSize:11,color:'#9ca3af'}}>— log when available</span>}
+          </div>
+          {!isLoggingRevenue&&<button onClick={()=>{setActive('__revenue__');setInputVal('');}} style={{fontSize:12,color:'#5B6DC4',background:'none',border:'none',cursor:'pointer',padding:0}}>+ Log</button>}
+        </div>
+        {isLoggingRevenue?(
+          <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+            <input type="number" value={inputVal} onChange={e=>setInputVal(e.target.value)} placeholder="Revenue ($)" autoFocus style={{width:110,padding:'6px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none'}}/>
+            <input type="date" value={inputDate} onChange={e=>setInputDate(e.target.value)} style={{padding:'6px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none'}}/>
+            <button onClick={()=>logEntry('__revenue__',true)} disabled={!inputVal||isNaN(Number(inputVal))} style={{padding:'6px 14px',background:'#10b981',color:'white',border:'none',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',opacity:inputVal?1:.5}}>Save</button>
+            <button onClick={()=>setActive(null)} style={{padding:'6px 10px',background:'none',border:'none',color:'#9ca3af',fontSize:13,cursor:'pointer'}}>Cancel</button>
+          </div>
+        ):hasRevenue?(
+          <div>
+            <MiniLine readings={revenue} color="#10b981" wide={true}/>
+            <button onClick={()=>setShowReadings(showReadings==='__revenue__'?null:'__revenue__')} style={{marginTop:6,fontSize:11,color:'#9ca3af',background:'none',border:'none',cursor:'pointer',padding:0}}>{showReadings==='__revenue__'?'Hide readings':'Edit readings ({revenue.length})'}</button>
+            {showReadings==='__revenue__'&&<div style={{marginTop:8,display:'flex',flexDirection:'column',gap:4}}>
+              {revenue.map((r,i)=>(
+                <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 8px',background:'#f9fafb',borderRadius:8}}>
+                  <span style={{fontSize:12,color:'#374151',flex:1}}>{fmtC(r.v)} · {new Date(r.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</span>
+                  <button onClick={()=>deleteReading('__revenue__',i,true)} style={{color:'#d1d5db',background:'none',border:'none',cursor:'pointer',padding:2,fontSize:11}}>✕</button>
+                </div>
+              ))}
+            </div>}
+          </div>
+        ):(
+          <p style={{fontSize:12,color:'#d1d5db',fontStyle:'italic'}}>No revenue logged yet — add a reading once the company starts generating revenue</p>
+        )}
+      </div>
+
+      {/* Traction metrics — pre-revenue proxies, hidden once revenue exists */}
+      {metrics.length>0&&!hasRevenue&&<div style={{borderTop:'1px solid #f3f4f6',paddingTop:14}}>
+        <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:12}}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          <span style={{fontSize:12,fontWeight:600,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6}}>Traction metrics</span>
+        </div>
+        <div style={{display:'flex',flexDirection:'column',gap:0}}>
+          {metrics.map((metric, i) => {
+            const readings = log[metric] || [];
+            const isLogging = active === metric;
+            return (
+              <div key={metric} style={{paddingTop:i===0?0:12,marginTop:i===0?0:12,borderTop:i===0?'none':'1px solid #f9fafb'}}>
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
+                  <span style={{fontSize:13,color:'#374151',fontWeight:500,flex:1,minWidth:0,marginRight:12}}>{metric}</span>
+                  {!isLogging&&<button onClick={()=>{setActive(metric);setInputVal('');}} style={{fontSize:12,color:'#5B6DC4',background:'none',border:'none',cursor:'pointer',padding:0,flexShrink:0}}>+ Log</button>}
+                </div>
+                {isLogging?(
+                  <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                    <input type="number" value={inputVal} onChange={e=>setInputVal(e.target.value)} placeholder="Value" autoFocus style={{width:90,padding:'6px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none'}}/>
+                    <input type="date" value={inputDate} onChange={e=>setInputDate(e.target.value)} style={{padding:'6px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none'}}/>
+                    <button onClick={()=>logEntry(metric,false)} disabled={!inputVal||isNaN(Number(inputVal))} style={{padding:'6px 14px',background:'#5B6DC4',color:'white',border:'none',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',opacity:inputVal?1:.5}}>Save</button>
+                    <button onClick={()=>setActive(null)} style={{padding:'6px 10px',background:'none',border:'none',color:'#9ca3af',fontSize:13,cursor:'pointer'}}>Cancel</button>
+                  </div>
+                ):readings.length===0?(
+                  <p style={{fontSize:12,color:'#d1d5db',fontStyle:'italic'}}>No readings yet</p>
+                ):(
+                  <div>
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                      <MiniLine readings={readings} color={['#5B6DC4','#f59e0b','#7c3aed'][i%3]}/>
+                      <div style={{display:'flex',alignItems:'center',gap:8}}>
+                        <span style={{fontSize:11,color:'#9ca3af'}}>{readings.length} reading{readings.length!==1?'s':''}</span>
+                        <button onClick={()=>setShowReadings(showReadings===metric?null:metric)} style={{fontSize:11,color:'#9ca3af',background:'none',border:'none',cursor:'pointer',padding:0}}>{showReadings===metric?'▲':'▼'}</button>
+                      </div>
+                    </div>
+                    {showReadings===metric&&<div style={{marginTop:8,display:'flex',flexDirection:'column',gap:4}}>
+                      {readings.map((r,ri)=>(
+                        <div key={ri} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 8px',background:'#f9fafb',borderRadius:8}}>
+                          <span style={{fontSize:12,color:'#374151',flex:1}}>{r.v.toLocaleString()} · {new Date(r.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</span>
+                          <button onClick={()=>deleteReading(metric,ri,false)} style={{color:'#d1d5db',background:'none',border:'none',cursor:'pointer',padding:2,fontSize:11}}>✕</button>
+                        </div>
+                      ))}
+                    </div>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>}
+    </div>
+  );
+};
+
+// ── SECTIONS ─────────────────────────────────────────────────────────────────
+const DOC_TYPES = ['SAFE','Term Sheet','Cap Table','Pitch Deck','Due Diligence','Financial Model','Legal','Other'];
+
+const DocumentsSection = ({deal, onUpdate, setToast}) => {
+  const [open, setOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({label:'', url:'', type:'SAFE'});
+  const docs = deal.documents || [];
+
+  const add = () => {
+    if (!form.label.trim() || !form.url.trim()) return;
+    let url = form.url.trim();
+    if (!url.startsWith('http')) url = 'https://' + url;
+    const entry = {id:genId(), label:form.label.trim(), url, type:form.type, addedAt:new Date().toISOString()};
+    onUpdate({...deal, documents:[...docs, entry]});
+    setForm({label:'', url:'', type:'SAFE'});
+    setAdding(false);
+    setToast('Document added');
+  };
+
+  const remove = (id) => onUpdate({...deal, documents:docs.filter(d=>d.id!==id)});
+
+  const typeIcon = (type) => ({'SAFE':'📄','Term Sheet':'📋','Cap Table':'📊','Pitch Deck':'📑','Due Diligence':'🔍','Financial Model':'💹','Legal':'⚖️','Other':'📎'}[type]||'📎');
+
+  return (
+    <div style={{background:'white',borderRadius:16,overflow:'hidden',marginBottom:12}}>
+      <button onClick={()=>setOpen(v=>!v)} style={{width:'100%',padding:'14px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'none',border:'none',cursor:'pointer'}}>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Documents</span>
+          {docs.length>0&&<span style={{fontSize:12,color:'#9ca3af'}}>({docs.length})</span>}
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          {!open&&docs.length>0&&<span style={{fontSize:12,color:'#9ca3af'}}>{docs.slice(0,2).map(d=>d.type).join(' · ')}{docs.length>2?` +${docs.length-2}`:''}</span>}
+          <span style={{color:'#9ca3af',fontSize:11}}>{open?'▲':'▼'}</span>
+        </div>
+      </button>
+      {open&&<div style={{padding:'0 20px 20px',borderTop:'1px solid #f3f4f6'}}>
+        {docs.length===0&&!adding&&<p style={{fontSize:13,color:'#9ca3af',textAlign:'center',padding:'8px 0'}}>No documents yet — paste a Google Drive or Dropbox link</p>}
+        {docs.map(doc=>(
+          <div key={doc.id} style={{display:'flex',alignItems:'center',gap:12,paddingTop:12}}>
+            <span style={{fontSize:16,flexShrink:0}}>{typeIcon(doc.type)}</span>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:2}}>
+                <a href={doc.url} target="_blank" rel="noopener noreferrer" style={{fontWeight:500,fontSize:13,color:'#5B6DC4',textDecoration:'none',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{doc.label}</a>
+                <Pill>{doc.type}</Pill>
+              </div>
+              <p style={{fontSize:11,color:'#9ca3af'}}>Added {dAgo(doc.addedAt)}d ago</p>
+            </div>
+            <button onClick={()=>remove(doc.id)} style={{color:'#d1d5db',background:'none',border:'none',cursor:'pointer',padding:4,flexShrink:0}}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+        ))}
+        {adding?(
+          <div style={{paddingTop:12,marginTop:docs.length?8:0,borderTop:docs.length?'1px solid #f3f4f6':'none'}}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
+              <input placeholder="Label (e.g. Series A SAFE)" value={form.label} onChange={e=>setForm(f=>({...f,label:e.target.value}))} style={{padding:'8px 10px',border:'1px solid #e5e7eb',borderRadius:10,fontSize:13}}/>
+              <select value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))} style={{padding:'8px 10px',border:'1px solid #e5e7eb',borderRadius:10,fontSize:13}}>
+                {DOC_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <input placeholder="Google Drive or Dropbox URL" value={form.url} onChange={e=>setForm(f=>({...f,url:e.target.value}))} style={{width:'100%',padding:'8px 10px',border:'1px solid #e5e7eb',borderRadius:10,fontSize:13,marginBottom:8,boxSizing:'border-box'}}/>
+            <div style={{display:'flex',gap:8}}>
+              <button onClick={add} disabled={!form.label.trim()||!form.url.trim()} style={{flex:1,padding:'8px',background:'#5B6DC4',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',opacity:form.label.trim()&&form.url.trim()?1:.5}}>Add document</button>
+              <button onClick={()=>setAdding(false)} style={{padding:'8px 14px',background:'none',border:'none',color:'#6b7280',fontSize:13,cursor:'pointer'}}>Cancel</button>
+            </div>
+          </div>
+        ):<button onClick={()=>setAdding(true)} style={{marginTop:10,background:'none',border:'none',color:'#5B6DC4',fontSize:13,cursor:'pointer',padding:0}}>+ Add document</button>}
+      </div>}
+    </div>
+  );
+};
+
+// ── ACTIVE RAISE CARD ─────────────────────────────────────────────────────────
+const ActiveRaiseCard = ({deal, onUpdate, setToast}) => {
+  const raise = deal.activeRaise || {};
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    roundName: raise.roundName||'',
+    targetAmount: raise.targetAmount||'',
+    leadInvestor: raise.leadInvestor||'',
+    leadStatus: raise.leadStatus||'rumored',
+    participants: raise.participants||'',
+    expectedClose: raise.expectedClose||'',
+    dilutionPct: raise.dilutionPct||'20',
+  });
+
+  if (!deal.monitoring?.fundraisingStatus==='raising' && !raise.roundName) return null;
+  if (deal.monitoring?.fundraisingStatus !== 'raising' && !raise.roundName) return null;
+
+  const curOwnership = inv => {
+    const history = (deal.fundraiseHistory||[]);
+    if (!history.length) return null;
+    return history[history.length-1].ownershipAfter || null;
+  };
+  const projectedOwnership = raise.dilutionPct && raise.ownershipBefore
+    ? (raise.ownershipBefore * (1 - Number(raise.dilutionPct)/100)).toFixed(3)
+    : null;
+
+  const closeRound = () => {
+    const raise = deal.activeRaise||{};
+    const now = new Date().toISOString();
+    const currentOwn = getCurrentOwnership(deal);
+    const dilPct = Number(raise.dilutionPct)||20;
+    const ownershipAfter = currentOwn ? Number((currentOwn*(1-dilPct/100)).toFixed(3)) : null;
+    const newRound = {
+      id: genId(),
+      roundName: raise.roundName||'Unknown round',
+      date: now.slice(0,10),
+      amountRaised: raise.targetAmount||null,
+      postMoneyVal: raise.targetAmount && deal.investment?.impliedValuation
+        ? deal.investment.impliedValuation + Number(raise.targetAmount) : null,
+      leadInvestor: raise.leadInvestor||null,
+      followOns: raise.participants ? raise.participants.split(',').map(s=>s.trim()).filter(Boolean) : [],
+      dilutionPct: dilPct,
+      ownershipBefore: currentOwn||null,
+      ownershipAfter,
+    };
+    // Compute new implied value from closed round
+    const newIV = newRound.postMoneyVal && ownershipAfter
+      ? Math.round(newRound.postMoneyVal*(ownershipAfter/100)) : null;
+    onUpdate({
+      ...deal,
+      activeRaise: null,
+      monitoring: {...(deal.monitoring||{}), fundraisingStatus:'not-raising'},
+      fundraiseHistory: [...(deal.fundraiseHistory||[]), newRound],
+      investment: {
+        ...(deal.investment||{}),
+        ...(newIV ? {impliedValue:newIV, impliedValuation:newRound.postMoneyVal, lastValuationDate:now, valuationMethod:'last-round'} : {}),
+      },
+    });
+    setToast(`${newRound.roundName} closed — history and valuation updated`);
+  };
+
+  const save = () => {
+    const updated = {...form, targetAmount:form.targetAmount?Number(form.targetAmount):null, dilutionPct:Number(form.dilutionPct)||20};
+    onUpdate({...deal, activeRaise:updated, monitoring:{...(deal.monitoring||{}), fundraisingStatus:'raising'}});
+    setEditing(false);
+    setToast('Raise details saved');
+  };
+
+  const LEAD_STATUS = {confirmed:{l:'Lead confirmed',c:'#10b981'},rumored:{l:'Lead rumored',c:'#f59e0b'},none:{l:'No lead yet',c:'#ef4444'}};
+
+  return (
+    <div style={{borderRadius:16,overflow:'hidden',border:'2px solid #5B6DC4',marginBottom:12,background:'white'}}>
+      <div style={{padding:'12px 18px',background:'#5B6DC4',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+          <span style={{fontWeight:700,fontSize:13,color:'white'}}>Actively raising{raise.roundName?` · ${raise.roundName}`:''}</span>
+          {raise.expectedClose&&<span style={{fontSize:12,color:'rgba(255,255,255,.75)'}}>· Close {new Date(raise.expectedClose).toLocaleDateString('en-US',{month:'short',year:'numeric'})}</span>}
+        </div>
+        <div style={{display:'flex',gap:6}}>
+          <button onClick={()=>{setForm({roundName:raise.roundName||'',targetAmount:raise.targetAmount||'',leadInvestor:raise.leadInvestor||'',leadStatus:raise.leadStatus||'rumored',participants:raise.participants||'',expectedClose:raise.expectedClose||'',dilutionPct:raise.dilutionPct||'20'});setEditing(v=>!v);}} style={{background:'rgba(255,255,255,.2)',border:'none',borderRadius:8,padding:'4px 10px',color:'white',fontSize:12,cursor:'pointer',fontWeight:500}}>{editing?'Cancel':'Edit'}</button>
+          <button onClick={closeRound} style={{background:'white',border:'none',borderRadius:8,padding:'4px 10px',color:'#5B6DC4',fontSize:12,cursor:'pointer',fontWeight:700}}>Close round ✓</button>
+        </div>
+      </div>
+
+      {editing?(
+        <div style={{padding:16,display:'flex',flexDirection:'column',gap:10}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+            <div><p style={{fontSize:11,color:'#6b7280',marginBottom:3}}>Round name</p><input value={form.roundName} onChange={e=>setForm(f=>({...f,roundName:e.target.value}))} placeholder="Series B" style={{width:'100%',padding:'7px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,boxSizing:'border-box'}}/></div>
+            <div><p style={{fontSize:11,color:'#6b7280',marginBottom:3}}>Target amount ($)</p><input type="number" value={form.targetAmount} onChange={e=>setForm(f=>({...f,targetAmount:e.target.value}))} placeholder="10000000" style={{width:'100%',padding:'7px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,boxSizing:'border-box'}}/></div>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+            <div><p style={{fontSize:11,color:'#6b7280',marginBottom:3}}>Lead investor</p><input value={form.leadInvestor} onChange={e=>setForm(f=>({...f,leadInvestor:e.target.value}))} placeholder="Investor name" style={{width:'100%',padding:'7px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,boxSizing:'border-box'}}/></div>
+            <div><p style={{fontSize:11,color:'#6b7280',marginBottom:3}}>Lead status</p>
+              <select value={form.leadStatus} onChange={e=>setForm(f=>({...f,leadStatus:e.target.value}))} style={{width:'100%',padding:'7px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13}}>
+                <option value="confirmed">Confirmed</option><option value="rumored">Rumored</option><option value="none">None yet</option>
+              </select>
+            </div>
+          </div>
+          <div><p style={{fontSize:11,color:'#6b7280',marginBottom:3}}>Other participants (comma-separated)</p><input value={form.participants} onChange={e=>setForm(f=>({...f,participants:e.target.value}))} placeholder="Breakthrough Energy, GIC" style={{width:'100%',padding:'7px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,boxSizing:'border-box'}}/></div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+            <div><p style={{fontSize:11,color:'#6b7280',marginBottom:3}}>Expected close</p><input type="date" value={form.expectedClose} onChange={e=>setForm(f=>({...f,expectedClose:e.target.value}))} style={{width:'100%',padding:'7px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,boxSizing:'border-box'}}/></div>
+            <div><p style={{fontSize:11,color:'#6b7280',marginBottom:3}}>Expected dilution (%)</p><input type="number" value={form.dilutionPct} onChange={e=>setForm(f=>({...f,dilutionPct:e.target.value}))} placeholder="20" style={{width:'100%',padding:'7px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,boxSizing:'border-box'}}/></div>
+          </div>
+          <button onClick={save} style={{padding:'8px',background:'#5B6DC4',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer'}}>Save</button>
+        </div>
+      ):(
+        <div style={{padding:'14px 18px',display:'flex',flexDirection:'column',gap:10}}>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10}}>
+            <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:3}}>Target</p><p style={{fontSize:15,fontWeight:700,color:'#111827'}}>{raise.targetAmount?fmtC(raise.targetAmount):'—'}</p></div>
+            <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:3}}>Lead</p>
+              <div style={{display:'flex',alignItems:'center',gap:5}}>
+                <span style={{width:6,height:6,borderRadius:99,background:LEAD_STATUS[raise.leadStatus||'none']?.c||'#9ca3af',display:'inline-block'}}/>
+                <p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{raise.leadInvestor||LEAD_STATUS[raise.leadStatus||'none']?.l}</p>
+              </div>
+            </div>
+            <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:3}}>Dilution est.</p>
+              <p style={{fontSize:15,fontWeight:700,color:'#5B6DC4'}}>{raise.dilutionPct||20}%</p>
+            </div>
+          </div>
+          {raise.participants&&<div>
+            <p style={{fontSize:11,color:'#9ca3af',marginBottom:4}}>Participants</p>
+            <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+              {raise.participants.split(',').map(p=>p.trim()).filter(Boolean).map((p,i)=><Pill key={i}>{p}</Pill>)}
+            </div>
+          </div>}
+          {raise.leadStatus&&<div style={{padding:'8px 12px',background:LEAD_STATUS[raise.leadStatus]?.c+'12',borderRadius:10,display:'flex',alignItems:'center',gap:6}}>
+            <span style={{width:6,height:6,borderRadius:99,background:LEAD_STATUS[raise.leadStatus].c,display:'inline-block'}}/>
+            <span style={{fontSize:12,color:LEAD_STATUS[raise.leadStatus].c,fontWeight:600}}>{LEAD_STATUS[raise.leadStatus].l}</span>
+            {raise.dilutionPct&&<span style={{fontSize:12,color:'#6b7280',marginLeft:4}}>— projected {raise.dilutionPct}% dilution to your position</span>}
+          </div>}
         </div>
       )}
-      <div className="p-4 flex items-center gap-4">
-        <div className="w-11 h-11 rounded-xl flex items-center justify-center text-base font-bold text-white flex-shrink-0" style={{ backgroundColor: health.color }}>
-          {deal.companyName?.charAt(0)?.toUpperCase()}
+    </div>
+  );
+};
+
+// ── FUNDRAISE HISTORY ──────────────────────────────────────────────────────────
+const FundraiseHistory = ({deal, onUpdate, setToast}) => {
+  const [open, setOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState({roundName:'',date:'',amountRaised:'',preMoneyVal:'',postMoneyVal:'',leadInvestor:'',followOns:'',dilutionPct:'20',ownershipBefore:'',ownershipAfter:''});
+  const rounds = (deal.fundraiseHistory||[]).sort((a,b)=>new Date(a.date)-new Date(b.date));
+
+  const deleteRound = (id) => {
+    onUpdate({...deal, fundraiseHistory:(deal.fundraiseHistory||[]).filter(r=>r.id!==id)});
+    setToast('Round removed');
+  };
+
+  const startEdit = (r) => {
+    setEditingId(r.id);
+    setAdding(false);
+    setForm({
+      roundName:r.roundName||'', date:r.date||'',
+      amountRaised:r.amountRaised||'', preMoneyVal:r.preMoneyVal||'',
+      postMoneyVal:r.postMoneyVal||'', leadInvestor:r.leadInvestor||'',
+      followOns:(r.followOns||[]).join(', '), dilutionPct:r.dilutionPct||'20',
+      ownershipBefore:r.ownershipBefore||'', ownershipAfter:r.ownershipAfter||'',
+    });
+  };
+
+  const saveEdit = () => {
+    if (!form.roundName || !form.date) return;
+    const ownershipAfter = form.ownershipAfter || calcOwnershipAfter(form.ownershipBefore, form.dilutionPct);
+    const updated = {
+      id: editingId,
+      roundName:form.roundName, date:form.date,
+      amountRaised:form.amountRaised?Number(form.amountRaised):null,
+      preMoneyVal:form.preMoneyVal?Number(form.preMoneyVal):null,
+      postMoneyVal:form.postMoneyVal?Number(form.postMoneyVal):null,
+      leadInvestor:form.leadInvestor||null,
+      followOns:form.followOns?form.followOns.split(',').map(s=>s.trim()).filter(Boolean):[],
+      dilutionPct:Number(form.dilutionPct)||20,
+      ownershipBefore:form.ownershipBefore?Number(form.ownershipBefore):null,
+      ownershipAfter:ownershipAfter?Number(ownershipAfter):null,
+    };
+    const updatedInvestment = {...(deal.investment||{})};
+    if (updated.postMoneyVal) { updatedInvestment.impliedValuation=updated.postMoneyVal; updatedInvestment.lastValuationDate=new Date(form.date).toISOString(); updatedInvestment.valuationMethod='last-round'; }
+    if (updated.ownershipAfter) updatedInvestment.ownershipPercent=updated.ownershipAfter;
+    onUpdate({...deal, fundraiseHistory:(deal.fundraiseHistory||[]).map(r=>r.id===editingId?updated:r), investment:updatedInvestment});
+    setEditingId(null);
+    setToast('Round updated — valuation refreshed');
+  };
+
+  const calcOwnershipAfter = (before, dilPct) => {
+    if (!before || !dilPct) return null;
+    return (Number(before) * (1 - Number(dilPct)/100)).toFixed(3);
+  };
+
+  const add = () => {
+    if (!form.roundName || !form.date) return;
+    const ownershipAfter = form.ownershipAfter || calcOwnershipAfter(form.ownershipBefore, form.dilutionPct);
+    const entry = {
+      id: genId(),
+      roundName: form.roundName,
+      date: form.date,
+      amountRaised: form.amountRaised ? Number(form.amountRaised) : null,
+      preMoneyVal: form.preMoneyVal ? Number(form.preMoneyVal) : null,
+      postMoneyVal: form.postMoneyVal ? Number(form.postMoneyVal) : null,
+      leadInvestor: form.leadInvestor || null,
+      followOns: form.followOns ? form.followOns.split(',').map(s=>s.trim()).filter(Boolean) : [],
+      dilutionPct: Number(form.dilutionPct)||20,
+      ownershipBefore: form.ownershipBefore ? Number(form.ownershipBefore) : null,
+      ownershipAfter: ownershipAfter ? Number(ownershipAfter) : null,
+    };
+    // Auto-update valuation mark if post-money is known
+    const updatedInvestment = {...(deal.investment||{})};
+    if (entry.postMoneyVal) {
+      updatedInvestment.impliedValuation = entry.postMoneyVal;
+      updatedInvestment.lastValuationDate = new Date(form.date).toISOString();
+      updatedInvestment.valuationMethod = 'last-round';
+    }
+    if (entry.ownershipAfter) {
+      updatedInvestment.ownershipPercent = entry.ownershipAfter;
+    }
+    onUpdate({...deal, fundraiseHistory:[...(deal.fundraiseHistory||[]), entry], investment:updatedInvestment});
+    setForm({roundName:'',date:'',amountRaised:'',preMoneyVal:'',postMoneyVal:'',leadInvestor:'',followOns:'',dilutionPct:'20',ownershipBefore:'',ownershipAfter:''});
+    setAdding(false);
+    setToast('Round added — valuation and ownership updated');
+  };
+
+  const inp = {width:'100%',padding:'7px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,boxSizing:'border-box'};
+  const lbl = {fontSize:11,color:'#6b7280',marginBottom:3};
+
+  return (
+    <div style={{background:'white',borderRadius:16,overflow:'hidden',marginBottom:12}}>
+      <button onClick={()=>setOpen(v=>!v)} style={{width:'100%',padding:'14px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'none',border:'none',cursor:'pointer'}}>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Fundraise history</span>
+          {rounds.length>0&&<span style={{fontSize:12,color:'#9ca3af'}}>{rounds.length} round{rounds.length!==1?'s':''}</span>}
         </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
-            <h3 className="font-semibold text-stone-900 dark:text-stone-100 text-sm">{deal.companyName}</h3>
-            <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400">{trlLabel}</span>
-          </div>
-          <p className="text-xs text-stone-500 dark:text-stone-400">{deal.industry} · {deal.stage}{founderName ? ` · ${founderName}` : ''}</p>
-          {health.factors.filter(f => f.type !== 'info').slice(0,1).map((f, i) => (
-            <div key={i} className="flex items-center gap-1 mt-1">
-              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${f.type === 'positive' ? 'bg-emerald-400' : f.type === 'negative' ? 'bg-red-400' : 'bg-amber-400'}`}/>
-              <span className="text-xs text-stone-400 dark:text-stone-500">{f.label}</span>
+        <span style={{color:'#9ca3af',fontSize:11}}>{open?'▲':'▼'}</span>
+      </button>
+
+      {open&&<div style={{padding:'0 20px 20px',borderTop:'1px solid #f3f4f6'}}>
+        {rounds.length===0&&!adding&&<p style={{fontSize:13,color:'#9ca3af',textAlign:'center',padding:'12px 0'}}>No rounds logged yet</p>}
+
+        {/* Timeline */}
+        <div style={{position:'relative',paddingLeft:16}}>
+          {rounds.length>0&&<div style={{position:'absolute',left:6,top:8,bottom:8,width:1,background:'#e5e7eb'}}/>}
+          {rounds.map((r,i)=>(
+            <div key={r.id} style={{position:'relative',paddingTop:i===0?8:16}}>
+              <div style={{position:'absolute',left:-10,top:i===0?12:20,width:8,height:8,borderRadius:99,background:'#5B6DC4',border:'2px solid white',boxShadow:'0 0 0 1px #5B6DC4'}}/>
+              {editingId===r.id?(
+                <div style={{background:'#f5f3ff',borderRadius:12,padding:'12px 14px',border:'1px solid #e9d5ff'}}>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
+                    <div><p style={lbl}>Round name *</p><input value={form.roundName} onChange={e=>setForm(f=>({...f,roundName:e.target.value}))} style={inp}/></div>
+                    <div><p style={lbl}>Date *</p><input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={inp}/></div>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:8}}>
+                    <div><p style={lbl}>Amount ($)</p><input type="number" value={form.amountRaised} onChange={e=>setForm(f=>({...f,amountRaised:e.target.value}))} style={inp}/></div>
+                    <div><p style={lbl}>Pre-money ($)</p><input type="number" value={form.preMoneyVal} onChange={e=>setForm(f=>({...f,preMoneyVal:e.target.value}))} style={inp}/></div>
+                    <div><p style={lbl}>Post-money ($)</p><input type="number" value={form.postMoneyVal} onChange={e=>setForm(f=>({...f,postMoneyVal:e.target.value}))} style={inp}/></div>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
+                    <div><p style={lbl}>Lead</p><input value={form.leadInvestor} onChange={e=>setForm(f=>({...f,leadInvestor:e.target.value}))} style={inp}/></div>
+                    <div><p style={lbl}>Follow-ons</p><input value={form.followOns} onChange={e=>setForm(f=>({...f,followOns:e.target.value}))} style={inp}/></div>
+                  </div>
+                  <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:10}}>
+                    <div><p style={lbl}>Ownership before (%)</p><input type="number" value={form.ownershipBefore} onChange={e=>setForm(f=>({...f,ownershipBefore:e.target.value,ownershipAfter:calcOwnershipAfter(e.target.value,f.dilutionPct)||''}))} style={inp}/></div>
+                    <div><p style={lbl}>Dilution (%)</p><input type="number" value={form.dilutionPct} onChange={e=>setForm(f=>({...f,dilutionPct:e.target.value,ownershipAfter:calcOwnershipAfter(f.ownershipBefore,e.target.value)||''}))} style={inp}/></div>
+                    <div><p style={lbl}>Ownership after (%)</p><input type="number" value={form.ownershipAfter} onChange={e=>setForm(f=>({...f,ownershipAfter:e.target.value}))} style={{...inp,background:'#f9fafb'}}/></div>
+                  </div>
+                  <div style={{display:'flex',gap:8}}>
+                    <button onClick={saveEdit} disabled={!form.roundName||!form.date} style={{flex:1,padding:'7px',background:'#5B6DC4',color:'white',border:'none',borderRadius:9,fontWeight:600,fontSize:13,cursor:'pointer',opacity:form.roundName&&form.date?1:.4}}>Save changes</button>
+                    <button onClick={()=>setEditingId(null)} style={{padding:'7px 12px',background:'none',border:'none',color:'#6b7280',fontSize:13,cursor:'pointer'}}>Cancel</button>
+                  </div>
+                </div>
+              ):(
+                <div style={{background:'#f9fafb',borderRadius:12,padding:'12px 14px'}}>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
+                    <div style={{display:'flex',alignItems:'center',gap:8}}>
+                      <span style={{fontWeight:700,fontSize:13,color:'#111827'}}>{r.roundName}</span>
+                      {r.amountRaised&&<Pill color="#5B6DC4" bg="#FFFBEC">{fmtC(r.amountRaised)}</Pill>}
+                    </div>
+                    <div style={{display:'flex',alignItems:'center',gap:8}}>
+                      <span style={{fontSize:11,color:'#9ca3af'}}>{new Date(r.date).toLocaleDateString('en-US',{month:'short',year:'numeric'})}</span>
+                      <button onClick={()=>startEdit(r)} style={{fontSize:11,color:'#9ca3af',background:'none',border:'none',cursor:'pointer',padding:0}}>Edit</button>
+                      <button onClick={()=>deleteRound(r.id)} style={{fontSize:11,color:'#fca5a5',background:'none',border:'none',cursor:'pointer',padding:0}}>Delete</button>
+                    </div>
+                  </div>
+                  <div style={{display:'flex',gap:16,flexWrap:'wrap',marginBottom:r.leadInvestor||r.followOns?.length?8:0}}>
+                    {r.postMoneyVal&&<div><span style={{fontSize:11,color:'#9ca3af'}}>Post-money </span><span style={{fontSize:12,fontWeight:600,color:'#374151'}}>{fmtC(r.postMoneyVal)}</span></div>}
+                    {r.ownershipBefore!=null&&r.ownershipAfter!=null&&<div>
+                      <span style={{fontSize:11,color:'#9ca3af'}}>Your ownership </span>
+                      <span style={{fontSize:12,fontWeight:600,color:'#374151'}}>{r.ownershipBefore}%</span>
+                      <span style={{fontSize:11,color:'#9ca3af'}}> → </span>
+                      <span style={{fontSize:12,fontWeight:600,color:r.ownershipAfter<r.ownershipBefore?'#ef4444':'#374151'}}>{r.ownershipAfter}%</span>
+                      <span style={{fontSize:11,color:'#9ca3af'}}> ({r.dilutionPct}% dilution)</span>
+                    </div>}
+                  </div>
+                  {(r.leadInvestor||r.followOns?.length>0)&&<div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
+                    {r.leadInvestor&&<Pill color="#10b981" bg="#f0fdf4">Lead: {r.leadInvestor}</Pill>}
+                    {r.followOns?.map((f,fi)=><Pill key={fi}>{f}</Pill>)}
+                  </div>}
+                </div>
+              )}
             </div>
           ))}
         </div>
-        <div className="flex flex-col items-end gap-1 flex-shrink-0">
-          <div className="flex items-center gap-1.5">
-            <div className="w-12 h-1.5 rounded-full bg-stone-100 dark:bg-stone-700 overflow-hidden">
-              <div className="h-full rounded-full" style={{ width: `${health.score}%`, backgroundColor: health.color }}/>
+
+        {/* Add round form */}
+        {adding?(
+          <div style={{marginTop:16,paddingTop:16,borderTop:'1px solid #f3f4f6'}}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
+              <div><p style={lbl}>Round name *</p><input value={form.roundName} onChange={e=>setForm(f=>({...f,roundName:e.target.value}))} placeholder="Series A" style={inp}/></div>
+              <div><p style={lbl}>Date *</p><input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={inp}/></div>
             </div>
-            <span className="text-xs font-semibold" style={{ color: health.color }}>{health.label}</span>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:8}}>
+              <div><p style={lbl}>Amount raised ($)</p><input type="number" value={form.amountRaised} onChange={e=>setForm(f=>({...f,amountRaised:e.target.value}))} placeholder="5000000" style={inp}/></div>
+              <div><p style={lbl}>Pre-money val ($)</p><input type="number" value={form.preMoneyVal} onChange={e=>setForm(f=>({...f,preMoneyVal:e.target.value}))} placeholder="20000000" style={inp}/></div>
+              <div><p style={lbl}>Post-money val ($)</p><input type="number" value={form.postMoneyVal} onChange={e=>setForm(f=>({...f,postMoneyVal:e.target.value}))} placeholder="25000000" style={inp}/></div>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
+              <div><p style={lbl}>Lead investor</p><input value={form.leadInvestor} onChange={e=>setForm(f=>({...f,leadInvestor:e.target.value}))} placeholder="Breakthrough Energy" style={inp}/></div>
+              <div><p style={lbl}>Follow-ons (comma-sep)</p><input value={form.followOns} onChange={e=>setForm(f=>({...f,followOns:e.target.value}))} placeholder="GIC, Bill Gates" style={inp}/></div>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:12}}>
+              <div><p style={lbl}>Your ownership before (%)</p><input type="number" value={form.ownershipBefore} onChange={e=>setForm(f=>({...f,ownershipBefore:e.target.value,ownershipAfter:calcOwnershipAfter(e.target.value,f.dilutionPct)||''}))} placeholder="0.05" style={inp}/></div>
+              <div><p style={lbl}>Dilution (%)</p><input type="number" value={form.dilutionPct} onChange={e=>setForm(f=>({...f,dilutionPct:e.target.value,ownershipAfter:calcOwnershipAfter(f.ownershipBefore,e.target.value)||''}))} placeholder="20" style={inp}/></div>
+              <div><p style={lbl}>Ownership after (%)</p><input type="number" value={form.ownershipAfter} onChange={e=>setForm(f=>({...f,ownershipAfter:e.target.value}))} placeholder="auto-calc" style={{...inp,background:'#f9fafb'}}/></div>
+            </div>
+            <div style={{display:'flex',gap:8}}>
+              <button onClick={add} disabled={!form.roundName||!form.date} style={{flex:1,padding:'8px',background:'#5B6DC4',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',opacity:form.roundName&&form.date?1:.4}}>Add round</button>
+              <button onClick={()=>setAdding(false)} style={{padding:'8px 14px',background:'none',border:'none',color:'#6b7280',fontSize:13,cursor:'pointer'}}>Cancel</button>
+            </div>
           </div>
-          <span className="text-sm font-semibold text-stone-800 dark:text-stone-200">{formatCurrency(getEffectiveCostBasis(deal.investment || {}))}</span>
-          {method !== 'mark-at-cost' && moic !== null
-            ? <span className="text-xs font-medium" style={{ color: moic >= 1.0 ? '#10b981' : '#ef4444' }}>{moic.toFixed(2)}x</span>
-            : <span className="text-xs text-stone-400">at cost</span>
-          }
-        </div>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a8a29e" strokeWidth="2" className="flex-shrink-0"><polyline points="9 18 15 12 9 6"/></svg>
+        ):<button onClick={()=>setAdding(true)} style={{marginTop:12,background:'none',border:'none',color:'#5B6DC4',fontSize:13,fontWeight:500,cursor:'pointer',padding:0,display:'flex',alignItems:'center',gap:6}}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Add round
+        </button>}
+      </div>}
+    </div>
+  );
+};
+
+const SignalsSection = ({deal}) => {
+  const allMilestones = (deal.milestones||[])
+    .filter(m => ['fundraising','partnership','product','update'].includes(m.type))
+    .sort((a,b) => new Date(b.date)-new Date(a.date));
+  if (!allMilestones.length) return null;
+  const TYPE_CFG = {
+    fundraising:{color:'#5B6DC4',bg:'#FFFBEC',label:'Funding'},
+    partnership:{color:'#10b981',bg:'#f0fdf4',label:'Partnership'},
+    product:{color:'#f59e0b',bg:'#fffbeb',label:'Product'},
+    update:{color:'#78716c',bg:'#f5f5f4',label:'Update'},
+  };
+  return (
+    <div style={{background:'white',borderRadius:16,padding:20,marginBottom:12}}>
+      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:14}}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Signals</span>
+        <span style={{fontSize:12,color:'#9ca3af'}}>{allMilestones.length} logged</span>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:8}}>
+        {allMilestones.slice(0,6).map((s,i)=>{
+          const cfg=TYPE_CFG[s.type]||TYPE_CFG.update;
+          return <div key={s.id||i} style={{display:'flex',alignItems:'flex-start',gap:10,padding:'10px 12px',borderRadius:12,background:cfg.bg}}>
+            <div style={{flexShrink:0,marginTop:2}}>
+              <Pill color={cfg.color} bg={cfg.color+'18'}>{cfg.label}</Pill>
+            </div>
+            <div style={{flex:1,minWidth:0}}>
+              <p style={{fontSize:13,fontWeight:500,color:'#111827',marginBottom:2}}>{s.title}</p>
+              {s.description&&<p style={{fontSize:12,color:'#6b7280',lineHeight:1.5}}>{s.description}</p>}
+            </div>
+            <span style={{fontSize:11,color:'#9ca3af',flexShrink:0,marginTop:2}}>{dAgo(s.date)}d ago</span>
+          </div>;
+        })}
       </div>
     </div>
   );
 };
 
-const DealWatchingCard = ({ deal, onSelect }) => {
-  const founderName = deal.founders?.[0]?.name || '';
+// ── INVESTMENT MEMO ───────────────────────────────────────────────────────────
+// Written once at the moment of decision. The thesis. Editable anytime.
+const InvestmentMemo = ({deal, onUpdate, setToast}) => {
+  const isWatching = deal.status === 'watching';
+  const label = isWatching ? 'Why I am watching' : 'Investment memo';
+  const placeholder = isWatching
+    ? 'Why are you watching this company? What would move you to invest? What risks are you tracking?'
+    : 'Why did you invest? What is your thesis? What are the key risks? What would make this a winner?';
+  const memo = deal.memo || '';
+  const [editing, setEditing] = useState(!memo);
+  const [draft, setDraft] = useState(memo);
+  const [open, setOpen] = useState(true);
+
+  const save = () => {
+    onUpdate({...deal, memo:draft.trim()});
+    setEditing(false);
+    setToast('Memo saved');
+  };
+
   return (
-    <div
-      onClick={onSelect}
-      className="bg-white dark:bg-stone-800 rounded-2xl border border-stone-200 dark:border-stone-700 cursor-pointer transition-all hover:shadow-md"
-    >
-      <div className="p-4 flex items-center gap-4">
-        <div className="w-11 h-11 rounded-xl flex items-center justify-center text-base font-bold bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400 flex-shrink-0">
-          {deal.companyName?.charAt(0)?.toUpperCase()}
+    <div style={{background:'white',borderRadius:16,overflow:'hidden',marginBottom:12}}>
+      <button onClick={()=>setOpen(v=>!v)} style={{width:'100%',padding:'14px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'none',border:'none',cursor:'pointer'}}>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>{label}</span>
         </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
-            <h3 className="font-semibold text-stone-700 dark:text-stone-300 text-sm">{deal.companyName}</h3>
-            <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-stone-100 dark:bg-stone-700 text-stone-400">{deal.status === 'passed' ? 'Passed' : 'Watching'}</span>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          {memo&&!editing&&open&&<button onClick={e=>{e.stopPropagation();setDraft(memo);setEditing(true);}} style={{fontSize:12,color:'#5B6DC4',background:'none',border:'none',cursor:'pointer',padding:'2px 8px'}}>Edit</button>}
+          {!memo&&<span style={{fontSize:12,color:'#9ca3af'}}>Not written yet</span>}
+          <span style={{color:'#9ca3af',fontSize:11}}>{open?'▲':'▼'}</span>
+        </div>
+      </button>
+      {open&&<div style={{padding:'0 20px 20px',borderTop:'1px solid #f3f4f6'}}>
+        {editing?(
+          <div style={{paddingTop:14}}>
+            <textarea value={draft} onChange={e=>setDraft(e.target.value)} placeholder={placeholder} rows={6}
+              style={{width:'100%',padding:'10px 12px',border:'1px solid #5B6DC4',borderRadius:12,fontSize:13,resize:'vertical',outline:'none',boxSizing:'border-box',fontFamily:'inherit',lineHeight:1.7}}
+              autoFocus/>
+            <div style={{display:'flex',gap:8,marginTop:8}}>
+              <button onClick={save} disabled={draft.trim().length<5} style={{flex:1,padding:'8px',background:'#5B6DC4',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',opacity:draft.trim().length>=5?1:.4}}>Save memo</button>
+              {memo&&<button onClick={()=>setEditing(false)} style={{padding:'8px 14px',background:'none',border:'none',color:'#6b7280',fontSize:13,cursor:'pointer'}}>Cancel</button>}
+            </div>
           </div>
-          <p className="text-xs text-stone-400 dark:text-stone-500">{deal.industry} · {deal.stage}{founderName ? ` · ${founderName}` : ''}</p>
-          {deal.watchingNotes && (
-            <p className="text-xs text-stone-400 dark:text-stone-500 mt-1 line-clamp-1 italic">"{deal.watchingNotes}"</p>
-          )}
+        ):memo?(
+          <p style={{fontSize:13,color:'#374151',lineHeight:1.8,whiteSpace:'pre-wrap',paddingTop:12}}>{memo}</p>
+        ):null}
+      </div>}
+    </div>
+  );
+};
+
+// ── FOUNDER UPDATES ───────────────────────────────────────────────────────────
+// Recurring log of founder communications. Paste text or upload file.
+// Signal extraction runs on each entry and surfaces tags.
+const FounderUpdates = ({deal, onUpdate, setToast, inv={}, overdue=false, dUntilNext=null, dSinceUpd=null}) => {
+  const [open, setOpen] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [fileInfo, setFileInfo] = useState(null); // {name, type}
+  const fileRef = useState(null);
+
+  const [editingId, setEditingId] = useState(null);
+  const [editDraft, setEditDraft] = useState('');
+  const updates = (deal.founderUpdates||[]).sort((a,b)=>new Date(b.date)-new Date(a.date));
+
+  const deleteUpdate = (id) => onUpdate({...deal, founderUpdates:(deal.founderUpdates||[]).filter(u=>u.id!==id)});
+
+  const saveEdit = (id) => {
+    const now = new Date().toISOString();
+    const sigs = parseNote(editDraft.trim(), now);
+    onUpdate({...deal, founderUpdates:(deal.founderUpdates||[]).map(u=>
+      u.id===id ? {...u, content:editDraft.trim(), signals:sigs.map(s=>s.type), editedAt:now} : u
+    )});
+    setEditingId(null); setEditDraft('');
+  };
+
+  const addText = () => {
+    if(draft.trim().length < 5) return;
+    const now = new Date().toISOString();
+    const sigs = parseNote(draft.trim(), now);
+    const entry = {id:genId(), type:'text', content:draft.trim(), date:now, signals:sigs.map(s=>s.type)};
+    onUpdate({...deal,
+      founderUpdates:[...(deal.founderUpdates||[]), entry],
+      investment:{...inv, lastUpdateReceived:now}
+    });
+    setDraft(''); setAdding(false);
+    const hasFundingSig = sigs.some(s=>s.type==='funding_signal');
+    if (hasFundingSig && deal.monitoring?.fundraisingStatus !== 'raising') {
+      setToast('Funding signal detected — consider adding an active raise entry');
+    } else {
+      setToast(sigs.length ? `Update logged · ${sigs.length} signal${sigs.length>1?'s':''} detected` : 'Update logged');
+    }
+  };
+
+  const addFile = (file) => {
+    if(!file) return;
+    const now = new Date().toISOString();
+    const entry = {id:genId(), type:'file', fileName:file.name, fileType:file.type, date:now, signals:[]};
+    onUpdate({...deal,
+      founderUpdates:[...(deal.founderUpdates||[]), entry],
+      investment:{...inv, lastUpdateReceived:now}
+    });
+    setFileInfo(null); setAdding(false);
+    setToast(`${file.name} uploaded`);
+  };
+
+  const SIG_COLORS = {
+    funding_signal:{l:'Funding',c:'#5B6DC4',bg:'#FFFBEC'},
+    hardware_milestone:{l:'Milestone',c:'#f59e0b',bg:'#fffbeb'},
+    offtake:{l:'Customer',c:'#10b981',bg:'#f0fdf4'},
+    team_risk:{l:'Team risk',c:'#ef4444',bg:'#fef2f2'},
+    policy_risk:{l:'Policy risk',c:'#ef4444',bg:'#fef2f2'},
+    policy_positive:{l:'Policy',c:'#10b981',bg:'#f0fdf4'},
+    risk:{l:'Risk',c:'#f59e0b',bg:'#fffbeb'},
+  };
+
+  // Detect if any update mentions revenue/traction — prompt to log metric
+  const hasRevenueSignal = updates.some(u => u.type==='text' && /revenue|arr|mrr|\$\d|million|customers|users/i.test(u.content));
+  const hasRecentMetric = (deal.metricsToWatch||[]).some(m=>(deal.metricsLog||{})[m]?.some(e=>dAgo(e.date)<=90));
+  const hasRecentRevenue = (deal.revenueLog||[]).some(e=>dAgo(e.date)<=90);
+  const showMetricPrompt = hasRevenueSignal && !hasRecentMetric && !hasRecentRevenue;
+  const hasFundingUpdate = updates.some(u => u.type==='text' && u.signals?.includes('funding_signal'));
+
+  return (
+    <div style={{background:'white',borderRadius:16,overflow:'hidden',marginBottom:12}}>
+      {overdue&&<div style={{padding:'9px 16px',background:'#fffbeb',borderBottom:'1px solid #fde68a',display:'flex',gap:8,alignItems:'center'}}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <p style={{fontSize:12,color:'#92400e'}}>Founder update overdue by {Math.abs(dUntilNext)} days</p>
+      </div>}
+      <button onClick={()=>setOpen(v=>!v)} style={{width:'100%',padding:'14px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'none',border:'none',cursor:'pointer'}}>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Founder updates</span>
+          {updates.length>0&&<span style={{fontSize:12,color:'#9ca3af'}}>({updates.length})</span>}
+          {dSinceUpd!==null&&<Pill color={overdue?'#b45309':'#6b7280'} bg={overdue?'#fef3c7':'#f5f5f4'}>Last {dSinceUpd}d ago</Pill>}
         </div>
-        <div className="flex flex-col items-end gap-1 flex-shrink-0">
-          {deal.monitoring?.fundraisingStatus === 'raising' && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 font-medium dark:bg-blue-900/30 dark:text-blue-400">Raising now</span>
-          )}
-          <span className="text-xs text-stone-400">{deal.stage}</span>
+        <span style={{color:'#9ca3af',fontSize:11}}>{open?'▲':'▼'}</span>
+      </button>
+
+      {open&&<div style={{padding:'0 20px 20px',borderTop:'1px solid #f3f4f6'}}>
+        {/* Prompts */}
+        {showMetricPrompt&&<div style={{margin:'12px 0',padding:'10px 14px',background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:12,display:'flex',gap:10,alignItems:'center'}}>
+          <span style={{fontSize:14}}>📊</span>
+          <p style={{fontSize:13,color:'#166534',flex:1}}>A recent update mentions revenue or customers — log a metric reading to track progress</p>
+        </div>}
+        {hasFundingUpdate&&deal.monitoring?.fundraisingStatus!=='raising'&&<div style={{margin:'12px 0',padding:'10px 14px',background:'#FFFBEC',border:'1px solid #c7d2fe',borderRadius:12,display:'flex',gap:10,alignItems:'center'}}>
+          <span style={{fontSize:14}}>💰</span>
+          <p style={{fontSize:13,color:'#5B6DC4',flex:1}}>A recent update mentions a fundraise — add an active raise entry to track dilution</p>
+        </div>}
+
+        {/* Update entries */}
+        {updates.length===0&&!adding&&<p style={{fontSize:13,color:'#9ca3af',textAlign:'center',padding:'12px 0'}}>No updates yet — paste a founder email or upload a PDF</p>}
+          {updates.map((u,i)=>{
+          const sigs = u.type==='text' ? parseNote(u.content, u.date) : [];
+          const hasNeg = sigs.some(s=>s.sentiment==='negative');
+          const isEditing = editingId === u.id;
+          return (
+            <div key={u.id} style={{paddingTop:12,marginTop:i===0?4:0,borderTop:i===0?'none':'1px solid #f3f4f6'}}>
+              {u.type==='file'?(
+                <div style={{display:'flex',alignItems:'center',gap:10,padding:'10px 12px',background:'#f9fafb',borderRadius:10}}>
+                  <span style={{fontSize:16}}>{u.fileType?.includes('pdf')?'📄':'📝'}</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <p style={{fontSize:13,fontWeight:500,color:'#374151',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{u.fileName}</p>
+                    <p style={{fontSize:11,color:'#9ca3af',marginTop:2}}>{new Date(u.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</p>
+                  </div>
+                  <button onClick={()=>deleteUpdate(u.id)} style={{color:'#d1d5db',background:'none',border:'none',cursor:'pointer',padding:4}}>
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+                  </button>
+                </div>
+              ):isEditing?(
+                <div>
+                  <textarea value={editDraft} onChange={e=>setEditDraft(e.target.value)} rows={4}
+                    style={{width:'100%',padding:'10px 12px',border:'1px solid #5B6DC4',borderRadius:12,fontSize:13,resize:'none',outline:'none',boxSizing:'border-box',fontFamily:'inherit',lineHeight:1.6}}
+                    autoFocus/>
+                  <div style={{display:'flex',gap:8,marginTop:8}}>
+                    <button onClick={()=>saveEdit(u.id)} disabled={editDraft.trim().length<5} style={{flex:1,padding:'7px',background:'#5B6DC4',color:'white',border:'none',borderRadius:9,fontWeight:600,fontSize:13,cursor:'pointer',opacity:editDraft.trim().length>=5?1:.4}}>Save</button>
+                    <button onClick={()=>setEditingId(null)} style={{padding:'7px 12px',background:'none',border:'none',color:'#6b7280',fontSize:13,cursor:'pointer'}}>Cancel</button>
+                  </div>
+                </div>
+              ):(
+                <div>
+                  <p style={{fontSize:13,color:'#374151',lineHeight:1.7}}>{u.content}</p>
+                  <div style={{display:'flex',alignItems:'center',gap:8,marginTop:6,flexWrap:'wrap'}}>
+                    <span style={{fontSize:11,color:'#9ca3af'}}>{new Date(u.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}{u.editedAt&&<span style={{color:'#d1d5db'}}> · edited</span>}</span>
+                    {sigs.map((s,si)=>{
+                      const cfg=SIG_COLORS[s.type]||{l:s.type,c:'#78716c',bg:'#f5f5f4'};
+                      return <span key={si} style={{fontSize:10,fontWeight:700,color:cfg.c,background:cfg.bg,padding:'2px 7px',borderRadius:99}}>{cfg.l}</span>;
+                    })}
+                    {hasNeg&&<span style={{fontSize:10,color:'#ef4444',fontWeight:600}}>⚠ needs attention</span>}
+                    <div style={{marginLeft:'auto',display:'flex',gap:6}}>
+                      <button onClick={()=>{setEditingId(u.id);setEditDraft(u.content);}} style={{fontSize:11,color:'#9ca3af',background:'none',border:'none',cursor:'pointer',padding:0}}>Edit</button>
+                      <button onClick={()=>deleteUpdate(u.id)} style={{fontSize:11,color:'#d1d5db',background:'none',border:'none',cursor:'pointer',padding:0}}>Delete</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Add entry */}
+        {adding?(
+          <div style={{marginTop:14,paddingTop:14,borderTop:'1px solid #f3f4f6'}}>
+            <textarea value={draft} onChange={e=>setDraft(e.target.value)}
+              placeholder="Paste the founder email, quarterly update, or summarize what they shared..."
+              rows={5} style={{width:'100%',padding:'10px 12px',border:'1px solid #e5e7eb',borderRadius:12,fontSize:13,resize:'none',outline:'none',boxSizing:'border-box',fontFamily:'inherit',lineHeight:1.6}}
+              autoFocus/>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginTop:10}}>
+              <button onClick={addText} disabled={draft.trim().length<5} style={{flex:1,padding:'8px',background:'#5B6DC4',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',opacity:draft.trim().length>=5?1:.4}}>Log update</button>
+              <span style={{fontSize:12,color:'#9ca3af'}}>or</span>
+              <label style={{padding:'8px 14px',border:'1px solid #e5e7eb',borderRadius:10,fontSize:13,color:'#374151',cursor:'pointer',background:'white',fontWeight:500}}>
+                Upload file
+                <input type="file" accept=".pdf,.doc,.docx" style={{display:'none'}} onChange={e=>{const f=e.target.files[0];if(f)addFile(f);}}/>
+              </label>
+              <button onClick={()=>{setAdding(false);setDraft('');}} style={{padding:'8px 12px',background:'none',border:'none',color:'#9ca3af',fontSize:13,cursor:'pointer'}}>Cancel</button>
+            </div>
+          </div>
+        ):(
+          <button onClick={()=>setAdding(true)} style={{marginTop:12,background:'none',border:'none',color:'#5B6DC4',fontSize:13,fontWeight:500,cursor:'pointer',padding:0,display:'flex',alignItems:'center',gap:6}}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add founder update
+          </button>
+        )}
+      </div>}
+    </div>
+  );
+};
+
+// ── PROMOTE TO INVESTED MODAL ─────────────────────────────────────────────────
+const PromoteModal = ({deal, onClose, onPromote}) => {
+  const [f, setF] = useState({amount:'', vehicle:'SAFE', date:new Date().toISOString().slice(0,10), notes:''});
+  const inp = {width:'100%', padding:'9px 12px', border:'1px solid #e5e7eb', borderRadius:10, fontSize:13, boxSizing:'border-box'};
+  const lbl = {fontSize:12, color:'#6b7280', display:'block', marginBottom:4};
+
+  const submit = () => {
+    if (!f.amount) return;
+    const now = new Date(f.date).toISOString();
+    const promoted = {
+      ...deal,
+      status: 'invested',
+      statusEnteredAt: now,
+      investment: {
+        amount: Number(f.amount),
+        costBasis: Number(f.amount),
+        vehicle: f.vehicle,
+        date: now,
+        lastUpdateReceived: now,
+      },
+      // Append invest note to memo if provided
+      memo: f.notes.trim()
+        ? (deal.memo ? `${deal.memo}\n\n---\nInvestment note (${new Date(f.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}): ${f.notes.trim()}` : f.notes.trim())
+        : deal.memo || '',
+      monitoring: {...(deal.monitoring||{}), fundraisingStatus:'not-raising'},
+    };
+    onPromote(promoted);
+    onClose();
+  };
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',zIndex:200,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+      <div style={{background:'white',borderRadius:20,width:'100%',maxWidth:400,overflow:'hidden'}}>
+        <div style={{padding:'14px 20px',borderBottom:'1px solid #f3f4f6',display:'flex',justifyContent:'space-between',alignItems:'center',background:'#5B6DC4'}}>
+          <div>
+            <p style={{fontWeight:700,fontSize:15,color:'white'}}>Invest in {deal.companyName}</p>
+            <p style={{fontSize:12,color:'rgba(255,255,255,.75)',marginTop:2}}>Converts to portfolio company — all notes and history preserved</p>
+          </div>
+          <button onClick={onClose} style={{background:'rgba(255,255,255,.2)',border:'none',cursor:'pointer',color:'white',borderRadius:8,padding:'4px 8px'}}>✕</button>
         </div>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a8a29e" strokeWidth="2" className="flex-shrink-0"><polyline points="9 18 15 12 9 6"/></svg>
+        <div style={{padding:20,display:'flex',flexDirection:'column',gap:14}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+            <div>
+              <label style={lbl}>Amount ($) *</label>
+              <input type="number" value={f.amount} onChange={e=>setF(p=>({...p,amount:e.target.value}))} placeholder="25000" style={inp} autoFocus/>
+            </div>
+            <div>
+              <label style={lbl}>Vehicle</label>
+              <select value={f.vehicle} onChange={e=>setF(p=>({...p,vehicle:e.target.value}))} style={inp}>
+                <option value="SAFE">SAFE</option>
+                <option value="Convertible Note">Conv. Note</option>
+                <option value="Equity">Equity</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label style={lbl}>Investment date</label>
+            <input type="date" value={f.date} onChange={e=>setF(p=>({...p,date:e.target.value}))} style={inp}/>
+          </div>
+          <div>
+            <label style={lbl}>Investment note <span style={{fontWeight:400,color:'#9ca3af'}}>(optional — appended to memo)</span></label>
+            <textarea value={f.notes} onChange={e=>setF(p=>({...p,notes:e.target.value}))}
+              placeholder="Why you decided to invest now, what changed your mind..."
+              rows={3} style={{...inp,resize:'none',outline:'none',fontFamily:'inherit',lineHeight:1.6}}/>
+          </div>
+        </div>
+        <div style={{padding:'12px 20px',borderTop:'1px solid #f3f4f6',display:'flex',gap:8}}>
+          <button onClick={submit} disabled={!f.amount} style={{flex:1,padding:'11px',background:'#5B6DC4',color:'white',border:'none',borderRadius:12,fontWeight:700,fontSize:14,cursor:'pointer',opacity:f.amount?1:.4}}>
+            Invest — move to portfolio
+          </button>
+        </div>
       </div>
     </div>
   );
 };
+
+const CoInvestorsSection = ({deal,onUpdate,setToast}) => {
+  const [open,setOpen]=useState(true);
+  const [adding,setAdding]=useState(false);
+  const [form,setForm]=useState({name:'',fund:'',role:'co-investor',checkSize:''});
+  const list=deal.coInvestors||[];
+  const add=()=>{if(!form.name.trim())return;const e={id:genId(),name:form.name.trim(),fund:form.fund.trim()||null,role:form.role,checkSize:form.checkSize?Number(form.checkSize):null};onUpdate({...deal,coInvestors:[...list,e]});setForm({name:'',fund:'',role:'co-investor',checkSize:''});setAdding(false);setToast('Investor added');};
+  const remove=(id)=>onUpdate({...deal,coInvestors:list.filter(c=>c.id!==id)});
+  return (
+    <div style={{background:'white',borderRadius:16,overflow:'hidden'}}>
+      <button onClick={()=>setOpen(v=>!v)} style={{width:'100%',padding:'14px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'none',border:'none',cursor:'pointer'}}>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span style={{fontWeight:500,fontSize:14,color:'#374151'}}>Investors</span>
+          {list.length>0&&<span style={{fontSize:12,color:'#9ca3af'}}>({list.length})</span>}
+        </div>
+        <span style={{color:'#9ca3af',fontSize:12}}>{open?'▲':'▼'}</span>
+      </button>
+      {open&&<div style={{padding:'0 20px 20px',borderTop:'1px solid #f3f4f6'}}>
+        {list.length===0&&!adding&&<p style={{fontSize:13,color:'#9ca3af',textAlign:'center',padding:'8px 0'}}>No investors logged yet</p>}
+        {list.map(ci=>{const rc=ROLE_CFG[ci.role]||ROLE_CFG['co-investor'];return(
+          <div key={ci.id} style={{display:'flex',alignItems:'center',gap:12,paddingTop:12}}>
+            <div style={{width:32,height:32,borderRadius:99,background:rc.c+'20',color:rc.c,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:13,flexShrink:0}}>{ci.name[0].toUpperCase()}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
+                <span style={{fontWeight:500,fontSize:13,color:'#1f2937'}}>{ci.name}</span>
+                {ci.fund&&ci.fund!==ci.name&&<span style={{fontSize:12,color:'#9ca3af'}}>· {ci.fund}</span>}
+                <Pill color={rc.c} bg={rc.bg}>{rc.l}</Pill>
+                {ci.checkSize&&<span style={{fontSize:12,color:'#9ca3af'}}>{fmtC(ci.checkSize)}</span>}
+              </div>
+            </div>
+            <button onClick={()=>remove(ci.id)} style={{color:'#d1d5db',background:'none',border:'none',cursor:'pointer',padding:4}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+          </div>
+        );})}
+        {adding?<div style={{paddingTop:12,borderTop:list.length?'1px solid #f3f4f6':'none',marginTop:list.length?8:0}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
+            <input placeholder="Investor name *" value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))} style={{padding:'8px 10px',border:'1px solid #e5e7eb',borderRadius:10,fontSize:13}}/>
+            <input placeholder="Fund / firm" value={form.fund} onChange={e=>setForm(f=>({...f,fund:e.target.value}))} style={{padding:'8px 10px',border:'1px solid #e5e7eb',borderRadius:10,fontSize:13}}/>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
+            <select value={form.role} onChange={e=>setForm(f=>({...f,role:e.target.value}))} style={{padding:'8px 10px',border:'1px solid #e5e7eb',borderRadius:10,fontSize:13}}>
+              <option value="lead">Lead</option><option value="co-investor">Co-investor</option><option value="follow-on">Follow-on</option><option value="strategic">Strategic</option>
+            </select>
+            <input placeholder="Check size ($)" type="number" value={form.checkSize} onChange={e=>setForm(f=>({...f,checkSize:e.target.value}))} style={{padding:'8px 10px',border:'1px solid #e5e7eb',borderRadius:10,fontSize:13}}/>
+          </div>
+          <div style={{display:'flex',gap:8}}>
+            <button onClick={add} disabled={!form.name.trim()} style={{flex:1,padding:'8px',background:'#5B6DC4',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',opacity:form.name.trim()?1:.5}}>Add investor</button>
+            <button onClick={()=>setAdding(false)} style={{padding:'8px 14px',background:'none',border:'none',color:'#6b7280',fontSize:13,cursor:'pointer'}}>Cancel</button>
+          </div>
+        </div>:<button onClick={()=>setAdding(true)} style={{marginTop:10,background:'none',border:'none',color:'#5B6DC4',fontSize:13,cursor:'pointer',padding:0}}>+ Add investor</button>}
+      </div>}
+    </div>
+  );
+};
+
+const LiquiditySection = ({deal,onUpdate,setToast}) => {
+  const [open,setOpen]=useState(false);
+  const [adding,setAdding]=useState(false);
+  const [form,setForm]=useState({type:'exit',date:'',amount:'',notes:''});
+  const events=deal.liquidityEvents||[];
+  const realized=events.filter(e=>e.type!=='writedown').reduce((s,e)=>s+(e.proceeds||0),0);
+  const cb=getCB(deal.investment||{});
+  const dpi=cb>0?realized/cb:0;
+  const deleteEvent=(id)=>onUpdate({...deal,liquidityEvents:events.filter(e=>e.id!==id)});
+  const add=()=>{if(!form.amount||!form.date)return;const e={id:genId(),type:form.type,date:form.date,proceeds:form.type==='writedown'?0:Number(form.amount),writedownAmount:form.type==='writedown'?Number(form.amount):0,notes:form.notes||null};onUpdate({...deal,liquidityEvents:[...events,e]});setForm({type:'exit',date:'',amount:'',notes:''});setAdding(false);setToast(`${LIQ_TYPES[form.type].l} logged`);};
+  return (
+    <div style={{background:'white',borderRadius:16,overflow:'hidden'}}>
+      <button onClick={()=>setOpen(v=>!v)} style={{width:'100%',padding:'14px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'none',border:'none',cursor:'pointer'}}>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="16 12 12 8 8 12"/><line x1="12" y1="16" x2="12" y2="8"/></svg>
+          <span style={{fontWeight:500,fontSize:14,color:'#374151'}}>Liquidity events</span>
+          {events.length>0&&<Pill color="#10b981" bg="#f0fdf4">{fmtC(realized)} realized · {dpi.toFixed(2)}x DPI</Pill>}
+        </div>
+        <span style={{color:'#9ca3af',fontSize:12}}>{open?'▲':'▼'}</span>
+      </button>
+      {open&&<div style={{padding:'0 20px 20px',borderTop:'1px solid #f3f4f6'}}>
+        {events.length===0&&!adding&&<p style={{fontSize:13,color:'#9ca3af',textAlign:'center',padding:'8px 0'}}>No liquidity events yet</p>}
+        {events.map(ev=>{const c=LIQ_TYPES[ev.type];const amt=ev.type==='writedown'?ev.writedownAmount:ev.proceeds;return(
+          <div key={ev.id} style={{display:'flex',gap:12,padding:12,borderRadius:12,marginTop:8,backgroundColor:c.bg}}>
+            <span style={{fontSize:18}}>{c.i}</span>
+            <div style={{flex:1}}>
+              <div style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontWeight:600,fontSize:13,color:c.c}}>{c.l}</span><span style={{fontSize:12,color:'#9ca3af'}}>{new Date(ev.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</span></div>
+              <p style={{fontWeight:700,fontSize:14,color:c.c,marginTop:2}}>{ev.type==='writedown'?`−${fmtC(amt)}`:`+${fmtC(amt)}`}</p>
+              {ev.notes&&<p style={{fontSize:12,color:'#6b7280',marginTop:4}}>{ev.notes}</p>}
+            </div>
+            <button onClick={()=>deleteEvent(ev.id)} style={{color:'#d1d5db',background:'none',border:'none',cursor:'pointer',padding:4,alignSelf:'flex-start'}}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+            </button>
+          </div>
+        );})}
+        {adding?<div style={{paddingTop:12,marginTop:8,borderTop:'1px solid #f3f4f6'}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
+            <select value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))} style={{padding:'8px 10px',border:'1px solid #e5e7eb',borderRadius:10,fontSize:13}}>
+              {Object.entries(LIQ_TYPES).map(([k,v])=><option key={k} value={k}>{v.l}</option>)}
+            </select>
+            <input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={{padding:'8px 10px',border:'1px solid #e5e7eb',borderRadius:10,fontSize:13}}/>
+          </div>
+          <input placeholder={form.type==='writedown'?'Amount written down ($)':'Proceeds ($)'} type="number" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))} style={{width:'100%',padding:'8px 10px',border:'1px solid #e5e7eb',borderRadius:10,fontSize:13,marginBottom:8,boxSizing:'border-box'}}/>
+          <input placeholder="Notes (optional)" value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} style={{width:'100%',padding:'8px 10px',border:'1px solid #e5e7eb',borderRadius:10,fontSize:13,marginBottom:8,boxSizing:'border-box'}}/>
+          <div style={{display:'flex',gap:8}}>
+            <button onClick={add} disabled={!form.amount||!form.date} style={{flex:1,padding:'8px',background:'#10b981',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',opacity:form.amount&&form.date?1:.5}}>Log event</button>
+            <button onClick={()=>setAdding(false)} style={{padding:'8px 14px',background:'none',border:'none',color:'#6b7280',fontSize:13,cursor:'pointer'}}>Cancel</button>
+          </div>
+        </div>:<button onClick={()=>setAdding(true)} style={{marginTop:10,background:'none',border:'none',color:'#5B6DC4',fontSize:13,cursor:'pointer',padding:0}}>+ Log liquidity event</button>}
+      </div>}
+    </div>
+  );
+};
+
+// ── DETAIL VIEW ───────────────────────────────────────────────────────────────
+const DetailView = ({deal,onUpdate,setToast}) => {
+  const inv=deal.investment||{};
+  const method=getMethod(deal);
+  const staleness=getStaleness(deal);
+  const [showInvDetails,setShowInvDetails]=useState(false);
+  const dSinceUpd=inv.lastUpdateReceived?dAgo(inv.lastUpdateReceived):null;
+  const dUntilNext=inv.nextUpdateExpected?dUntil(inv.nextUpdateExpected):null;
+  const overdue=dUntilNext!==null&&dUntilNext<-7;
+  const health=calcHealth(deal,[]);
+
+  // Ownership + implied value: fundraise history takes precedence over manual fields
+  const currentOwnership = getCurrentOwnership(deal);
+  const historyIV = getHistoryImpliedValue(deal);
+  const iv = historyIV || calcIV(deal);
+  const cb = getCB(inv);
+  const moic = cb>0 ? iv/cb : null;
+  const markup = calcMarkup(deal);
+  const projected = getProjected(deal);
+
+  const C = {
+    card:{background:'white',borderRadius:16,padding:20,marginBottom:12},
+    label:{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.8,marginBottom:4},
+    val:{fontSize:16,fontWeight:700,color:'#111827'},
+    sm:{fontSize:13,color:'#374151'},
+  };
+
+  if(deal.status==='watching') {
+    const daysUntilRevisit = deal.revisitDate ? dUntil(deal.revisitDate) : null;
+    const revisitOverdue = daysUntilRevisit !== null && daysUntilRevisit < 0;
+    const signals = (deal.milestones||[]).filter(m => ['fundraising','partnership','product'].includes(m.type));
+    const [showThesis, setShowThesis] = useState(false);
+    const [showPromote, setShowPromote] = useState(false);
+
+    return (
+      <div style={{padding:20}}>
+        {showPromote&&<PromoteModal deal={deal} onClose={()=>setShowPromote(false)} onPromote={d=>{onUpdate(d);setToast(`${d.companyName} moved to portfolio`);}}/>}
+
+        {/* Header */}
+        <div style={C.card}>
+          <div style={{display:'flex',alignItems:'flex-start',gap:14,marginBottom:deal.overview?12:0}}>
+            <CompanyLogo name={deal.companyName} website={deal.website} size={52} radius={14} fallbackBg="#f59e0b" fallbackColor="white"/>
+            <div style={{flex:1}}>
+              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+                <h2 style={{fontSize:20,fontWeight:800,color:'#111827'}}>{deal.companyName}</h2>
+                {deal.website&&<a href={deal.website} target="_blank" rel="noopener noreferrer" style={{color:'#9ca3af'}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>}
+              </div>
+              <p style={{fontSize:13,color:'#6b7280',marginBottom:4}}>{deal.stage} · {deal.industry}</p>
+              {deal.monitoring?.fundraisingStatus==='raising'&&<Pill color="#1d4ed8" bg="#eff6ff">Raising now</Pill>}
+            </div>
+            <button onClick={()=>setShowPromote(true)} style={{flexShrink:0,padding:'8px 14px',background:'#10b981',color:'white',border:'none',borderRadius:10,fontWeight:700,fontSize:13,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+              Invest
+            </button>
+          </div>
+          {deal.overview&&<p style={{fontSize:14,color:'#374151',lineHeight:1.6,marginBottom:deal.founders?.length?12:0}}>{deal.overview}</p>}
+          {deal.founders?.length>0&&<div style={{display:'flex',alignItems:'center',gap:8,paddingTop:12,borderTop:'1px solid #f3f4f6'}}>
+            <span style={{fontSize:13,color:'#6b7280'}}>Founders:</span>
+            {deal.founders.map((f,i)=><span key={i} style={{fontSize:13,color:'#374151',fontWeight:500}}>{f.name} <span style={{fontWeight:400,color:'#9ca3af'}}>({f.role})</span></span>)}
+          </div>}
+        </div>
+
+        <ActiveRaiseCard deal={deal} onUpdate={onUpdate} setToast={setToast}/>
+
+        {/* Revisit banner */}
+        {revisitOverdue&&<div style={{padding:'10px 16px',background:'#fffbeb',border:'1px solid #fde68a',borderRadius:12,display:'flex',alignItems:'center',gap:8,marginBottom:12}}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <p style={{fontSize:13,color:'#92400e',fontWeight:500}}>Revisit date was {Math.abs(daysUntilRevisit)}d ago — time to update your view.</p>
+        </div>}
+        {daysUntilRevisit!==null&&!revisitOverdue&&daysUntilRevisit<=14&&<div style={{padding:'10px 16px',background:'#f0fdf4',border:'1px solid #bbf7d0',borderRadius:12,display:'flex',alignItems:'center',gap:8,marginBottom:12}}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <p style={{fontSize:13,color:'#166534'}}>Revisit in {daysUntilRevisit} day{daysUntilRevisit!==1?'s':''}</p>
+        </div>}
+
+        {/* Traction metrics — same as invested */}
+        <MetricsTracker deal={deal} onUpdate={onUpdate}/>
+
+        {/* Notes */}
+        <InvestmentMemo deal={deal} onUpdate={onUpdate} setToast={setToast}/>
+
+        <FounderUpdates deal={deal} onUpdate={onUpdate} setToast={setToast}/>
+
+        {/* Signals */}
+        <SignalsSection deal={deal}/>
+
+        {/* Known investors */}
+        {(deal.coInvestors||[]).length>0&&<div style={C.card}>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12}}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Known investors</span>
+          </div>
+          <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            {deal.coInvestors.map(ci=>{const rc=ROLE_CFG[ci.role]||ROLE_CFG['co-investor'];return(
+              <div key={ci.id} style={{display:'flex',alignItems:'center',gap:10}}>
+                <div style={{width:30,height:30,borderRadius:99,background:rc.c+'20',color:rc.c,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:12,flexShrink:0}}>{ci.name[0]}</div>
+                <div style={{flex:1}}>
+                  <div style={{display:'flex',alignItems:'center',gap:6}}>
+                    <span style={{fontWeight:500,fontSize:13,color:'#111827'}}>{ci.name}</span>
+                    {ci.fund&&ci.fund!==ci.name&&<span style={{fontSize:12,color:'#9ca3af'}}>· {ci.fund}</span>}
+                    <Pill color={rc.c} bg={rc.c+'15'}>{rc.l}</Pill>
+                  </div>
+                </div>
+              </div>
+            );})}
+          </div>
+        </div>}
+
+        {/* Documents */}
+        <DocumentsSection deal={deal} onUpdate={onUpdate} setToast={setToast}/>
+
+      </div>
+    );
+  }
+
+  return (
+    <div style={{padding:20}}>
+      <div style={C.card}>
+        <div style={{display:'flex',alignItems:'flex-start',gap:14,marginBottom:deal.overview?12:0}}>
+          <CompanyLogo name={deal.companyName} website={deal.website} size={52} radius={14} fallbackBg="#f59e0b" fallbackColor="white"/>
+          <div style={{flex:1}}>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+              <h2 style={{fontSize:20,fontWeight:800,color:'#111827'}}>{deal.companyName}</h2>
+              {deal.website&&<a href={deal.website} target="_blank" rel="noopener noreferrer" style={{color:'#9ca3af'}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>}
+            </div>
+            <p style={{fontSize:13,color:'#6b7280',marginBottom:inv.trlAtInvestment&&['lab','pilot','scale'].includes(health.mat)?6:0}}>{deal.stage} · {deal.industry}</p>
+            {inv.trlAtInvestment&&['lab','pilot','scale'].includes(health.mat)&&<div style={{display:'flex',alignItems:'center',gap:6}}><TRLBadge trl={inv.trlAtInvestment}/><span style={{fontSize:11,color:'#9ca3af'}}>at investment</span></div>}
+          </div>
+        </div>
+        {deal.overview&&<p style={{fontSize:14,color:'#374151',lineHeight:1.6}}>{deal.overview}</p>}
+        {deal.founders?.length>0&&<div style={{display:'flex',alignItems:'center',gap:8,marginTop:12,paddingTop:12,borderTop:'1px solid #f3f4f6'}}>
+          <span style={{fontSize:13,color:'#6b7280'}}>Founders:</span>
+          {deal.founders.map((f,i)=><span key={i} style={{fontSize:13,color:'#374151',fontWeight:500}}>{f.name} <span style={{fontWeight:400,color:'#9ca3af'}}>({f.role})</span></span>)}
+        </div>}
+      </div>
+
+      <ActiveRaiseCard deal={deal} onUpdate={onUpdate} setToast={setToast}/>
+
+      <div style={C.card}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+          <div style={{display:'flex',alignItems:'center',gap:8}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg><span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Valuation</span></div>
+          <Pill>{getMethodLabel(method)}</Pill>
+        </div>
+
+        {/* Current row */}
+        <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:12}}>
+          <div><p style={C.label}>Cost basis</p><p style={C.val}>{fmtC(cb)}</p></div>
+          <div><p style={C.label}>Implied value</p>
+            {method==='mark-at-cost'
+              ? <p style={{...C.val,color:'#9ca3af'}}>—</p>
+              : <p style={{...C.val,color:iv>=cb?'#10b981':'#ef4444'}}>{fmtC(iv)}</p>}
+          </div>
+          <div><p style={C.label}>MOIC</p>
+            {method==='mark-at-cost'
+              ? <p style={{...C.val,color:'#9ca3af'}}>1.0x</p>
+              : moic ? <p style={{...C.val,color:moic>=1.5?'#10b981':moic>=1?'#5B6DC4':'#ef4444'}}>{moic.toFixed(2)}x</p>
+              : <p style={{...C.val,color:'#9ca3af'}}>—</p>}
+          </div>
+          <div><p style={C.label}>Ownership</p>
+            <p style={{...C.val,color:'#374151'}}>{currentOwnership ? `${currentOwnership}%` : '—'}</p>
+          </div>
+        </div>
+
+        {/* Projected row — shows when active raise exists */}
+        {projected&&<div style={{marginTop:4,marginBottom:12,padding:'10px 14px',background:'#f5f3ff',borderRadius:12,border:'1px solid #e9d5ff'}}>
+          <p style={{fontSize:10,color:'#7c3aed',fontWeight:700,textTransform:'uppercase',letterSpacing:.7,marginBottom:8}}>After {deal.activeRaise?.roundName||'active raise'} closes · {projected.dilPct}% dilution</p>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12}}>
+            <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:3}}>Proj. value</p>
+              <p style={{fontSize:14,fontWeight:700,color:projected.projectedIV&&projected.projectedIV>=cb?'#7c3aed':'#ef4444'}}>{projected.projectedIV?fmtC(projected.projectedIV):'—'}</p>
+            </div>
+            <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:3}}>Proj. MOIC</p>
+              <p style={{fontSize:14,fontWeight:700,color:projected.projectedMOIC>=1.5?'#7c3aed':projected.projectedMOIC>=1?'#5B6DC4':'#ef4444'}}>{projected.projectedMOIC?`${projected.projectedMOIC.toFixed(2)}x`:'—'}</p>
+            </div>
+            <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:3}}>Proj. ownership</p>
+              <p style={{fontSize:14,fontWeight:700,color:'#7c3aed'}}>{projected.projectedOwn.toFixed(3)}%</p>
+            </div>
+            <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:3}}>Proj. post-$</p>
+              <p style={{fontSize:14,fontWeight:700,color:'#374151'}}>{projected.projectedPostMoney?fmtC(projected.projectedPostMoney):'—'}</p>
+            </div>
+          </div>
+        </div>}
+
+        {method==='mark-at-cost'&&<div style={{marginTop:10,paddingTop:10,borderTop:'1px solid #f3f4f6'}}>
+          <p style={{fontSize:12,color:'#9ca3af',fontStyle:'italic',marginBottom:8}}>{health.mat==='lab'?'Lab/bench stage — marked at cost. MOIC not meaningful pre-demonstration.':'Pilot stage — marked at cost until next priced round.'}</p>
+          {inv.vehicle==='SAFE'&&deal.terms?.cap&&(()=>{const pct=deal.terms.cap>0?((cb/(deal.terms.cap+cb))*100):null;return <div style={{background:'#f9fafb',borderRadius:12,padding:'10px 14px'}}><p style={{fontSize:13,color:'#374151'}}>At your <strong>{fmtC(deal.terms.cap)}</strong> cap, you own approx <strong style={{color:'#5B6DC4'}}>~{pct?.toFixed(2)}%</strong> on conversion.{deal.terms.mfn&&<span style={{color:'#6b7280'}}> · MFN</span>}</p><p style={{fontSize:11,color:'#9ca3af',marginTop:4}}>Pre-dilution from option pool.</p></div>;})()}
+        </div>}
+        {method!=='mark-at-cost'&&inv.lastValuationDate&&<div style={{display:'flex',alignItems:'center',gap:6,marginTop:10}}>
+          <span style={{width:6,height:6,borderRadius:99,background:STALE_COL[staleness],display:'inline-block'}}/>
+          <p style={{fontSize:12,color:STALE_COL[staleness]}}>Mark from {new Date(inv.lastValuationDate).toLocaleDateString('en-US',{month:'short',year:'numeric'})}{staleness==='stale'?' — consider refreshing':staleness==='very-stale'?' — mark is outdated':''}</p>
+        </div>}
+      </div>
+
+      <MetricsTracker deal={deal} onUpdate={onUpdate}/>
+
+      <div style={{background:'white',borderRadius:16,overflow:'hidden',marginBottom:12}}>
+        <button onClick={()=>setShowInvDetails(v=>!v)} style={{width:'100%',padding:'14px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'none',border:'none',cursor:'pointer'}}>
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="6" x2="12" y2="18"/><path d="M15 9.5c0-1.5-1.5-2.5-3-2.5s-3 .5-3 2.5c0 1.5 1.5 2 3 2.5s3 1 3 2.5c0 1.5-1.5 2.5-3 2.5s-3-1-3-2.5"/></svg>
+            <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Investment details</span>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            {!showInvDetails&&<span style={{fontSize:12,color:'#9ca3af'}}>{[inv.amount&&fmtC(inv.amount),inv.vehicle,inv.date&&new Date(inv.date).toLocaleDateString('en-US',{month:'short',year:'numeric'})].filter(Boolean).join(' · ')}</span>}
+            <span style={{color:'#9ca3af',fontSize:11}}>{showInvDetails?'▲':'▼'}</span>
+          </div>
+        </button>
+        {showInvDetails&&<div style={{padding:'0 20px 20px',borderTop:'1px solid #f3f4f6'}}>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,paddingTop:16}}>
+            {inv.amount&&<div><p style={C.label}>Amount in</p><p style={C.val}>{fmtC(inv.amount)}</p></div>}
+            {inv.vehicle&&<div><p style={C.label}>Vehicle</p><p style={{...C.sm,fontWeight:600}}>{inv.vehicle}</p></div>}
+            {inv.ownershipPercent&&<div><p style={C.label}>Ownership</p><p style={{...C.sm,fontWeight:600}}>{inv.ownershipPercent}%</p></div>}
+            {inv.date&&<div><p style={C.label}>Date</p><p style={{...C.sm,fontWeight:600}}>{new Date(inv.date).toLocaleDateString('en-US',{month:'short',year:'numeric'})}</p></div>}
+            {inv.entryPostMoneyValuation&&<div><p style={C.label}>Entry post-money</p><p style={{...C.sm,fontWeight:600}}>{fmtC(inv.entryPostMoneyValuation)}</p></div>}
+          </div>
+        </div>}
+      </div>
+
+      {/* Proactive prompts — grounded in real data gaps */}
+      {(()=>{
+        const prompts=[];
+        const allMetrics=deal.metricsToWatch||[];
+        const hasRecentMetric=allMetrics.some(m=>(deal.metricsLog||{})[m]?.some(e=>dAgo(e.date)<=90));
+        const hasRecentRevenue=(deal.revenueLog||[]).some(e=>dAgo(e.date)<=90);
+        if(allMetrics.length>0&&!hasRecentMetric&&!hasRecentRevenue) prompts.push({icon:'📊',text:'No metrics logged in 90+ days — log a reading after your next founder call'});
+        const staleness=getStaleness(deal);
+        if(staleness==='very-stale'&&getMethod(deal)!=='mark-at-cost') prompts.push({icon:'📅',text:'Valuation mark is over a year old — worth refreshing with the founder'});
+        if(!prompts.length) return null;
+        return <div style={{marginBottom:12,display:'flex',flexDirection:'column',gap:8}}>
+          {prompts.map((p,i)=>(
+            <div key={i} style={{padding:'10px 14px',background:'#f9fafb',border:'1px solid #e5e7eb',borderRadius:12,display:'flex',alignItems:'center',gap:10}}>
+              <span style={{fontSize:15,flexShrink:0}}>{p.icon}</span>
+              <p style={{fontSize:13,color:'#374151',flex:1,lineHeight:1.5}}>{p.text}</p>
+            </div>
+          ))}
+        </div>;
+      })()}
+
+      <InvestmentMemo deal={deal} onUpdate={onUpdate} setToast={setToast}/>
+
+      <FounderUpdates deal={deal} onUpdate={onUpdate} setToast={setToast} inv={inv} overdue={overdue} dUntilNext={dUntilNext} dSinceUpd={dSinceUpd}/>
+
+      <SignalsSection deal={deal}/>
+
+      <CoInvestorsSection deal={deal} onUpdate={onUpdate} setToast={setToast}/>
+      <FundraiseHistory deal={deal} onUpdate={onUpdate} setToast={setToast}/>
+      <div style={{marginTop:12}}><LiquiditySection deal={deal} onUpdate={onUpdate} setToast={setToast}/></div>
+      <div style={{marginTop:12}}><DocumentsSection deal={deal} onUpdate={onUpdate} setToast={setToast}/></div>
+    </div>
+  );
+};
+
+// ── DEAL CARDS ────────────────────────────────────────────────────────────────
+const InvestedCard = ({deal,onClick}) => {
+  const health=calcHealth(deal,[]);
+  const moic=calcMOIC(deal);
+  const method=getMethod(deal);
+  const trl={'lab':'TRL 1–3','pilot':'TRL 4–6','scale':'TRL 7–8'}[health.mat]||null;
+  return (
+    <div onClick={onClick} style={{background:'white',borderRadius:16,border:`1px solid ${health.needsCheckIn?'#fde68a':'#e5e7eb'}`,cursor:'pointer',overflow:'hidden'}}>
+      {health.needsCheckIn&&<div style={{padding:'6px 16px',background:'#fffbeb',borderBottom:'1px solid #fde68a',display:'flex',gap:8,alignItems:'center'}}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span style={{fontSize:12,fontWeight:500,color:'#92400e'}}>{health.checkInReason}</span></div>}
+      <div style={{padding:'14px 16px',display:'flex',alignItems:'center',gap:14}}>
+        <CompanyLogo name={deal.companyName} website={deal.website} size={44} radius={12} fallbackBg="#f59e0b" fallbackColor="white"/>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:2}}>
+            <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>{deal.companyName}</span>
+            {trl&&<Pill>{trl}</Pill>}
+          </div>
+          <p style={{fontSize:12,color:'#6b7280'}}>{deal.industry} · {deal.stage}</p>
+          {health.factors.filter(f=>f.t!=='info').slice(0,1).map((f,i)=><div key={i} style={{display:'flex',alignItems:'center',gap:6,marginTop:4}}><span style={{width:6,height:6,borderRadius:99,background:f.t==='positive'?'#10b981':f.t==='negative'?'#ef4444':'#f59e0b',display:'inline-block'}}/><span style={{fontSize:11,color:'#9ca3af'}}>{f.l}</span></div>)}
+        </div>
+        <div style={{textAlign:'right',flexShrink:0}}>
+          <p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{fmtC(getCB(deal.investment||{}))}</p>
+          {method!=='mark-at-cost'&&moic?<p style={{fontSize:12,fontWeight:500,color:moic>=1?'#10b981':'#ef4444'}}>{moic.toFixed(2)}x</p>:<p style={{fontSize:12,color:'#9ca3af'}}>at cost</p>}
+        </div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
+      </div>
+    </div>
+  );
+};
+
+const WatchingCard = ({deal,onClick}) => (
+  <div onClick={onClick} style={{background:'white',borderRadius:16,border:'1px solid #e5e7eb',cursor:'pointer',padding:'14px 16px',display:'flex',alignItems:'center',gap:14}}>
+    <CompanyLogo name={deal.companyName} website={deal.website} size={44} radius={12} fallbackBg="#f3f4f6" fallbackColor="#6b7280"/>
+    <div style={{flex:1,minWidth:0}}>
+      <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:2}}><span style={{fontWeight:600,fontSize:14,color:'#374151'}}>{deal.companyName}</span></div>
+      <p style={{fontSize:12,color:'#9ca3af'}}>{deal.industry} · {deal.stage}</p>
+      {deal.watchingNotes&&<p style={{fontSize:12,color:'#9ca3af',marginTop:4,overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis',fontStyle:'italic'}}>"{deal.watchingNotes}"</p>}
+    </div>
+    {deal.monitoring?.fundraisingStatus==='raising'&&<Pill color="#1d4ed8" bg="#eff6ff">Raising now</Pill>}
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
+  </div>
+);
+
+// ── ADD MODAL ─────────────────────────────────────────────────────────────────
+const AddModal = ({onClose,onAdd}) => {
+  const [f,setF]=useState(()=>{
+    const mat=STAGE_MAT['seed']||'pilot';
+    const defs=METRIC_DEFAULTS[mat]||[];
+    return {name:'',website:'',industry:'',stage:'seed',status:'invested',amount:'',vehicle:'SAFE',founderName:'',founderRole:'CEO',note:'',metric1:defs[0]||'',metric2:defs[1]||'',metric3:defs[2]||''};
+  });
+
+  const updateStage = (stage) => {
+    const mat=STAGE_MAT[stage]||'lab';
+    const defs=METRIC_DEFAULTS[mat]||[];
+    setF(prev=>({...prev,stage,metric1:defs[0]||'',metric2:defs[1]||'',metric3:defs[2]||''}));
+  };
+  const submit=()=>{
+    if(!f.name||(f.status==='invested'&&!f.amount))return;
+    const now=new Date().toISOString();
+    const metrics=[f.metric1,f.metric2,f.metric3].map(m=>m.trim()).filter(Boolean);
+    const base={
+      id:genId(),companyName:f.name,status:f.status,stage:f.stage,
+      industry:f.industry||'Other',
+      website:f.website||null,
+      founders:f.founderName?[{name:f.founderName,role:f.founderRole}]:[],
+      coInvestors:[],liquidityEvents:[],documents:[],
+      monitoring:{healthStatus:'stable',fundraisingStatus:'not-raising'},
+      milestones:[],
+      metricsToWatch:metrics,
+      metricsLog:{},
+      revenueLog:[],
+      notesLog:f.note.trim()?[{id:genId(),text:f.note.trim(),date:now}]:[],
+      memo:f.note.trim()||'',
+      founderUpdates:[],
+      createdAt:now,statusEnteredAt:now
+    };
+    if(f.status==='invested'){base.investment={amount:Number(f.amount),costBasis:Number(f.amount),vehicle:f.vehicle,date:now,lastUpdateReceived:now};}
+    onAdd(base);onClose();
+  };
+
+  const inp={width:'100%',padding:'10px 12px',border:'1px solid #e5e7eb',borderRadius:10,fontSize:13,boxSizing:'border-box'};
+  const lbl={fontSize:12,color:'#6b7280',display:'block',marginBottom:4};
+
+  return <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,.5)',zIndex:100,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+    <div style={{background:'white',borderRadius:20,width:'100%',maxWidth:440,maxHeight:'88vh',overflow:'auto'}}>
+      <div style={{padding:'16px 20px',borderBottom:'1px solid #f3f4f6',display:'flex',justifyContent:'space-between',alignItems:'center',position:'sticky',top:0,background:'white',zIndex:1}}>
+        <span style={{fontWeight:700,fontSize:15,color:'#111827'}}>Add Company</span>
+        <button onClick={onClose} style={{background:'none',border:'none',cursor:'pointer',color:'#9ca3af'}}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+      </div>
+      <div style={{padding:20,display:'flex',flexDirection:'column',gap:14}}>
+
+        {/* Status */}
+        <div><label style={lbl}>Status</label>
+          <div style={{display:'flex',gap:8}}>
+            {['invested','watching'].map(s=>(
+              <button key={s} onClick={()=>setF({...f,status:s})} style={{flex:1,padding:'9px',borderRadius:10,fontSize:13,fontWeight:600,cursor:'pointer',border:`2px solid ${f.status===s?'#5B6DC4':'#e5e7eb'}`,background:f.status===s?'#5B6DC4':'white',color:f.status===s?'white':'#374151',textTransform:'capitalize'}}>{s}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Company basics */}
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <div style={{gridColumn:'1/-1'}}><label style={lbl}>Company name *</label><input value={f.name} onChange={e=>setF({...f,name:e.target.value})} placeholder="Acme Inc" style={inp}/></div>
+          <div style={{gridColumn:'1/-1'}}><label style={lbl}>Website</label><input value={f.website} onChange={e=>setF({...f,website:e.target.value})} placeholder="https://acme.com" style={inp}/></div>
+          <div><label style={lbl}>Industry</label><input value={f.industry} onChange={e=>setF({...f,industry:e.target.value})} placeholder="Climate Tech" style={inp}/></div>
+          <div><label style={lbl}>Stage</label>
+            <select value={f.stage} onChange={e=>updateStage(e.target.value)} style={inp}>
+              <option value="pre-seed">Pre-seed</option><option value="seed">Seed</option>
+              <option value="series-a">Series A</option><option value="series-b">Series B</option><option value="growth">Growth</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Investment details */}
+        {f.status==='invested'&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <div><label style={lbl}>Amount ($) *</label><input type="number" value={f.amount} onChange={e=>setF({...f,amount:e.target.value})} placeholder="25000" style={inp}/></div>
+          <div><label style={lbl}>Vehicle</label>
+            <select value={f.vehicle} onChange={e=>setF({...f,vehicle:e.target.value})} style={inp}>
+              <option value="SAFE">SAFE</option><option value="Convertible Note">Conv. Note</option><option value="Equity">Equity</option>
+            </select>
+          </div>
+        </div>}
+
+        {/* Founder */}
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <div><label style={lbl}>Founder name</label><input value={f.founderName} onChange={e=>setF({...f,founderName:e.target.value})} placeholder="Name" style={inp}/></div>
+          <div><label style={lbl}>Role</label><input value={f.founderRole} onChange={e=>setF({...f,founderRole:e.target.value})} placeholder="CEO" style={inp}/></div>
+        </div>
+
+        {/* Traction metrics */}
+        {(()=>{
+          const mat = STAGE_MAT[f.stage]||'lab';
+          const defs = METRIC_DEFAULTS[mat]||[];
+          if(mat==='deploy'||mat==='fund') return (
+            <div style={{padding:'10px 14px',background:'#f9fafb',borderRadius:10,border:'1px solid #f3f4f6'}}>
+              <p style={{fontSize:13,color:'#9ca3af'}}>At {f.stage} stage, revenue is the primary metric — no traction proxies needed.</p>
+            </div>
+          );
+          return (
+            <div>
+              <label style={lbl}>Traction metrics <span style={{fontWeight:400,color:'#9ca3af'}}>— pre-filled for {f.stage} stage, edit freely</span></label>
+              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                {['metric1','metric2','metric3'].map((k,i)=>(
+                  <input key={k} value={f[k]} onChange={e=>setF({...f,[k]:e.target.value})}
+                    placeholder={defs[i]||`Metric ${i+1}`}
+                    style={{...inp,borderColor:f[k]?'#5B6DC4':'#e5e7eb'}}/>
+                ))}
+              </div>
+              <p style={{fontSize:11,color:'#9ca3af',marginTop:6}}>Log readings on the deal page after each founder call</p>
+            </div>
+          );
+        })()}
+
+        {/* Initial note */}
+        <div>
+          <label style={lbl}>{f.status==='invested'?'Why you invested':'Why you are watching'} <span style={{fontWeight:400,color:'#9ca3af'}}>(optional)</span></label>
+          <textarea value={f.note} onChange={e=>setF({...f,note:e.target.value})}
+            placeholder={f.status==='invested'?'What made you invest? What is your thesis?':'Why are you watching? What would move you to invest?'}
+            rows={3} style={{...inp,resize:'none',outline:'none',fontFamily:'inherit',lineHeight:1.6}}/>
+        </div>
+      </div>
+
+      <div style={{padding:'12px 20px',borderTop:'1px solid #f3f4f6',position:'sticky',bottom:0,background:'white'}}>
+        <button onClick={submit} disabled={!f.name||(f.status==='invested'&&!f.amount)} style={{width:'100%',padding:'12px',background:'#5B6DC4',color:'white',border:'none',borderRadius:12,fontWeight:600,fontSize:14,cursor:'pointer',opacity:f.name&&(f.status!=='invested'||f.amount)?1:.4}}>Add Company</button>
+      </div>
+    </div>
+  </div>;
+};
+
+// ── ROOT APP ──────────────────────────────────────────────────────────────────
+
+// ── APP SHELL ─────────────────────────────────────────────────────────────────
 
 function ConvexApp({ userMenu, syncStatus, user }) {
   const [page, setPage] = useState('list');
   const [deals, setDeals] = useState([]);
   const [dealsLoading, setDealsLoading] = useState(true);
   const [selected, setSelected] = useState(null);
-  const [toast, setToast] = useState(null);
+  const [toast, setToastRaw] = useState(null);
+  const setToast = (msg) => {
+    if (typeof msg === 'string') setToastRaw({ message: msg, type: 'success' });
+    else setToastRaw(msg);
+  };
   const [search, setSearch] = useState('');
   const [sortBy, setSortBy] = useState('health');
   const [showSortDropdown, setShowSortDropdown] = useState(false);
@@ -2689,18 +4296,13 @@ function ConvexApp({ userMenu, syncStatus, user }) {
 
   const addDeal = async (newDeal) => {
     const { id, ...dealData } = newDeal;
-    const { error } = await supabase.from('deals').insert({
+    await supabase.from('deals').insert({
       id,
       user_id: user.id,
       company_name: newDeal.companyName,
       status: newDeal.status,
       data: dealData
     });
-    if (error) {
-      console.error('Failed to save deal:', error);
-      setToast({ message: `Failed to save: ${error.message}`, type: 'error' });
-      return;
-    }
     setDeals(prev => [newDeal, ...prev]);
     const statusLabel = STATUS_CONFIG[newDeal.status]?.label || newDeal.status;
     setToast({ message: `${newDeal.companyName} added as ${statusLabel}`, type: 'success' });
@@ -2903,11 +4505,10 @@ function ConvexApp({ userMenu, syncStatus, user }) {
         </header>
         <main className="px-6 py-6">
           {selected.status === 'invested'
-            ? <InvestedView deal={selected} onUpdate={updateDeal} setToast={setToast} />
-            : <WatchingView deal={selected} onUpdate={updateDeal} setToast={setToast} />
+            <DetailView deal={selected} onUpdate={updateDeal} setToast={setToast} />
           }
         </main>
-        {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+        {toast && <Toast message={typeof toast === "string" ? toast : toast.message} type={typeof toast === "string" ? "success" : (toast.type || "success")} onClose={() => setToastRaw(null)} />}
       </div>
     );
   }
@@ -2921,17 +4522,9 @@ function ConvexApp({ userMenu, syncStatus, user }) {
         <div className="flex items-center justify-between px-6 py-4">
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: '#4A1942' }}>
-                <svg width="18" height="18" viewBox="0 0 38 38" fill="none">
-                  <circle cx="19" cy="19" r="4.5" fill="#F5DFA0"/>
-                  <line x1="19" y1="3" x2="19" y2="10" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/>
-                  <line x1="19" y1="28" x2="19" y2="35" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/>
-                  <line x1="3" y1="19" x2="10" y2="19" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/>
-                  <line x1="28" y1="19" x2="35" y2="19" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/>
-                  <line x1="7.1" y1="7.1" x2="12.1" y2="12.1" stroke="#F5DFA0" strokeWidth="2" strokeLinecap="round" opacity=".8"/>
-                  <line x1="25.9" y1="25.9" x2="30.9" y2="30.9" stroke="#F5DFA0" strokeWidth="2" strokeLinecap="round" opacity=".8"/>
-                  <line x1="30.9" y1="7.1" x2="25.9" y2="12.1" stroke="#F5DFA0" strokeWidth="2" strokeLinecap="round" opacity=".8"/>
-                  <line x1="12.1" y1="25.9" x2="7.1" y2="30.9" stroke="#F5DFA0" strokeWidth="2" strokeLinecap="round" opacity=".8"/>
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: '#5B6DC4' }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
+                  <rect x="3" y="3" width="18" height="18" rx="2"/>
                 </svg>
               </div>
               <span className="font-semibold text-stone-900 dark:text-stone-100" style={{letterSpacing:'-0.3px'}}>Lucero</span>
@@ -3202,7 +4795,7 @@ function ConvexApp({ userMenu, syncStatus, user }) {
                   </div>
                   <div className="space-y-3">
                     {investedDeals.map(deal => (
-                      <DealInvestedCard key={deal.id} deal={deal} onSelect={() => { setSelected(deal); setPage('detail'); }} />
+                      <InvestedCard key={deal.id} deal={deal} onClick={() => { setSelected(deal); setPage('detail'); }} />
                     ))}
                   </div>
                 </div>
@@ -3217,7 +4810,7 @@ function ConvexApp({ userMenu, syncStatus, user }) {
                   </div>
                   <div className="space-y-3">
                     {watchingDeals.map(deal => (
-                      <DealWatchingCard key={deal.id} deal={deal} onSelect={() => { setSelected(deal); setPage('detail'); }} />
+                      <WatchingCard key={deal.id} deal={deal} onClick={() => { setSelected(deal); setPage('detail'); }} />
                     ))}
                   </div>
                 </div>
@@ -3231,7 +4824,7 @@ function ConvexApp({ userMenu, syncStatus, user }) {
                   </div>
                   <div className="space-y-2 opacity-60">
                     {passedDeals.map(deal => (
-                      <DealWatchingCard key={deal.id} deal={deal} onSelect={() => { setSelected(deal); setPage('detail'); }} />
+                      <WatchingCard key={deal.id} deal={deal} onClick={() => { setSelected(deal); setPage('detail'); }} />
                     ))}
                   </div>
                 </div>
@@ -3257,8 +4850,8 @@ function ConvexApp({ userMenu, syncStatus, user }) {
       </div>
 
       {/* Modals */}
-      {showAddPortfolio && <AddPortfolioModal onClose={() => setShowAddPortfolio(false)} onAdd={addDeal} />}
-      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      {showAddPortfolio && <AddModal onClose={() => setShowAddPortfolio(false)} onAdd={addDeal} />}
+      {toast && <Toast message={typeof toast === "string" ? toast : toast.message} type={typeof toast === "string" ? "success" : (toast.type || "success")} onClose={() => setToastRaw(null)} />}
     </div>
   );
 }
@@ -3278,8 +4871,12 @@ const App = () => {
     await signOut();
   };
 
-  if (isLoading) return null;
-
+  if (isLoading) return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fafaf9' }}>
+      <div style={{ width: '32px', height: '32px', border: '3px solid #e7e5e4', borderTopColor: '#5B6DC4', borderRadius: '50%', animation: 'spin 1s linear infinite' }}/>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
 
   if (!isAuthenticated) return <SimpleLoginPage onLogin={handleLogin} />;
 
