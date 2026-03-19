@@ -828,9 +828,8 @@ const FundraiseHistory = ({deal, onUpdate, setToast}) => {
 };
 
 // ── EXTERNAL SIGNAL FETCHER ───────────────────────────────────────────────────
-const SIGNAL_CACHE_KEY = 'lucero_signals_v1';
-const SIGNAL_TTL = 12 * 60 * 60 * 1000; // 12 hours
-
+const SIGNAL_CACHE_KEY = 'lucero_signals_v2';
+const SIGNAL_TTL = 12 * 60 * 60 * 1000;
 const loadSignalCache = () => { try { return JSON.parse(localStorage.getItem(SIGNAL_CACHE_KEY) || '{}'); } catch { return {}; } };
 const saveSignalCache = (c) => { try { localStorage.setItem(SIGNAL_CACHE_KEY, JSON.stringify(c)); } catch {} };
 
@@ -838,27 +837,61 @@ const fetchExternalSignals = async (deal) => {
   const resp = await fetch('/api/signals', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      companyName: deal.companyName,
-      website: deal.website || null,
-      stage: deal.stage || null,
-      industry: deal.industry || null,
-    }),
+    body: JSON.stringify({ companyName: deal.companyName, website: deal.website || null, stage: deal.stage || null, industry: deal.industry || null }),
   });
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({}));
-    throw new Error(err.error || `HTTP ${resp.status}`);
-  }
+  if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error(err.error || `HTTP ${resp.status}`); }
   return resp.json();
 };
 
+// ── STATUS DOTS ────────────────────────────────────────────────────────────────
+const ActivityDot = ({ status }) => {
+  const cfg = {
+    active:   { color: '#10b981', label: 'Active',  bg: '#f0fdf4' },
+    quiet:    { color: '#f59e0b', label: 'Quiet',   bg: '#fffbeb' },
+    dark:     { color: '#ef4444', label: 'Dark',    bg: '#fef2f2' },
+    unknown:  { color: '#9ca3af', label: 'Unknown', bg: '#f9fafb' },
+  }[status || 'unknown'];
+  return (
+    <span style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'3px 9px', borderRadius:99, background:cfg.bg, fontSize:11, fontWeight:600, color:cfg.color }}>
+      <span style={{ width:6, height:6, borderRadius:99, background:cfg.color, display:'inline-block' }}/>
+      {cfg.label}
+    </span>
+  );
+};
+
+const MomentumDot = ({ trend }) => {
+  const cfg = {
+    up:      { color: '#10b981', bg: '#f0fdf4', icon: '↑', label: 'Momentum ↑' },
+    flat:    { color: '#5B6DC4', bg: '#eef2ff', icon: '→', label: 'Steady →' },
+    down:    { color: '#ef4444', bg: '#fef2f2', icon: '↓', label: 'Slowing ↓' },
+    unknown: { color: '#9ca3af', bg: '#f9fafb', icon: '·', label: 'No data' },
+  }[trend || 'unknown'];
+  return (
+    <span style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'3px 9px', borderRadius:99, background:cfg.bg, fontSize:11, fontWeight:600, color:cfg.color }}>
+      {cfg.label}
+    </span>
+  );
+};
+
+const RiskDot = ({ level }) => {
+  const cfg = {
+    none:    { color: '#10b981', bg: '#f0fdf4', label: 'No risk flags' },
+    watch:   { color: '#f59e0b', bg: '#fffbeb', label: 'Watch' },
+    alert:   { color: '#ef4444', bg: '#fef2f2', label: 'Risk alert' },
+  }[level || 'none'];
+  return (
+    <span style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'3px 9px', borderRadius:99, background:cfg.bg, fontSize:11, fontWeight:600, color:cfg.color }}>
+      <span style={{ width:6, height:6, borderRadius:99, background:cfg.color, display:'inline-block' }}/>
+      {cfg.label}
+    </span>
+  );
+};
+
+// ── SIGNALS SECTION ───────────────────────────────────────────────────────────
 const SignalsSection = ({ deal, onUpdate }) => {
-  const [state, setState] = useState('idle'); // idle | loading | done | error
+  const [fetchState, setFetchState] = useState('idle');
   const [data, setData] = useState(null);
   const [lastFetched, setLastFetched] = useState(null);
-  const manualMilestones = (deal.milestones || [])
-    .filter(m => ['fundraising', 'partnership', 'product', 'update'].includes(m.type))
-    .sort((a, b) => new Date(b.date) - new Date(a.date));
 
   // Load from cache on mount
   useEffect(() => {
@@ -867,167 +900,273 @@ const SignalsSection = ({ deal, onUpdate }) => {
     if (cached && (Date.now() - new Date(cached.fetchedAt).getTime()) < SIGNAL_TTL) {
       setData(cached);
       setLastFetched(new Date(cached.fetchedAt));
-      setState('done');
+      setFetchState('done');
     }
   }, [deal.id]);
 
-  const fetch = async () => {
-    setState('loading');
+  const doFetch = async () => {
+    setFetchState('loading');
     try {
       const result = await fetchExternalSignals(deal);
-      const entry = { ...result, fetchedAt: new Date().toISOString(), dealId: deal.id };
+      const entry = { ...result, fetchedAt: new Date().toISOString() };
       const cache = loadSignalCache();
       cache[deal.id] = entry;
       saveSignalCache(cache);
       setData(entry);
       setLastFetched(new Date());
-      setState('done');
+      setFetchState('done');
 
-      // If we found signals, save top ones as milestones on the deal
-      if (result.signals?.length > 0 && onUpdate) {
-        const existing = new Set((deal.milestones || []).map(m => m.title));
-        const newMilestones = result.signals
-          .filter(s => !existing.has(s.title))
-          .slice(0, 5)
-          .map(s => ({
+      if (!onUpdate) return;
+      let updated = { ...deal };
+
+      // Funding rounds → fundraiseHistory
+      if (result.momentum?.fundingRounds?.length > 0) {
+        const existing = new Set((deal.fundraiseHistory || []).map(r => r.roundName?.toLowerCase()));
+        const newRounds = result.momentum.fundingRounds
+          .filter(r => r.roundName && !existing.has(r.roundName.toLowerCase()))
+          .map(r => ({
             id: genId(),
-            type: s.type === 'funding' ? 'fundraising' : s.type === 'partnership' ? 'partnership' : s.type === 'product' ? 'product' : 'update',
-            title: s.title,
-            description: s.description,
-            date: s.date ? new Date(s.date).toISOString() : new Date().toISOString(),
-            source: s.source,
-            sourceUrl: s.url,
+            roundName: r.roundName,
+            date: r.date ? new Date(r.date).toISOString() : new Date().toISOString(),
+            amountRaised: r.amountRaised || null,
+            postMoneyVal: r.postMoneyVal || null,
+            leadInvestor: r.leadInvestor || '',
+            followOns: r.followOns || [],
+            source: r.source || 'External search',
+            sourceUrl: r.sourceUrl || null,
             fromAgent: true,
-            sentiment: s.sentiment,
           }));
-        if (newMilestones.length > 0) {
-          onUpdate({ ...deal, milestones: [...(deal.milestones || []), ...newMilestones] });
+        if (newRounds.length) {
+          updated.fundraiseHistory = [...(updated.fundraiseHistory || []), ...newRounds]
+            .sort((a, b) => new Date(a.date) - new Date(b.date));
         }
       }
+
+      // Revenue data → revenueLog
+      if (result.momentum?.revenueData?.length > 0) {
+        const existingDates = new Set((deal.revenueLog || []).map(r => r.date?.substring(0, 7)));
+        const newRevenue = result.momentum.revenueData
+          .filter(r => r.date && !existingDates.has(r.date?.substring(0, 7)))
+          .map(r => ({
+            id: genId(),
+            date: new Date(r.date).toISOString(),
+            metric: r.metric || 'Revenue',
+            value: r.value || '',
+            numericValue: r.numericValue || null,
+            source: r.source || 'External search',
+            sourceUrl: r.sourceUrl || null,
+            fromAgent: true,
+          }));
+        if (newRevenue.length) {
+          updated.revenueLog = [...(updated.revenueLog || []), ...newRevenue]
+            .sort((a, b) => new Date(a.date) - new Date(b.date));
+        }
+      }
+
+      // Momentum + activity + risk signals → milestones
+      const allSignals = [
+        ...(result.momentum?.signals || []),
+        ...(result.activity?.signals || []),
+        ...(result.risk?.signals || []).map(s => ({ ...s, sentiment: 'negative' })),
+      ];
+      if (allSignals.length > 0) {
+        const existing = new Set((deal.milestones || []).map(m => m.title));
+        const newMs = allSignals
+          .filter(s => s.title && !existing.has(s.title))
+          .slice(0, 8)
+          .map(s => ({
+            id: genId(),
+            type: s.type === 'partnership' ? 'partnership' : s.type === 'product' ? 'product' : 'update',
+            title: s.title,
+            description: s.description || '',
+            date: s.date ? new Date(s.date).toISOString() : new Date().toISOString(),
+            source: s.source,
+            sourceUrl: s.sourceUrl || null,
+            fromAgent: true,
+            sentiment: s.sentiment || 'neutral',
+          }));
+        if (newMs.length) updated.milestones = [...(updated.milestones || []), ...newMs];
+      }
+
+      onUpdate(updated);
     } catch (e) {
       console.error('Signal fetch failed:', e);
-      setState('error');
+      setFetchState('error');
     }
   };
 
-  const TYPE_CFG = {
-    funding: { color: '#5B6DC4', bg: '#FFFBEC', label: 'Funding' },
-    revenue: { color: '#10b981', bg: '#f0fdf4', label: 'Revenue' },
-    product: { color: '#f59e0b', bg: '#fffbeb', label: 'Product' },
-    partnership: { color: '#10b981', bg: '#f0fdf4', label: 'Partnership' },
-    team: { color: '#7c3aed', bg: '#f5f3ff', label: 'Team' },
-    news: { color: '#78716c', bg: '#f5f5f4', label: 'News' },
-    risk: { color: '#ef4444', bg: '#fef2f2', label: 'Risk' },
-    fundraising: { color: '#5B6DC4', bg: '#FFFBEC', label: 'Funding' },
-    update: { color: '#78716c', bg: '#f5f5f4', label: 'Update' },
+  const activity = data?.activity;
+  const momentum = data?.momentum;
+  const risk = data?.risk;
+  const hasData = fetchState === 'done' && data;
+
+  const SIG_CFG = {
+    product:    { color: '#f59e0b', bg: '#fffbeb', label: 'Product' },
+    partnership:{ color: '#10b981', bg: '#f0fdf4', label: 'Partnership' },
+    team:       { color: '#7c3aed', bg: '#f5f3ff', label: 'Team' },
+    award:      { color: '#5B6DC4', bg: '#eef2ff', label: 'Award' },
+    news:       { color: '#78716c', bg: '#f5f5f4', label: 'News' },
+    silence:    { color: '#ef4444', bg: '#fef2f2', label: 'Silence' },
+    founder_departure: { color: '#ef4444', bg: '#fef2f2', label: 'Founder left' },
+    pivot:      { color: '#f59e0b', bg: '#fffbeb', label: 'Pivot' },
+    layoffs:    { color: '#ef4444', bg: '#fef2f2', label: 'Layoffs' },
+    domain:     { color: '#ef4444', bg: '#fef2f2', label: 'Domain issue' },
+    other:      { color: '#78716c', bg: '#f5f5f4', label: 'Risk' },
   };
 
-  const allSignals = data?.signals || [];
-  const hasAnyContent = state === 'done' || manualMilestones.length > 0;
-
   return (
-    <div style={{ background: 'white', borderRadius: 16, padding: 20, marginBottom: 12 }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+    <div style={{ background:'white', borderRadius:16, padding:20, marginBottom:12 }}>
+      {/* Header row */}
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: hasData ? 14 : 0 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>External Signals</span>
-          {lastFetched && <span style={{ fontSize: 11, color: '#9ca3af' }}>· {dAgo(lastFetched)}d ago</span>}
+          <span style={{ fontWeight:600, fontSize:14, color:'#111827' }}>External Signals</span>
+          {lastFetched && <span style={{ fontSize:11, color:'#9ca3af' }}>· updated {dAgo(lastFetched)}d ago</span>}
         </div>
-        <button
-          onClick={fetch}
-          disabled={state === 'loading'}
-          style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 8, fontSize: 12, fontWeight: 600, background: state === 'loading' ? '#f3f4f6' : '#eef2ff', color: state === 'loading' ? '#9ca3af' : '#5B6DC4', border: 'none', cursor: state === 'loading' ? 'not-allowed' : 'pointer' }}
-        >
-          {state === 'loading'
-            ? <><div style={{ width: 10, height: 10, border: '1.5px solid #d1d5db', borderTopColor: '#5B6DC4', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }}/> Searching…</>
-            : <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.12-7.51"/></svg>{state === 'done' ? 'Refresh' : 'Fetch signals'}</>
+        <button onClick={doFetch} disabled={fetchState === 'loading'}
+          style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 10px', borderRadius:8, fontSize:12, fontWeight:600,
+            background: fetchState === 'loading' ? '#f3f4f6' : '#eef2ff',
+            color: fetchState === 'loading' ? '#9ca3af' : '#5B6DC4', border:'none',
+            cursor: fetchState === 'loading' ? 'not-allowed' : 'pointer' }}>
+          {fetchState === 'loading'
+            ? <><div style={{ width:10, height:10, border:'1.5px solid #d1d5db', borderTopColor:'#5B6DC4', borderRadius:'50%', animation:'spin 0.8s linear infinite' }}/> Searching…</>
+            : <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.12-7.51"/></svg>{hasData ? 'Refresh' : 'Fetch signals'}</>
           }
         </button>
       </div>
 
-      {/* Idle state — prompt to fetch */}
-      {state === 'idle' && manualMilestones.length === 0 && (
-        <div style={{ textAlign: 'center', padding: '20px 0' }}>
-          <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 6 }}>No signals yet for {deal.companyName}</p>
-          <p style={{ fontSize: 12, color: '#9ca3af' }}>Click "Fetch signals" to search for news, funding rounds, revenue data, and website status.</p>
-        </div>
+      {/* Idle */}
+      {fetchState === 'idle' && (
+        <p style={{ fontSize:13, color:'#9ca3af', textAlign:'center', padding:'12px 0' }}>
+          Search for activity, momentum, and risk signals across the web.
+        </p>
       )}
 
       {/* Error */}
-      {state === 'error' && (
-        <p style={{ fontSize: 13, color: '#ef4444', textAlign: 'center', padding: '8px 0' }}>Failed to fetch — check your connection and try again.</p>
+      {fetchState === 'error' && (
+        <p style={{ fontSize:13, color:'#ef4444', textAlign:'center', padding:'8px 0' }}>
+          Failed to fetch — check connection and try again.
+        </p>
       )}
 
-      {/* Summary */}
-      {data?.summary && (
-        <div style={{ background: '#f9fafb', borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
-          <p style={{ fontSize: 13, color: '#374151', lineHeight: 1.6 }}>{data.summary}</p>
-          <div style={{ display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
-            {data.websiteStatus && data.websiteStatus !== 'unknown' && (
-              <span style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ width: 6, height: 6, borderRadius: 99, background: data.websiteStatus === 'active' ? '#10b981' : data.websiteStatus === 'down' ? '#ef4444' : '#f59e0b', display: 'inline-block' }}/>
-                <span style={{ color: '#6b7280' }}>Website {data.websiteStatus}</span>
-              </span>
-            )}
-            {data.lastFundingRound && <span style={{ fontSize: 11, color: '#5B6DC4' }}>💰 {data.lastFundingRound}</span>}
-            {data.estimatedRevenue && <span style={{ fontSize: 11, color: '#10b981' }}>📈 {data.estimatedRevenue}</span>}
-          </div>
-        </div>
-      )}
-
-      {/* Check-in recommendation */}
-      {data?.checkInRecommended && (
-        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '8px 12px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-          <p style={{ fontSize: 12, color: '#92400e' }}>{data.checkInReason}</p>
-        </div>
-      )}
-
-      {/* External signals from agent */}
-      {allSignals.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: manualMilestones.length ? 16 : 0 }}>
-          {allSignals.map((s, i) => {
-            const cfg = TYPE_CFG[s.type] || TYPE_CFG.news;
-            return (
-              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', borderRadius: 12, background: cfg.bg }}>
-                <Pill color={cfg.color} bg={cfg.color + '18'}>{cfg.label}</Pill>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ fontSize: 13, fontWeight: 500, color: '#111827', marginBottom: 2 }}>{s.title}</p>
-                  <p style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.5 }}>{s.description}</p>
-                  {s.url && <a href={s.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: '#5B6DC4', marginTop: 3, display: 'inline-block' }}>View source →</a>}
-                </div>
-                <span style={{ fontSize: 11, color: '#9ca3af', flexShrink: 0 }}>{s.source || ''}</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Manual milestones you've logged */}
-      {manualMilestones.length > 0 && (
+      {hasData && (
         <>
-          {allSignals.length > 0 && <p style={{ fontSize: 11, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: .6, marginBottom: 8 }}>Your notes</p>}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {manualMilestones.slice(0, 4).map((s, i) => {
-              const cfg = TYPE_CFG[s.type] || TYPE_CFG.update;
-              return (
-                <div key={s.id || i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', borderRadius: 12, background: cfg.bg }}>
-                  <Pill color={cfg.color} bg={cfg.color + '18'}>{cfg.label}</Pill>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: 13, fontWeight: 500, color: '#111827', marginBottom: 2 }}>{s.title}</p>
-                    {s.description && <p style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.5 }}>{s.description}</p>}
-                  </div>
-                  <span style={{ fontSize: 11, color: '#9ca3af', flexShrink: 0 }}>{dAgo(s.date)}d ago</span>
-                </div>
-              );
-            })}
+          {/* 3-bucket status bar */}
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:14 }}>
+            <ActivityDot status={activity?.status}/>
+            <MomentumDot trend={momentum?.trend}/>
+            <RiskDot level={risk?.level}/>
           </div>
+
+          {/* Summary */}
+          {data.summary && (
+            <div style={{ background:'#f9fafb', borderRadius:10, padding:'10px 14px', marginBottom:12 }}>
+              <p style={{ fontSize:13, color:'#374151', lineHeight:1.6 }}>{data.summary}</p>
+              {activity?.websiteStatus && activity.websiteStatus !== 'unknown' && (
+                <p style={{ fontSize:11, color:'#9ca3af', marginTop:6 }}>
+                  <span style={{ width:6, height:6, borderRadius:99, background: activity.websiteStatus==='active'?'#10b981':activity.websiteStatus==='down'?'#ef4444':'#f59e0b', display:'inline-block', marginRight:5 }}/>
+                  Website {activity.websiteStatus}{activity.websiteSummary ? ` — ${activity.websiteSummary}` : ''}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Auto-populated banner */}
+          {(momentum?.fundingRounds?.length > 0 || momentum?.revenueData?.length > 0) && (
+            <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:10, padding:'8px 14px', marginBottom:12, display:'flex', gap:14, flexWrap:'wrap', alignItems:'center' }}>
+              <span style={{ fontSize:11, color:'#166534', fontWeight:600 }}>✓ Auto-populated:</span>
+              {momentum.fundingRounds?.length > 0 && <span style={{ fontSize:11, color:'#166534' }}>{momentum.fundingRounds.length} funding round{momentum.fundingRounds.length>1?'s':''} → Fundraise History</span>}
+              {momentum.revenueData?.length > 0 && <span style={{ fontSize:11, color:'#166534' }}>{momentum.revenueData.length} revenue point{momentum.revenueData.length>1?'s':''} → Revenue Log</span>}
+            </div>
+          )}
+
+          {/* Risk alert */}
+          {risk?.level === 'alert' && risk.signals?.length > 0 && (
+            <div style={{ background:'#fef2f2', border:'1px solid #fecaca', borderRadius:10, padding:'10px 14px', marginBottom:12 }}>
+              <p style={{ fontSize:12, fontWeight:600, color:'#dc2626', marginBottom:6 }}>⚠ Risk signals detected</p>
+              {risk.signals.map((s, i) => (
+                <div key={i} style={{ fontSize:12, color:'#7f1d1d', marginBottom: i < risk.signals.length-1 ? 4 : 0 }}>
+                  <span style={{ fontWeight:500 }}>{s.title}</span>{s.description ? ` — ${s.description}` : ''}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Check-in recommendation */}
+          {data.checkInRecommended && (
+            <div style={{ background:'#fffbeb', border:'1px solid #fde68a', borderRadius:10, padding:'8px 12px', marginBottom:12, display:'flex', alignItems:'center', gap:8 }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <p style={{ fontSize:12, color:'#92400e' }}>{data.checkInReason}</p>
+            </div>
+          )}
+
+          {/* Momentum signals */}
+          {momentum?.signals?.length > 0 && (
+            <div style={{ marginBottom:12 }}>
+              <p style={{ fontSize:11, color:'#9ca3af', textTransform:'uppercase', letterSpacing:.6, marginBottom:8 }}>Momentum</p>
+              <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                {momentum.signals.map((s, i) => {
+                  const cfg = SIG_CFG[s.type] || SIG_CFG.news;
+                  return (
+                    <div key={i} style={{ display:'flex', alignItems:'flex-start', gap:10, padding:'10px 12px', borderRadius:12, background:cfg.bg }}>
+                      <Pill color={cfg.color} bg={cfg.color+'18'}>{cfg.label}</Pill>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <p style={{ fontSize:13, fontWeight:500, color:'#111827', marginBottom:2 }}>{s.title}</p>
+                        <p style={{ fontSize:12, color:'#6b7280', lineHeight:1.5 }}>{s.description}</p>
+                        {s.sourceUrl && <a href={s.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize:11, color:'#5B6DC4', marginTop:3, display:'inline-block' }}>Source →</a>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Activity signals */}
+          {activity?.signals?.length > 0 && (
+            <div style={{ marginBottom: risk?.signals?.filter(s => risk.level !== 'alert').length ? 12 : 0 }}>
+              <p style={{ fontSize:11, color:'#9ca3af', textTransform:'uppercase', letterSpacing:.6, marginBottom:8 }}>Activity</p>
+              <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                {activity.signals.map((s, i) => (
+                  <div key={i} style={{ display:'flex', alignItems:'flex-start', gap:10, padding:'10px 12px', borderRadius:12, background:'#f5f5f4' }}>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <p style={{ fontSize:13, fontWeight:500, color:'#111827', marginBottom:2 }}>{s.title}</p>
+                      <p style={{ fontSize:12, color:'#6b7280', lineHeight:1.5 }}>{s.description}</p>
+                      {s.sourceUrl && <a href={s.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize:11, color:'#5B6DC4', marginTop:3, display:'inline-block' }}>Source →</a>}
+                    </div>
+                    {s.date && <span style={{ fontSize:11, color:'#9ca3af', flexShrink:0 }}>{s.date}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Watch-level risk signals (not already shown as alert) */}
+          {risk?.level === 'watch' && risk.signals?.length > 0 && (
+            <div>
+              <p style={{ fontSize:11, color:'#9ca3af', textTransform:'uppercase', letterSpacing:.6, marginBottom:8 }}>Risk</p>
+              <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                {risk.signals.map((s, i) => {
+                  const cfg = SIG_CFG[s.type] || SIG_CFG.other;
+                  return (
+                    <div key={i} style={{ display:'flex', alignItems:'flex-start', gap:10, padding:'10px 12px', borderRadius:12, background:cfg.bg }}>
+                      <Pill color={cfg.color} bg={cfg.color+'18'}>{cfg.label}</Pill>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <p style={{ fontSize:13, fontWeight:500, color:'#111827', marginBottom:2 }}>{s.title}</p>
+                        <p style={{ fontSize:12, color:'#6b7280', lineHeight:1.5 }}>{s.description}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
   );
 };
+
 
 // ── INVESTMENT MEMO ───────────────────────────────────────────────────────────
 // Written once at the moment of decision. The thesis. Editable anytime.
@@ -1565,8 +1704,19 @@ const DetailView = ({deal,onUpdate,setToast}) => {
               <h2 style={{fontSize:20,fontWeight:800,color:'#111827'}}>{deal.companyName}</h2>
               {deal.website&&<a href={deal.website} target="_blank" rel="noopener noreferrer" style={{color:'#9ca3af'}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>}
             </div>
-            <p style={{fontSize:13,color:'#6b7280',marginBottom:inv.trlAtInvestment&&['lab','pilot','scale'].includes(health.mat)?6:0}}>{deal.stage} · {deal.industry}</p>
-            {inv.trlAtInvestment&&['lab','pilot','scale'].includes(health.mat)&&<div style={{display:'flex',alignItems:'center',gap:6}}><TRLBadge trl={inv.trlAtInvestment}/><span style={{fontSize:11,color:'#9ca3af'}}>at investment</span></div>}
+            <p style={{fontSize:13,color:'#6b7280',marginBottom:6}}>{deal.stage} · {deal.industry}</p>
+            {/* 3-bucket status dots from cached signal data */}
+            {(()=>{
+              const cached = loadSignalCache()[deal.id];
+              if (!cached) return null;
+              return (
+                <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                  <ActivityDot status={cached.activity?.status}/>
+                  <MomentumDot trend={cached.momentum?.trend}/>
+                  <RiskDot level={cached.risk?.level}/>
+                </div>
+              );
+            })()}
           </div>
         </div>
         {deal.overview&&<p style={{fontSize:14,color:'#374151',lineHeight:1.6}}>{deal.overview}</p>}
