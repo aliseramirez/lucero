@@ -2127,6 +2127,8 @@ export default function App() {
   const [search, setSearch] = useState('');
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(new Set());
 
   // Load deals — wait for real data, never flash demo
   useEffect(() => {
@@ -2194,6 +2196,27 @@ export default function App() {
     const { error } = await supabase.from('deals').delete().eq('id', id).eq('user_id', user.id);
     if (error) console.error('Delete failed:', error.message);
     else setToast('Company removed');
+  };
+
+  const massDelete = async () => {
+    const ids = [...selectedIds];
+    setDeals(prev => prev.filter(d => !selectedIds.has(d.id)));
+    setSelectMode(false);
+    setSelectedIds(new Set());
+    setToast(`${ids.length} ${ids.length === 1 ? 'company' : 'companies'} removed`);
+    // Delete from Supabase in background
+    for (const id of ids) {
+      supabase.from('deals').delete().eq('id', id).eq('user_id', user.id)
+        .then(({ error }) => { if (error) console.warn('Delete failed:', id, error.message); });
+    }
+  };
+
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
   };
 
   const addDeal = async (d, upsert = false) => {
@@ -2331,13 +2354,47 @@ export default function App() {
             <span style={{fontWeight:800,fontSize:16,color:'#111827',letterSpacing:'-0.3px'}}>Lucero</span>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:10}}>
-            <button onClick={() => setShowImport(true)} style={{padding:'8px 14px',background:'white',color:'#374151',border:'1px solid #e5e7eb',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              Import CSV
-            </button>
-            <button onClick={() => setShowAdd(true)} style={{padding:'8px 14px',background:'#5B6DC4',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}>
-              <span style={{fontSize:16,lineHeight:1}}>+</span>Add Company
-            </button>
+            {selectMode ? (
+              <>
+                <span style={{fontSize:13,color:'#6b7280'}}>{selectedIds.size} selected</span>
+                <button
+                  onClick={() => {
+                    const allIds = new Set(deals.map(d => d.id));
+                    setSelectedIds(selectedIds.size === deals.length ? new Set() : allIds);
+                  }}
+                  style={{padding:'8px 12px',background:'white',color:'#374151',border:'1px solid #e5e7eb',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer'}}
+                >
+                  {selectedIds.size === deals.length ? 'Deselect all' : 'Select all'}
+                </button>
+                <button
+                  onClick={massDelete}
+                  disabled={selectedIds.size === 0}
+                  style={{padding:'8px 14px',background:selectedIds.size>0?'#ef4444':'#f3f4f6',color:selectedIds.size>0?'white':'#9ca3af',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:selectedIds.size>0?'pointer':'not-allowed',display:'flex',alignItems:'center',gap:6}}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg>
+                  Delete {selectedIds.size > 0 ? selectedIds.size : ''}
+                </button>
+                <button
+                  onClick={() => { setSelectMode(false); setSelectedIds(new Set()); }}
+                  style={{padding:'8px 12px',background:'white',color:'#6b7280',border:'1px solid #e5e7eb',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer'}}
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                <button onClick={() => setShowImport(true)} style={{padding:'8px 14px',background:'white',color:'#374151',border:'1px solid #e5e7eb',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  Import CSV
+                </button>
+                <button onClick={() => setShowAdd(true)} style={{padding:'8px 14px',background:'#5B6DC4',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}>
+                  <span style={{fontSize:16,lineHeight:1}}>+</span>Add Company
+                </button>
+                <button onClick={() => setSelectMode(true)} style={{padding:'8px 10px',background:'white',color:'#6b7280',border:'1px solid #e5e7eb',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer'}} title="Select to delete">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg>
+                </button>
+              </>
+            )}
             <UserMenu user={user} onLogout={signOut}/>
           </div>
         </div>
@@ -2398,7 +2455,14 @@ export default function App() {
                     <p style={{fontSize:11,fontWeight:600,color:'#6b7280',textTransform:'uppercase',letterSpacing:.8}}>Invested · {fInvested.filter(d => !(d.liquidityEvents||[]).length).length}</p>
                   </div>
                   <div style={{display:'flex',flexDirection:'column',gap:10}}>
-                    {fInvested.filter(d => !(d.liquidityEvents||[]).length).map(d => <InvestedCard key={d.id} deal={d} onClick={() => { setSelected(d); setPage('detail'); }}/>)}
+                    {fInvested.filter(d => !(d.liquidityEvents||[]).length).map(d => (
+                    <div key={d.id} style={{position:'relative'}} onClick={selectMode ? () => toggleSelect(d.id) : undefined}>
+                      <InvestedCard deal={d} onClick={selectMode ? undefined : () => { setSelected(d); setPage('detail'); }}/>
+                      {selectMode && <div style={{position:'absolute',top:12,left:12,width:20,height:20,borderRadius:6,border:`2px solid ${selectedIds.has(d.id)?'#5B6DC4':'#d1d5db'}`,background:selectedIds.has(d.id)?'#5B6DC4':'white',display:'flex',alignItems:'center',justifyContent:'center',zIndex:10,pointerEvents:'none'}}>
+                        {selectedIds.has(d.id)&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+                      </div>}
+                    </div>
+                  ))}
                   </div>
                 </div>
               )}
@@ -2410,7 +2474,14 @@ export default function App() {
                     <p style={{fontSize:11,fontWeight:600,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.8}}>Realized · {fInvested.filter(d => (d.liquidityEvents||[]).length > 0).length}</p>
                   </div>
                   <div style={{display:'flex',flexDirection:'column',gap:10}}>
-                    {fInvested.filter(d => (d.liquidityEvents||[]).length > 0).map(d => <InvestedCard key={d.id} deal={d} onClick={() => { setSelected(d); setPage('detail'); }}/>)}
+                    {fInvested.filter(d => (d.liquidityEvents||[]).length > 0).map(d => (
+                    <div key={d.id} style={{position:'relative'}} onClick={selectMode ? () => toggleSelect(d.id) : undefined}>
+                      <InvestedCard deal={d} onClick={selectMode ? undefined : () => { setSelected(d); setPage('detail'); }}/>
+                      {selectMode && <div style={{position:'absolute',top:12,left:12,width:20,height:20,borderRadius:6,border:`2px solid ${selectedIds.has(d.id)?'#5B6DC4':'#d1d5db'}`,background:selectedIds.has(d.id)?'#5B6DC4':'white',display:'flex',alignItems:'center',justifyContent:'center',zIndex:10,pointerEvents:'none'}}>
+                        {selectedIds.has(d.id)&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+                      </div>}
+                    </div>
+                  ))}
                   </div>
                 </div>
               )}
@@ -2428,23 +2499,28 @@ export default function App() {
                 {fFunds.map(d => {
                   const cb = getCB(d.investment||{});
                   return (
-                    <div key={d.id} onClick={() => { setSelected(d); setPage('detail'); }}
-                      style={{background:'white',borderRadius:16,border:'1px solid #ede9fe',cursor:'pointer',padding:'14px 16px',display:'flex',alignItems:'center',gap:14}}>
-                      <div style={{width:44,height:44,borderRadius:12,background:'#7c3aed20',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-                      </div>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:2}}>
-                          <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>{d.companyName}</span>
-                          <Pill color="#7c3aed" bg="#f5f3ff">LP</Pill>
+                    <div key={d.id} style={{position:'relative'}} onClick={selectMode ? () => toggleSelect(d.id) : undefined}>
+                      <div onClick={selectMode ? undefined : () => { setSelected(d); setPage('detail'); }}
+                        style={{background:'white',borderRadius:16,border:'1px solid #ede9fe',cursor:'pointer',padding:'14px 16px',display:'flex',alignItems:'center',gap:14}}>
+                        <div style={{width:44,height:44,borderRadius:12,background:'#7c3aed20',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
                         </div>
-                        <p style={{fontSize:12,color:'#9ca3af'}}>{d.source?.name && d.source.name !== 'AngelList' ? d.source.name : 'Fund investment'}</p>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:2}}>
+                            <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>{d.companyName}</span>
+                            <Pill color="#7c3aed" bg="#f5f3ff">LP</Pill>
+                          </div>
+                          <p style={{fontSize:12,color:'#9ca3af'}}>{d.source?.name && d.source.name !== 'AngelList' ? d.source.name : 'Fund investment'}</p>
+                        </div>
+                        <div style={{textAlign:'right',flexShrink:0}}>
+                          <p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{fmtC(cb)}</p>
+                          <p style={{fontSize:12,color:'#9ca3af'}}>LP position</p>
+                        </div>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
                       </div>
-                      <div style={{textAlign:'right',flexShrink:0}}>
-                        <p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{fmtC(cb)}</p>
-                        <p style={{fontSize:12,color:'#9ca3af'}}>LP position</p>
-                      </div>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
+                      {selectMode && <div style={{position:'absolute',top:12,left:12,width:20,height:20,borderRadius:6,border:`2px solid ${selectedIds.has(d.id)?'#5B6DC4':'#d1d5db'}`,background:selectedIds.has(d.id)?'#5B6DC4':'white',display:'flex',alignItems:'center',justifyContent:'center',zIndex:10,pointerEvents:'none'}}>
+                        {selectedIds.has(d.id)&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+                      </div>}
                     </div>
                   );
                 })}
@@ -2458,7 +2534,14 @@ export default function App() {
                 <p style={{fontSize:11,fontWeight:600,color:'#6b7280',textTransform:'uppercase',letterSpacing:.8}}>Watching · {fWatching.length}</p>
               </div>
               <div style={{display:'flex',flexDirection:'column',gap:10}}>
-                {fWatching.map(d => <WatchingCard key={d.id} deal={d} onClick={() => { setSelected(d); setPage('detail'); }}/>)}
+                {fWatching.map(d => (
+                <div key={d.id} style={{position:'relative'}} onClick={selectMode ? () => toggleSelect(d.id) : undefined}>
+                  <WatchingCard deal={d} onClick={selectMode ? undefined : () => { setSelected(d); setPage('detail'); }}/>
+                  {selectMode && <div style={{position:'absolute',top:12,left:12,width:20,height:20,borderRadius:6,border:`2px solid ${selectedIds.has(d.id)?'#5B6DC4':'#d1d5db'}`,background:selectedIds.has(d.id)?'#5B6DC4':'white',display:'flex',alignItems:'center',justifyContent:'center',zIndex:10,pointerEvents:'none'}}>
+                    {selectedIds.has(d.id)&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+                  </div>}
+                </div>
+              ))}
               </div>
             </div>
           )}
