@@ -1,52 +1,78 @@
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const { companyName, website, stage, industry } = req.body;
-
-  if (!companyName) {
-    return res.status(400).json({ error: 'companyName required' });
-  }
+  if (!companyName) return res.status(400).json({ error: 'companyName required' });
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
-  }
+  if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
 
-  const prompt = `You are an investment research assistant. Search for recent information about the company "${companyName}" (${industry || 'startup'}, ${stage || 'early stage'}${website ? `, website: ${website}` : ''}) and return a JSON object.
+  const prompt = `You are an investment research assistant analyzing "${companyName}" (${industry || 'startup'}, ${stage || 'early stage'}${website ? `, website: ${website}` : ''}) for an angel investor.
 
-Research tasks:
-1. Check if their website is active and what it currently says
-2. Find any recent news, press coverage, or announcements (last 12 months)
-3. Look for funding rounds, investor announcements, or valuation changes
-4. Find any revenue figures, growth metrics, or customer wins mentioned publicly
-5. Check for leadership changes, product launches, or pivots
-6. Look for any negative signals: layoffs, shutdowns, pivots away from core business
+Search the web thoroughly and return ONLY valid JSON with this exact structure:
 
-Return ONLY valid JSON (no markdown):
 {
-  "websiteStatus": "active" | "down" | "changed" | "unknown",
-  "websiteSummary": "brief description of what site says now",
-  "signals": [
-    {
-      "type": "funding" | "revenue" | "product" | "partnership" | "team" | "news" | "risk",
-      "title": "short title",
-      "description": "1-2 sentence summary",
-      "sentiment": "positive" | "neutral" | "negative",
-      "date": "ISO date or approximate like 2024-06",
-      "source": "source name",
-      "url": "url or null"
-    }
-  ],
-  "summary": "2-3 sentence overall assessment of company trajectory",
-  "lastFundingRound": "e.g. Series A $10M - 2024 or null",
-  "estimatedRevenue": "e.g. $2M ARR or null",
+  "activity": {
+    "status": "active" | "quiet" | "dark",
+    "websiteStatus": "active" | "changed" | "down" | "unknown",
+    "websiteSummary": "1 sentence what site currently shows or null",
+    "lastPublicSignal": "e.g. 'Blog post 2 months ago' or null",
+    "lastSignalDate": "YYYY-MM or null",
+    "linkedInActive": true | false | null,
+    "signals": [
+      { "title": "short title", "description": "1-2 sentences", "date": "YYYY-MM", "source": "name", "sourceUrl": "url or null" }
+    ]
+  },
+
+  "momentum": {
+    "trend": "up" | "flat" | "down" | "unknown",
+    "fundingRounds": [
+      {
+        "roundName": "e.g. Series A",
+        "date": "YYYY-MM",
+        "amountRaised": 10000000,
+        "leadInvestor": "name or null",
+        "followOns": ["investor1"],
+        "postMoneyVal": 50000000,
+        "source": "name",
+        "sourceUrl": "url or null"
+      }
+    ],
+    "revenueData": [
+      {
+        "metric": "ARR" | "MRR" | "Revenue" | "GMV" | "Customers" | "Users",
+        "value": "$2M",
+        "numericValue": 2000000,
+        "date": "YYYY-MM",
+        "source": "name",
+        "sourceUrl": "url or null"
+      }
+    ],
+    "signals": [
+      { "type": "product" | "partnership" | "team" | "award", "title": "short title", "description": "1-2 sentences", "sentiment": "positive" | "neutral", "date": "YYYY-MM", "source": "name", "sourceUrl": "url or null" }
+    ]
+  },
+
+  "risk": {
+    "level": "none" | "watch" | "alert",
+    "signals": [
+      { "type": "silence" | "founder_departure" | "pivot" | "domain" | "layoffs" | "other", "title": "short title", "description": "1-2 sentences", "date": "YYYY-MM or null", "source": "name or null", "sourceUrl": "url or null" }
+    ]
+  },
+
+  "summary": "2-3 sentence overall assessment for an angel investor",
   "checkInRecommended": true | false,
   "checkInReason": "specific reason or null"
 }
 
-If nothing found: return signals: [], summary: "No recent public signals found."`;
+Rules:
+- activity.status: "active" = public signal in last 3mo, "quiet" = 3-12mo, "dark" = 12mo+ or nothing found
+- momentum.trend: based on funding recency, revenue growth, hiring signals
+- risk.level: "none" = all good, "watch" = something worth monitoring, "alert" = urgent concern
+- Only include fundingRounds and revenueData with high confidence from public sources
+- Use raw numbers for amounts (no $ signs), null if unknown
+- If nothing found for a section return empty arrays
+- Dates: YYYY-MM if month known, YYYY if only year`;
 
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -58,7 +84,7 @@ If nothing found: return signals: [], summary: "No recent public signals found."
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
+        max_tokens: 2000,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
         messages: [{ role: 'user', content: prompt }],
       }),
@@ -72,7 +98,14 @@ If nothing found: return signals: [], summary: "No recent public signals found."
     const data = await response.json();
     const textBlock = data.content.filter(b => b.type === 'text').pop();
     if (!textBlock?.text) {
-      return res.status(200).json({ signals: [], summary: 'No data returned.', websiteStatus: 'unknown' });
+      return res.status(200).json({
+        activity: { status: 'unknown', websiteStatus: 'unknown', signals: [] },
+        momentum: { trend: 'unknown', fundingRounds: [], revenueData: [], signals: [] },
+        risk: { level: 'none', signals: [] },
+        summary: 'No data returned.',
+        checkInRecommended: false,
+        checkInReason: null,
+      });
     }
 
     const parsed = JSON.parse(textBlock.text.replace(/```json|```/g, '').trim());
