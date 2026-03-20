@@ -927,8 +927,24 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
     return markers.sort((a, b) => a.date - b.date);
   };
 
+  const buildPortfolioMarkers = (deals) => {
+    const markers = [];
+    deals.forEach(d => {
+      const inv = d.investment || {};
+      const cb = getCB(inv);
+      if (!cb || !inv.date) return;
+      markers.push({
+        date: new Date(inv.date),
+        type: d.isFund ? 'round' : 'invest',
+        label: d.companyName,
+        sub: [fmtC(cb), inv.vehicle || null].filter(Boolean).join(' · '),
+      });
+    });
+    return markers.sort((a, b) => a.date - b.date);
+  };
+
   const valuePoints = mode === 'deal' ? buildDealTimeline(deal) : buildPortfolioTimeline(allDeals || []);
-  const markers = mode === 'deal' ? buildMarkers(deal) : [];
+  const markers = mode === 'deal' ? buildMarkers(deal) : buildPortfolioMarkers(allDeals || []);
 
   if (valuePoints.length < 2) return null;
 
@@ -1106,10 +1122,10 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
       {/* Legend */}
       {filteredMarkers.length > 0 && (
         <div style={{ display: 'flex', gap: 14, marginTop: 12, flexWrap: 'wrap' }}>
-          {['round','update','signal','risk'].filter(t => filteredMarkers.some(m=>m.type===t)).map(t => (
+          {['round','invest','update','signal','risk'].filter(t => filteredMarkers.some(m=>m.type===t)).map(t => (
             <span key={t} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#6b7280' }}>
               <span style={{ width: 8, height: 8, borderRadius: 99, background: MARKER_COLORS[t], display: 'inline-block' }}/>
-              {t === 'round' ? 'Funding round' : t === 'update' ? 'Founder update' : t === 'signal' ? 'Signal' : 'Risk'}
+              {t === 'round' ? 'Fund / round' : t === 'invest' ? 'Investment' : t === 'update' ? 'Founder update' : t === 'signal' ? 'Signal' : 'Risk'}
             </span>
           ))}
         </div>
