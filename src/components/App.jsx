@@ -1079,29 +1079,29 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
             const my = yOf(valAtDate);
             const isHov = hovered === i;
             // Clamp tooltip x so it doesn't overflow
-            const ttX = Math.max(PL, Math.min(mx - 65, W - PR - 130));
-            const ttY = Math.max(PT + 4, my - 54);
+            const ttX = Math.max(PL, Math.min(mx - 44, W - PR - 88));
+            const ttY = Math.max(PT + 2, my - 40);
             return (
               <g key={i} style={{ cursor: 'pointer' }}
                 onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)}>
                 {/* Vertical dashed line from marker to x-axis */}
-                <line x1={mx} y1={my} x2={mx} y2={PT+CH} stroke={MARKER_COLORS[m.type]} strokeWidth="1" strokeDasharray="3,3" strokeOpacity="0.5"/>
+                <line x1={mx} y1={my+4} x2={mx} y2={PT+CH} stroke={MARKER_COLORS[m.type]} strokeWidth="0.75" strokeDasharray="2,3" strokeOpacity="0.35"/>
                 {/* Dot on the value line */}
                 <circle cx={mx} cy={my} r={isHov ? 3.5 : 2.5} fill={MARKER_COLORS[m.type]} stroke="white" strokeWidth="1"/>
                 {/* Tooltip on hover */}
                 {isHov && (
                   <g>
-                    <rect x={ttX} y={ttY} width="110" height={m.sub ? 38 : 30} rx="4" fill="white"
+                    <rect x={ttX} y={ttY} width="88" height={m.sub ? 30 : 24} rx="3" fill="white"
                       stroke={MARKER_COLORS[m.type]} strokeWidth="0.8" strokeOpacity="0.4"
                       style={{filter:'drop-shadow(0 2px 8px rgba(0,0,0,.14))'}}/>
-                    <text x={ttX+8} y={ttY+12} fontSize="6" fontWeight="700" fill={MARKER_COLORS[m.type]} style={{textTransform:'uppercase',letterSpacing:'0.5px'}}>
+                    <text x={ttX+6} y={ttY+9} fontSize="5.5" fontWeight="700" fill={MARKER_COLORS[m.type]} style={{textTransform:'uppercase',letterSpacing:'0.5px'}}>
                       {m.type === 'round' ? 'Funding round' : m.type === 'update' ? 'Founder update' : m.type === 'signal' ? 'Signal' : m.type === 'risk' ? 'Risk' : 'Event'}
                     </text>
-                    <text x={ttX+8} y={ttY+24} fontSize="7.5" fontWeight="600" fill="#111827">
+                    <text x={ttX+6} y={ttY+18} fontSize="6.5" fontWeight="600" fill="#111827">
                       {(m.label||'').substring(0,24)}{(m.label||'').length>24?'…':''}
                     </text>
-                    {m.sub && <text x={ttX+8} y={ttY+34} fontSize="6.5" fill="#6b7280">{m.sub.substring(0,26)}</text>}
-                    <text x={ttX+8} y={ttY+(m.sub?46:36)-5} fontSize="6" fill="#9ca3af">
+                    {m.sub && <text x={ttX+6} y={ttY+25} fontSize="5.5" fill="#6b7280">{m.sub.substring(0,26)}</text>}
+                    <text x={ttX+6} y={ttY+(m.sub?30:24)-4} fontSize="5" fill="#9ca3af">
                       {m.date.toLocaleDateString('en-US',{month:'short',year:'numeric'})}
                     </text>
                   </g>
