@@ -1052,7 +1052,7 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
           {yTicks.map((v, i) => (
             <g key={i}>
               <line x1={PL} y1={yOf(v)} x2={W-PR} y2={yOf(v)} stroke="#f3f4f6" strokeWidth="1"/>
-              <text x={PL-6} y={yOf(v)+4} textAnchor="end" fontSize="8" fill="#c4c4c4">{fmtC(v)}</text>
+              <text x={PL-6} y={yOf(v)+4} textAnchor="end" fontSize="5.5" fill="#c4c4c4">{fmtC(v)}</text>
             </g>
           ))}
 
@@ -1112,7 +1112,7 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
 
           {/* X axis date labels — small, 3 evenly spaced */}
           {[filtered[0], filtered[Math.floor(filtered.length/2)], filtered[filtered.length-1]].map((p, i) => (
-            <text key={i} x={xOf(p.date)} y={H-3} textAnchor="middle" fontSize="7" fill="#c4c4c4">
+            <text key={i} x={xOf(p.date)} y={H-3} textAnchor="middle" fontSize="5.5" fill="#c4c4c4">
               {p.date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })}
             </text>
           ))}
