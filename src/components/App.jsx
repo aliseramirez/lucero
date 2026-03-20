@@ -894,14 +894,36 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
   const buildMarkers = (d) => {
     const markers = [];
     (d.fundraiseHistory || []).forEach(r => {
-      if (r.date) markers.push({ date: new Date(r.date), type: 'round', label: r.roundName || 'Round', sub: r.amountRaised ? fmtC(r.amountRaised) : null });
+      if (r.date) markers.push({
+        date: new Date(r.date), type: 'round',
+        label: r.roundName || 'Funding round',
+        sub: [r.amountRaised ? fmtC(r.amountRaised) : null, r.leadInvestor || null].filter(Boolean).join(' · ') || null,
+      });
     });
     (d.founderUpdates || []).slice(0, 6).forEach(u => {
-      if (u.date) markers.push({ date: new Date(u.date), type: 'update', label: u.keyTakeaway ? u.keyTakeaway.substring(0, 40) + '…' : 'Founder update' });
+      if (u.date) markers.push({
+        date: new Date(u.date), type: 'update',
+        label: u.keyTakeaway ? u.keyTakeaway.substring(0, 50) : 'Founder update',
+        sub: null,
+      });
     });
-    (d.milestones || []).filter(m => m.fromPrimary || m.fromAgent).slice(0, 4).forEach(m => {
-      if (m.date) markers.push({ date: new Date(m.date), type: m.sentiment === 'negative' ? 'risk' : 'signal', label: m.title?.substring(0, 40) });
+    (d.milestones || []).filter(m => m.fromPrimary || m.fromAgent).slice(0, 6).forEach(m => {
+      if (m.date) markers.push({
+        date: new Date(m.date),
+        type: m.sentiment === 'negative' ? 'risk' : 'signal',
+        label: m.title?.substring(0, 50) || '',
+        sub: m.description ? m.description.substring(0, 40) : null,
+      });
     });
+    // Also include external signal fetch dates
+    try {
+      const cache = loadSignalCache()[d.id];
+      if (cache?.fetchedAt) markers.push({
+        date: new Date(cache.fetchedAt), type: 'signal',
+        label: 'External signals fetched',
+        sub: cache.activity?.status ? `Activity: ${cache.activity.status}` : null,
+      });
+    } catch {}
     return markers.sort((a, b) => a.date - b.date);
   };
 
@@ -918,8 +940,19 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
     : timeframe === 'ytd' ? new Date(now.getFullYear(), 0, 1)
     : null;
 
-  const filtered = cutoff ? valuePoints.filter(p => p.date >= cutoff) : valuePoints;
-  if (filtered.length < 2) return null;
+  // When filtering, always prepend the last point before the cutoff so the
+  // line has a starting value even if no events happened in the window
+  const filtered = (() => {
+    if (!cutoff) return valuePoints;
+    const inWindow = valuePoints.filter(p => p.date >= cutoff);
+    const beforeWindow = valuePoints.filter(p => p.date < cutoff);
+    if (beforeWindow.length === 0) return inWindow.length >= 1 ? inWindow : valuePoints;
+    // Start from the last known value just before the cutoff
+    const anchor = { ...beforeWindow[beforeWindow.length - 1], date: cutoff };
+    return [anchor, ...inWindow];
+  })();
+
+  if (filtered.length < 1) return null;
 
   const filteredMarkers = cutoff ? markers.filter(m => m.date >= cutoff) : markers;
 
@@ -1019,35 +1052,51 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
           {/* End dot */}
           <circle cx={xOf(filtered[filtered.length-1].date)} cy={yOf(endVal)} r="3.5" fill="#C9A84C"/>
 
-          {/* Event markers */}
+          {/* Event markers — placed on the value line at their date */}
           {filteredMarkers.map((m, i) => {
             const mx = xOf(m.date);
-            const my = yOf(endVal); // place at bottom of chart area
+            // Find the value on the step line at this marker's date
+            const valAtDate = (() => {
+              const before = filtered.filter(p => p.date <= m.date);
+              return before.length ? before[before.length-1].value : filtered[0].value;
+            })();
+            const my = yOf(valAtDate);
             const isHov = hovered === i;
+            // Clamp tooltip x so it doesn't overflow
+            const ttX = Math.max(PL, Math.min(mx - 65, W - PR - 160));
+            const ttY = Math.max(PT + 4, my - 68);
             return (
               <g key={i} style={{ cursor: 'pointer' }}
                 onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)}>
-                {/* Pin line */}
-                <line x1={mx} y1={PT+CH-2} x2={mx} y2={PT+CH+6} stroke={MARKER_COLORS[m.type]} strokeWidth="1.5" strokeDasharray="2,2"/>
-                {/* Marker dot on line */}
-                <circle cx={mx} cy={PT+CH} r={isHov ? 6 : 4} fill={MARKER_COLORS[m.type]} fillOpacity={isHov?1:.8}/>
-
+                {/* Vertical dashed line from marker to x-axis */}
+                <line x1={mx} y1={my} x2={mx} y2={PT+CH} stroke={MARKER_COLORS[m.type]} strokeWidth="1" strokeDasharray="3,3" strokeOpacity="0.5"/>
+                {/* Dot on the value line */}
+                <circle cx={mx} cy={my} r={isHov ? 6 : 4.5} fill={MARKER_COLORS[m.type]} stroke="white" strokeWidth="1.5"/>
                 {/* Tooltip on hover */}
                 {isHov && (
                   <g>
-                    <rect x={Math.min(mx - 60, W - PR - 130)} y={PT+CH+10} width="130" height="36" rx="6" fill="white"
-                      filter="drop-shadow(0 2px 6px rgba(0,0,0,.12))"/>
-                    <text x={Math.min(mx - 60, W - PR - 130) + 8} y={PT+CH+24} fontSize="10" fontWeight="700" fill={MARKER_COLORS[m.type]}>{m.type.toUpperCase()}</text>
-                    <text x={Math.min(mx - 60, W - PR - 130) + 8} y={PT+CH+38} fontSize="10" fill="#374151">{(m.label||'').substring(0,22)}</text>
+                    <rect x={ttX} y={ttY} width="160" height={m.sub ? 52 : 42} rx="6" fill="white"
+                      stroke={MARKER_COLORS[m.type]} strokeWidth="0.8" strokeOpacity="0.4"
+                      style={{filter:'drop-shadow(0 2px 8px rgba(0,0,0,.14))'}}/>
+                    <text x={ttX+10} y={ttY+14} fontSize="8" fontWeight="700" fill={MARKER_COLORS[m.type]} style={{textTransform:'uppercase',letterSpacing:'0.5px'}}>
+                      {m.type === 'round' ? 'Funding round' : m.type === 'update' ? 'Founder update' : m.type === 'signal' ? 'Signal' : m.type === 'risk' ? 'Risk' : 'Event'}
+                    </text>
+                    <text x={ttX+10} y={ttY+27} fontSize="9" fontWeight="600" fill="#111827">
+                      {(m.label||'').substring(0,24)}{(m.label||'').length>24?'…':''}
+                    </text>
+                    {m.sub && <text x={ttX+10} y={ttY+40} fontSize="8.5" fill="#6b7280">{m.sub.substring(0,26)}</text>}
+                    <text x={ttX+10} y={ttY+(m.sub?52:42)-5} fontSize="8" fill="#9ca3af">
+                      {m.date.toLocaleDateString('en-US',{month:'short',year:'numeric'})}
+                    </text>
                   </g>
                 )}
               </g>
             );
           })}
 
-          {/* X axis date labels */}
+          {/* X axis date labels — small, 3 evenly spaced */}
           {[filtered[0], filtered[Math.floor(filtered.length/2)], filtered[filtered.length-1]].map((p, i) => (
-            <text key={i} x={xOf(p.date)} y={H-4} textAnchor="middle" fontSize="9" fill="#c4c4c4">
+            <text key={i} x={xOf(p.date)} y={H-3} textAnchor="middle" fontSize="7" fill="#c4c4c4">
               {p.date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })}
             </text>
           ))}
