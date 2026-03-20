@@ -266,40 +266,30 @@ const CompanyLogo = ({name, website, size=44, radius=12, fallbackBg='#f3f4f6', f
 const MetricsTracker = ({deal, onUpdate}) => {
   const metrics = deal.metricsToWatch || [];
   const log = deal.metricsLog || {};
-  const revenue = deal.revenueLog || [];
   const [active, setActive] = useState(null);
   const [inputVal, setInputVal] = useState('');
   const [inputDate, setInputDate] = useState(new Date().toISOString().slice(0,10));
-  const [showReadings, setShowReadings] = useState(null); // key of expanded readings
+  const [showReadings, setShowReadings] = useState(null);
 
-  const logEntry = (key, isRevenue=false) => {
+  const logEntry = (key) => {
     if (!inputVal || isNaN(Number(inputVal))) return;
     const entry = { v: Number(inputVal), date: new Date(inputDate).toISOString() };
-    const updated = isRevenue
-      ? { ...deal, revenueLog: [...revenue, entry].sort((a,b)=>new Date(a.date)-new Date(b.date)) }
-      : { ...deal, metricsLog: { ...log, [key]: [...(log[key]||[]), entry].sort((a,b)=>new Date(a.date)-new Date(b.date)) }};
-    onUpdate(updated);
+    onUpdate({ ...deal, metricsLog: { ...log, [key]: [...(log[key]||[]), entry].sort((a,b)=>new Date(a.date)-new Date(b.date)) }});
     setActive(null); setInputVal(''); setInputDate(new Date().toISOString().slice(0,10));
   };
 
-  const deleteReading = (key, idx, isRevenue=false) => {
-    if (isRevenue) {
-      onUpdate({...deal, revenueLog: revenue.filter((_,i)=>i!==idx)});
-    } else {
-      const updated = [...(log[key]||[])];
-      updated.splice(idx,1);
-      onUpdate({...deal, metricsLog:{...log,[key]:updated}});
-    }
+  const deleteReading = (key, idx) => {
+    const updated = [...(log[key]||[])]; updated.splice(idx,1);
+    onUpdate({...deal, metricsLog:{...log,[key]:updated}});
   };
 
-  const MiniLine = ({ readings, color='#5B6DC4', wide=false }) => {
+  const MiniLine = ({ readings, color='#5B6DC4' }) => {
     if (!readings || readings.length < 2) return <span style={{fontSize:11,color:'#d1d5db'}}>no readings yet</span>;
-    const W=wide?200:80, H=wide?44:28, P=3;
+    const W=80, H=28, P=3;
     const vals = readings.map(r=>r.v);
     const mn=Math.min(...vals), mx=Math.max(...vals), rng=mx-mn||1;
     const pts = readings.map((r,i)=>[P+(i/(readings.length-1))*(W-P*2), P+((mx-r.v)/rng)*(H-P*2)]);
     const poly = pts.map(([x,y])=>`${x},${y}`).join(' ');
-    const area = wide ? `M${pts[0][0]},${H} `+pts.map(([x,y])=>`L${x},${y}`).join(' ')+` L${pts[pts.length-1][0]},${H} Z` : null;
     const latest = readings[readings.length-1];
     const prev = readings[readings.length-2];
     const dir = latest.v > prev.v ? '↑' : latest.v < prev.v ? '↓' : '→';
@@ -307,145 +297,68 @@ const MetricsTracker = ({deal, onUpdate}) => {
     return (
       <div style={{display:'flex',alignItems:'center',gap:10}}>
         <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
-          {area&&<defs><linearGradient id={`rg${color.replace('#','')}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity=".15"/><stop offset="100%" stopColor={color} stopOpacity="0"/></linearGradient></defs>}
-          {area&&<path d={area} fill={`url(#rg${color.replace('#','')})`}/>}
-          <polyline points={poly} fill="none" stroke={color} strokeWidth={wide?"2":"1.5"} strokeLinejoin="round" strokeLinecap="round"/>
-          <circle cx={pts[pts.length-1][0]} cy={pts[pts.length-1][1]} r={wide?"3":"2.5"} fill={color}/>
+          <polyline points={poly} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/>
+          <circle cx={pts[pts.length-1][0]} cy={pts[pts.length-1][1]} r="2.5" fill={color}/>
         </svg>
-        <div>
-          <div style={{display:'flex',alignItems:'baseline',gap:4}}>
-            <span style={{fontSize:wide?16:13,fontWeight:700,color:'#111827'}}>{wide?fmtC(latest.v):latest.v.toLocaleString()}</span>
-            <span style={{fontSize:wide?14:13,fontWeight:600,color:dirColor}}>{dir}</span>
-          </div>
-          {wide&&<p style={{fontSize:11,color:'#9ca3af',marginTop:1}}>{readings.length} readings · last {dAgo(latest.date)}d ago</p>}
+        <div style={{display:'flex',alignItems:'baseline',gap:4}}>
+          <span style={{fontSize:13,fontWeight:700,color:'#111827'}}>{latest.v.toLocaleString()}</span>
+          <span style={{fontSize:13,fontWeight:600,color:dirColor}}>{dir}</span>
         </div>
       </div>
     );
   };
 
-  const hasRevenue = revenue.length > 0;
-  const isLoggingRevenue = active === '__revenue__';
-
-  // Merge manual revenue log with any fetched revenue data from signal cache
-  // Fetched entries have a 'numericValue' field; manual entries have 'v'
-  const allRevenuePoints = (() => {
-    const manual = revenue.map(r => ({ v: r.v, date: r.date, source: 'manual' }));
-    const fromCache = (() => {
-      try {
-        const cached = loadSignalCache()[deal?.id];
-        if (!cached?.momentum?.revenueData) return [];
-        return cached.momentum.revenueData
-          .filter(r => r.numericValue && r.date)
-          .map(r => ({ v: r.numericValue, date: new Date(r.date).toISOString(), source: r.source || 'External', metric: r.metric, label: r.value }));
-      } catch { return []; }
-    })();
-    // Deduplicate by month, prefer manual over fetched
-    const byMonth = {};
-    [...fromCache, ...manual].forEach(r => {
-      const key = r.date?.substring(0, 7);
-      if (key) byMonth[key] = r;
-    });
-    return Object.values(byMonth).sort((a, b) => new Date(a.date) - new Date(b.date));
-  })();
-
-  const hasAnyRevenue = allRevenuePoints.length > 0;
+  if (!metrics.length) return null;
 
   return (
     <div style={{background:'white',borderRadius:16,padding:20,marginBottom:12}}>
-      {/* Revenue — primary, always shown */}
-      <div style={{marginBottom:metrics.length?16:0}}>
-        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:hasAnyRevenue?10:6}}>
-          <div style={{display:'flex',alignItems:'center',gap:8}}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-            <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Revenue</span>
-            {!hasAnyRevenue&&<span style={{fontSize:11,color:'#9ca3af'}}>— log when available</span>}
-            {allRevenuePoints.some(r=>r.source!=='manual')&&<span style={{fontSize:10,color:'#10b981',background:'#f0fdf4',padding:'1px 6px',borderRadius:99}}>incl. external data</span>}
-          </div>
-          {!isLoggingRevenue&&<button onClick={()=>{setActive('__revenue__');setInputVal('');}} style={{fontSize:12,color:'#5B6DC4',background:'none',border:'none',cursor:'pointer',padding:0}}>+ Log</button>}
-        </div>
-        {isLoggingRevenue?(
-          <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
-            <input type="number" value={inputVal} onChange={e=>setInputVal(e.target.value)} placeholder="Revenue ($)" autoFocus style={{width:110,padding:'6px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none'}}/>
-            <input type="date" value={inputDate} onChange={e=>setInputDate(e.target.value)} style={{padding:'6px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none'}}/>
-            <button onClick={()=>logEntry('__revenue__',true)} disabled={!inputVal||isNaN(Number(inputVal))} style={{padding:'6px 14px',background:'#10b981',color:'white',border:'none',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',opacity:inputVal?1:.5}}>Save</button>
-            <button onClick={()=>setActive(null)} style={{padding:'6px 10px',background:'none',border:'none',color:'#9ca3af',fontSize:13,cursor:'pointer'}}>Cancel</button>
-          </div>
-        ):hasAnyRevenue?(
-          <div>
-            <MiniLine readings={allRevenuePoints} color="#10b981" wide={true}/>
-            <button onClick={()=>setShowReadings(showReadings==='__revenue__'?null:'__revenue__')} style={{marginTop:6,fontSize:11,color:'#9ca3af',background:'none',border:'none',cursor:'pointer',padding:0}}>
-              {showReadings==='__revenue__'?'Hide':'Show'} {allRevenuePoints.length} reading{allRevenuePoints.length!==1?'s':''}
-            </button>
-            {showReadings==='__revenue__'&&<div style={{marginTop:8,display:'flex',flexDirection:'column',gap:4}}>
-              {allRevenuePoints.map((r,i)=>(
-                <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 8px',background:'#f9fafb',borderRadius:8}}>
-                  <span style={{fontSize:12,color:'#374151',flex:1}}>
-                    {r.label || fmtC(r.v)}
-                    {r.metric && r.metric !== 'Revenue' && <span style={{color:'#9ca3af'}}> {r.metric}</span>}
-                    {' · '}{new Date(r.date).toLocaleDateString('en-US',{month:'short',year:'numeric'})}
-                  </span>
-                  {r.source!=='manual'
-                    ? <span style={{fontSize:10,color:'#9ca3af',fontStyle:'italic'}}>{r.source}</span>
-                    : <button onClick={()=>deleteReading('__revenue__',revenue.findIndex((_,ri)=>ri===i),true)} style={{color:'#d1d5db',background:'none',border:'none',cursor:'pointer',padding:2,fontSize:11}}>✕</button>
-                  }
-                </div>
-              ))}
-            </div>}
-          </div>
-        ):(
-          <p style={{fontSize:12,color:'#d1d5db',fontStyle:'italic'}}>No revenue logged yet — add a reading or fetch signals to pull public data</p>
-        )}
+      <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:14}}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        <span style={{fontSize:14,fontWeight:600,color:'#111827'}}>Traction Metrics</span>
+        <span style={{fontSize:11,color:'#9ca3af'}}>{metrics.length} tracked</span>
       </div>
-
-      {/* Traction metrics — pre-revenue proxies, hidden once revenue exists */}
-      {metrics.length>0&&!hasRevenue&&<div style={{borderTop:'1px solid #f3f4f6',paddingTop:14}}>
-        <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:12}}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-          <span style={{fontSize:12,fontWeight:600,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6}}>Traction metrics</span>
-        </div>
-        <div style={{display:'flex',flexDirection:'column',gap:0}}>
-          {metrics.map((metric, i) => {
-            const readings = log[metric] || [];
-            const isLogging = active === metric;
-            return (
-              <div key={metric} style={{paddingTop:i===0?0:12,marginTop:i===0?0:12,borderTop:i===0?'none':'1px solid #f9fafb'}}>
-                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
-                  <span style={{fontSize:13,color:'#374151',fontWeight:500,flex:1,minWidth:0,marginRight:12}}>{metric}</span>
-                  {!isLogging&&<button onClick={()=>{setActive(metric);setInputVal('');}} style={{fontSize:12,color:'#5B6DC4',background:'none',border:'none',cursor:'pointer',padding:0,flexShrink:0}}>+ Log</button>}
-                </div>
-                {isLogging?(
-                  <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
-                    <input type="number" value={inputVal} onChange={e=>setInputVal(e.target.value)} placeholder="Value" autoFocus style={{width:90,padding:'6px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none'}}/>
-                    <input type="date" value={inputDate} onChange={e=>setInputDate(e.target.value)} style={{padding:'6px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none'}}/>
-                    <button onClick={()=>logEntry(metric,false)} disabled={!inputVal||isNaN(Number(inputVal))} style={{padding:'6px 14px',background:'#5B6DC4',color:'white',border:'none',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',opacity:inputVal?1:.5}}>Save</button>
-                    <button onClick={()=>setActive(null)} style={{padding:'6px 10px',background:'none',border:'none',color:'#9ca3af',fontSize:13,cursor:'pointer'}}>Cancel</button>
-                  </div>
-                ):readings.length===0?(
-                  <p style={{fontSize:12,color:'#d1d5db',fontStyle:'italic'}}>No readings yet</p>
-                ):(
-                  <div>
-                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                      <MiniLine readings={readings} color={['#5B6DC4','#f59e0b','#7c3aed'][i%3]}/>
-                      <div style={{display:'flex',alignItems:'center',gap:8}}>
-                        <span style={{fontSize:11,color:'#9ca3af'}}>{readings.length} reading{readings.length!==1?'s':''}</span>
-                        <button onClick={()=>setShowReadings(showReadings===metric?null:metric)} style={{fontSize:11,color:'#9ca3af',background:'none',border:'none',cursor:'pointer',padding:0}}>{showReadings===metric?'▲':'▼'}</button>
-                      </div>
-                    </div>
-                    {showReadings===metric&&<div style={{marginTop:8,display:'flex',flexDirection:'column',gap:4}}>
-                      {readings.map((r,ri)=>(
-                        <div key={ri} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 8px',background:'#f9fafb',borderRadius:8}}>
-                          <span style={{fontSize:12,color:'#374151',flex:1}}>{r.v.toLocaleString()} · {new Date(r.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</span>
-                          <button onClick={()=>deleteReading(metric,ri,false)} style={{color:'#d1d5db',background:'none',border:'none',cursor:'pointer',padding:2,fontSize:11}}>✕</button>
-                        </div>
-                      ))}
-                    </div>}
-                  </div>
-                )}
+      <div style={{display:'flex',flexDirection:'column',gap:0}}>
+        {metrics.map((metric, i) => {
+          const readings = log[metric] || [];
+          const isLogging = active === metric;
+          return (
+            <div key={metric} style={{paddingTop:i===0?0:12,marginTop:i===0?0:12,borderTop:i===0?'none':'1px solid #f9fafb'}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
+                <span style={{fontSize:13,color:'#374151',fontWeight:500,flex:1,minWidth:0,marginRight:12}}>{metric}</span>
+                {!isLogging&&<button onClick={()=>{setActive(metric);setInputVal('');}} style={{fontSize:12,color:'#5B6DC4',background:'none',border:'none',cursor:'pointer',padding:0,flexShrink:0}}>+ Log</button>}
               </div>
-            );
-          })}
-        </div>
-      </div>}
+              {isLogging?(
+                <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                  <input type="number" value={inputVal} onChange={e=>setInputVal(e.target.value)} placeholder="Value" autoFocus style={{width:90,padding:'6px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none'}}/>
+                  <input type="date" value={inputDate} onChange={e=>setInputDate(e.target.value)} style={{padding:'6px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none'}}/>
+                  <button onClick={()=>logEntry(metric)} disabled={!inputVal||isNaN(Number(inputVal))} style={{padding:'6px 14px',background:'#5B6DC4',color:'white',border:'none',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',opacity:inputVal?1:.5}}>Save</button>
+                  <button onClick={()=>setActive(null)} style={{padding:'6px 10px',background:'none',border:'none',color:'#9ca3af',fontSize:13,cursor:'pointer'}}>Cancel</button>
+                </div>
+              ):readings.length===0?(
+                <p style={{fontSize:12,color:'#d1d5db',fontStyle:'italic'}}>No readings yet</p>
+              ):(
+                <div>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                    <MiniLine readings={readings} color={['#5B6DC4','#f59e0b','#7c3aed'][i%3]}/>
+                    <div style={{display:'flex',alignItems:'center',gap:8}}>
+                      <span style={{fontSize:11,color:'#9ca3af'}}>{readings.length} reading{readings.length!==1?'s':''}</span>
+                      <button onClick={()=>setShowReadings(showReadings===metric?null:metric)} style={{fontSize:11,color:'#9ca3af',background:'none',border:'none',cursor:'pointer',padding:0}}>{showReadings===metric?'▲':'▼'}</button>
+                    </div>
+                  </div>
+                  {showReadings===metric&&<div style={{marginTop:8,display:'flex',flexDirection:'column',gap:4}}>
+                    {readings.map((r,ri)=>(
+                      <div key={ri} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 8px',background:'#f9fafb',borderRadius:8}}>
+                        <span style={{fontSize:12,color:'#374151',flex:1}}>{r.v.toLocaleString()} · {new Date(r.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</span>
+                        <button onClick={()=>deleteReading(metric,ri)} style={{color:'#d1d5db',background:'none',border:'none',cursor:'pointer',padding:2,fontSize:11}}>✕</button>
+                      </div>
+                    ))}
+                  </div>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 };
@@ -918,6 +831,241 @@ const RiskDot = ({ level }) => {
       <span style={{ width:6, height:6, borderRadius:99, background:cfg.color, display:'inline-block' }}/>
       {cfg.label}
     </span>
+  );
+};
+
+// ── VALUE CHART ───────────────────────────────────────────────────────────────
+// Tracks implied value over time with annotated event markers.
+// Fundrise-style: area chart + step changes on valuation marks + event pins.
+const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
+  const [timeframe, setTimeframe] = useState('all');
+  const [hovered, setHovered] = useState(null);
+  const W = 600, H = 160, PL = 48, PR = 16, PT = 12, PB = 24;
+  const CW = W - PL - PR, CH = H - PT - PB;
+
+  // ── Build timeline data points ──────────────────────────────────────────────
+  const buildDealTimeline = (d) => {
+    const inv = d.investment || {};
+    const cb = getCB(inv);
+    if (!cb || !inv.date) return [];
+    const points = [{ date: new Date(inv.date), value: cb, type: 'invest' }];
+
+    // Each fundraise round with postMoneyVal recalculates implied value
+    (d.fundraiseHistory || [])
+      .filter(r => r.date && r.postMoneyVal && r.ownershipAfter)
+      .forEach(r => {
+        const iv = Math.round((r.ownershipAfter / 100) * r.postMoneyVal);
+        points.push({ date: new Date(r.date), value: iv, type: 'round', label: r.roundName });
+      });
+
+    // Current mark at today
+    const iv = calcIV(d);
+    points.push({ date: new Date(), value: iv, type: 'current' });
+
+    return points.sort((a, b) => a.date - b.date);
+  };
+
+  const buildPortfolioTimeline = (deals) => {
+    // Collect all investment events across portfolio
+    const events = [];
+    deals.forEach(d => {
+      const inv = d.investment || {};
+      const cb = getCB(inv);
+      if (!cb || !inv.date) return;
+      events.push({ date: new Date(inv.date), deal: d, cb });
+    });
+    events.sort((a, b) => a.date - b.date);
+    if (!events.length) return [];
+
+    // Build cumulative value over time
+    const points = [];
+    let deployed = 0;
+    events.forEach(e => {
+      deployed += e.cb;
+      points.push({ date: e.date, value: deployed, type: 'invest', label: e.deal.companyName });
+    });
+    // Add current total value at today
+    const totalIV = deals.reduce((s, d) => s + calcIV(d), 0);
+    points.push({ date: new Date(), value: totalIV, type: 'current' });
+    return points;
+  };
+
+  // ── Build event markers ──────────────────────────────────────────────────────
+  const buildMarkers = (d) => {
+    const markers = [];
+    (d.fundraiseHistory || []).forEach(r => {
+      if (r.date) markers.push({ date: new Date(r.date), type: 'round', label: r.roundName || 'Round', sub: r.amountRaised ? fmtC(r.amountRaised) : null });
+    });
+    (d.founderUpdates || []).slice(0, 6).forEach(u => {
+      if (u.date) markers.push({ date: new Date(u.date), type: 'update', label: u.keyTakeaway ? u.keyTakeaway.substring(0, 40) + '…' : 'Founder update' });
+    });
+    (d.milestones || []).filter(m => m.fromPrimary || m.fromAgent).slice(0, 4).forEach(m => {
+      if (m.date) markers.push({ date: new Date(m.date), type: m.sentiment === 'negative' ? 'risk' : 'signal', label: m.title?.substring(0, 40) });
+    });
+    return markers.sort((a, b) => a.date - b.date);
+  };
+
+  const valuePoints = mode === 'deal' ? buildDealTimeline(deal) : buildPortfolioTimeline(allDeals || []);
+  const markers = mode === 'deal' ? buildMarkers(deal) : [];
+
+  if (valuePoints.length < 2) return null;
+
+  // ── Timeframe filter ─────────────────────────────────────────────────────────
+  const now = new Date();
+  const cutoff = timeframe === '3m' ? new Date(now - 90*864e5)
+    : timeframe === '6m' ? new Date(now - 180*864e5)
+    : timeframe === '1y' ? new Date(now - 365*864e5)
+    : timeframe === 'ytd' ? new Date(now.getFullYear(), 0, 1)
+    : null;
+
+  const filtered = cutoff ? valuePoints.filter(p => p.date >= cutoff) : valuePoints;
+  if (filtered.length < 2) return null;
+
+  const filteredMarkers = cutoff ? markers.filter(m => m.date >= cutoff) : markers;
+
+  // ── Scale ────────────────────────────────────────────────────────────────────
+  const minDate = filtered[0].date.getTime();
+  const maxDate = filtered[filtered.length - 1].date.getTime();
+  const dateRange = maxDate - minDate || 1;
+  const vals = filtered.map(p => p.value);
+  const minVal = Math.min(...vals) * 0.9;
+  const maxVal = Math.max(...vals) * 1.08;
+  const valRange = maxVal - minVal || 1;
+
+  const xOf = (date) => PL + ((date.getTime() - minDate) / dateRange) * CW;
+  const yOf = (val) => PT + ((maxVal - val) / valRange) * CH;
+
+  // Build step line (hold previous value until new event)
+  const stepPts = [];
+  for (let i = 0; i < filtered.length; i++) {
+    const p = filtered[i];
+    if (i > 0) stepPts.push([xOf(p.date), yOf(filtered[i-1].value)]); // horizontal step
+    stepPts.push([xOf(p.date), yOf(p.value)]);
+  }
+  const linePath = stepPts.map(([x,y], i) => `${i===0?'M':'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  const areaPath = linePath + ` L${xOf(filtered[filtered.length-1].date).toFixed(1)},${(PT+CH).toFixed(1)} L${PL},${(PT+CH).toFixed(1)} Z`;
+
+  // Y axis labels
+  const yTicks = [minVal + valRange*0.1, minVal + valRange*0.5, minVal + valRange*0.9];
+
+  // Current value + change
+  const startVal = filtered[0].value;
+  const endVal = filtered[filtered.length - 1].value;
+  const change = endVal - startVal;
+  const changePct = startVal > 0 ? ((change / startVal) * 100).toFixed(1) : 0;
+  const isUp = change >= 0;
+
+  const MARKER_ICONS = {
+    round: '💰', update: '✉', signal: '✦', risk: '⚠', invest: '●',
+  };
+  const MARKER_COLORS = {
+    round: '#5B6DC4', update: '#10b981', signal: '#f59e0b', risk: '#ef4444', invest: '#9ca3af',
+  };
+
+  return (
+    <div style={{ background: 'white', borderRadius: 16, padding: 20, marginBottom: 12 }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
+        <div>
+          <p style={{ fontSize: 11, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: .6, marginBottom: 4 }}>
+            {mode === 'deal' ? 'Implied value' : 'Portfolio value'}
+          </p>
+          <p style={{ fontSize: 24, fontWeight: 800, color: '#111827', letterSpacing: '-0.5px' }}>{fmtC(endVal)}</p>
+          <p style={{ fontSize: 13, fontWeight: 600, color: isUp ? '#10b981' : '#ef4444', marginTop: 2 }}>
+            {isUp ? '▲' : '▼'} {fmtC(Math.abs(change))} ({Math.abs(changePct)}%) {timeframe === 'all' ? 'all time' : timeframe.toUpperCase()}
+          </p>
+        </div>
+        {/* Timeframe selector */}
+        <div style={{ display: 'flex', gap: 4, background: '#f3f4f6', borderRadius: 10, padding: 3 }}>
+          {['3m','6m','ytd','1y','all'].map(tf => (
+            <button key={tf} onClick={() => setTimeframe(tf)}
+              style={{ padding: '4px 9px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                background: timeframe === tf ? 'white' : 'transparent',
+                color: timeframe === tf ? '#111827' : '#9ca3af',
+                boxShadow: timeframe === tf ? '0 1px 3px rgba(0,0,0,.1)' : 'none' }}>
+              {tf === 'all' ? 'All time' : tf.toUpperCase()}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Chart */}
+      <div style={{ position: 'relative', overflowX: 'auto' }}>
+        <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}>
+          <defs>
+            <linearGradient id="valueGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#C9A84C" stopOpacity="0.18"/>
+              <stop offset="100%" stopColor="#C9A84C" stopOpacity="0.02"/>
+            </linearGradient>
+          </defs>
+
+          {/* Y axis gridlines + labels */}
+          {yTicks.map((v, i) => (
+            <g key={i}>
+              <line x1={PL} y1={yOf(v)} x2={W-PR} y2={yOf(v)} stroke="#f3f4f6" strokeWidth="1"/>
+              <text x={PL-6} y={yOf(v)+4} textAnchor="end" fontSize="9" fill="#c4c4c4">{fmtC(v)}</text>
+            </g>
+          ))}
+
+          {/* X axis baseline */}
+          <line x1={PL} y1={PT+CH} x2={W-PR} y2={PT+CH} stroke="#e5e7eb" strokeWidth="1"/>
+
+          {/* Area fill */}
+          <path d={areaPath} fill="url(#valueGrad)"/>
+
+          {/* Step line */}
+          <path d={linePath} fill="none" stroke="#C9A84C" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
+
+          {/* End dot */}
+          <circle cx={xOf(filtered[filtered.length-1].date)} cy={yOf(endVal)} r="3.5" fill="#C9A84C"/>
+
+          {/* Event markers */}
+          {filteredMarkers.map((m, i) => {
+            const mx = xOf(m.date);
+            const my = yOf(endVal); // place at bottom of chart area
+            const isHov = hovered === i;
+            return (
+              <g key={i} style={{ cursor: 'pointer' }}
+                onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)}>
+                {/* Pin line */}
+                <line x1={mx} y1={PT+CH-2} x2={mx} y2={PT+CH+6} stroke={MARKER_COLORS[m.type]} strokeWidth="1.5" strokeDasharray="2,2"/>
+                {/* Marker dot on line */}
+                <circle cx={mx} cy={PT+CH} r={isHov ? 6 : 4} fill={MARKER_COLORS[m.type]} fillOpacity={isHov?1:.8}/>
+
+                {/* Tooltip on hover */}
+                {isHov && (
+                  <g>
+                    <rect x={Math.min(mx - 60, W - PR - 130)} y={PT+CH+10} width="130" height="36" rx="6" fill="white"
+                      filter="drop-shadow(0 2px 6px rgba(0,0,0,.12))"/>
+                    <text x={Math.min(mx - 60, W - PR - 130) + 8} y={PT+CH+24} fontSize="10" fontWeight="700" fill={MARKER_COLORS[m.type]}>{m.type.toUpperCase()}</text>
+                    <text x={Math.min(mx - 60, W - PR - 130) + 8} y={PT+CH+38} fontSize="10" fill="#374151">{(m.label||'').substring(0,22)}</text>
+                  </g>
+                )}
+              </g>
+            );
+          })}
+
+          {/* X axis date labels */}
+          {[filtered[0], filtered[Math.floor(filtered.length/2)], filtered[filtered.length-1]].map((p, i) => (
+            <text key={i} x={xOf(p.date)} y={H-4} textAnchor="middle" fontSize="9" fill="#c4c4c4">
+              {p.date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })}
+            </text>
+          ))}
+        </svg>
+      </div>
+
+      {/* Legend */}
+      {filteredMarkers.length > 0 && (
+        <div style={{ display: 'flex', gap: 14, marginTop: 12, flexWrap: 'wrap' }}>
+          {['round','update','signal','risk'].filter(t => filteredMarkers.some(m=>m.type===t)).map(t => (
+            <span key={t} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#6b7280' }}>
+              <span style={{ width: 8, height: 8, borderRadius: 99, background: MARKER_COLORS[t], display: 'inline-block' }}/>
+              {t === 'round' ? 'Funding round' : t === 'update' ? 'Founder update' : t === 'signal' ? 'Signal' : 'Risk'}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
   );
 };
 
@@ -1888,6 +2036,8 @@ const DetailView = ({deal,onUpdate,setToast}) => {
           );
         })()}
       </div>
+
+      <ValueChart deal={deal} mode="deal"/>
 
       <ActiveRaiseCard deal={deal} onUpdate={onUpdate} setToast={setToast}/>
 
@@ -2866,6 +3016,8 @@ export default function App() {
             })()}
           </div>
         )}
+
+        {allInvested.length > 1 && <ValueChart allDeals={allInvested} mode="portfolio"/>}
 
         <div style={{marginBottom:14}}>
           <div style={{background:'white',borderRadius:14,border:'1px solid #e5e7eb',padding:'6px 12px',display:'flex',alignItems:'center',gap:10}}>
