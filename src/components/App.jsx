@@ -840,7 +840,7 @@ const RiskDot = ({ level }) => {
 const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
   const [timeframe, setTimeframe] = useState('all');
   const [hovered, setHovered] = useState(null);
-  const W = 600, H = 160, PL = 48, PR = 16, PT = 12, PB = 24;
+  const W = 360, H = 96, PL = 28, PR = 10, PT = 7, PB = 14;
   const CW = W - PL - PR, CH = H - PT - PB;
 
   // ── Build timeline data points ──────────────────────────────────────────────
@@ -1012,15 +1012,15 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
   };
 
   return (
-    <div style={{ background: 'white', borderRadius: 16, padding: 20, marginBottom: 12 }}>
+    <div style={{ background: 'white', borderRadius: 16, padding: '12px 16px', marginBottom: 12 }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
         <div>
-          <p style={{ fontSize: 11, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: .6, marginBottom: 4 }}>
+          <p style={{ fontSize: 9, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: .6, marginBottom: 2 }}>
             {mode === 'deal' ? 'Implied value' : 'Portfolio value'}
           </p>
-          <p style={{ fontSize: 24, fontWeight: 800, color: '#111827', letterSpacing: '-0.5px' }}>{fmtC(endVal)}</p>
-          <p style={{ fontSize: 13, fontWeight: 600, color: isUp ? '#10b981' : '#ef4444', marginTop: 2 }}>
+          <p style={{ fontSize: 16, fontWeight: 700, color: '#111827', letterSpacing: '-0.3px' }}>{fmtC(endVal)}</p>
+          <p style={{ fontSize: 11, fontWeight: 600, color: isUp ? '#10b981' : '#ef4444', marginTop: 1 }}>
             {isUp ? '▲' : '▼'} {fmtC(Math.abs(change))} ({Math.abs(changePct)}%) {timeframe === 'all' ? 'all time' : timeframe.toUpperCase()}
           </p>
         </div>
@@ -1028,7 +1028,7 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
         <div style={{ display: 'flex', gap: 4, background: '#f3f4f6', borderRadius: 10, padding: 3 }}>
           {['3m','6m','ytd','1y','all'].map(tf => (
             <button key={tf} onClick={() => setTimeframe(tf)}
-              style={{ padding: '4px 9px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+              style={{ padding: '4px 9px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 10, fontWeight: 600,
                 background: timeframe === tf ? 'white' : 'transparent',
                 color: timeframe === tf ? '#111827' : '#9ca3af',
                 boxShadow: timeframe === tf ? '0 1px 3px rgba(0,0,0,.1)' : 'none' }}>
@@ -1052,7 +1052,7 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
           {yTicks.map((v, i) => (
             <g key={i}>
               <line x1={PL} y1={yOf(v)} x2={W-PR} y2={yOf(v)} stroke="#f3f4f6" strokeWidth="1"/>
-              <text x={PL-6} y={yOf(v)+4} textAnchor="end" fontSize="9" fill="#c4c4c4">{fmtC(v)}</text>
+              <text x={PL-6} y={yOf(v)+4} textAnchor="end" fontSize="6" fill="#c4c4c4">{fmtC(v)}</text>
             </g>
           ))}
 
@@ -1066,7 +1066,7 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
           <path d={linePath} fill="none" stroke="#C9A84C" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
 
           {/* End dot */}
-          <circle cx={xOf(filtered[filtered.length-1].date)} cy={yOf(endVal)} r="3.5" fill="#C9A84C"/>
+          <circle cx={xOf(filtered[filtered.length-1].date)} cy={yOf(endVal)} r="2.5" fill="#C9A84C"/>
 
           {/* Event markers — placed on the value line at their date */}
           {filteredMarkers.map((m, i) => {
@@ -1079,7 +1079,7 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
             const my = yOf(valAtDate);
             const isHov = hovered === i;
             // Clamp tooltip x so it doesn't overflow
-            const ttX = Math.max(PL, Math.min(mx - 65, W - PR - 160));
+            const ttX = Math.max(PL, Math.min(mx - 55, W - PR - 110));
             const ttY = Math.max(PT + 4, my - 68);
             return (
               <g key={i} style={{ cursor: 'pointer' }}
@@ -1087,21 +1087,21 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
                 {/* Vertical dashed line from marker to x-axis */}
                 <line x1={mx} y1={my} x2={mx} y2={PT+CH} stroke={MARKER_COLORS[m.type]} strokeWidth="1" strokeDasharray="3,3" strokeOpacity="0.5"/>
                 {/* Dot on the value line */}
-                <circle cx={mx} cy={my} r={isHov ? 6 : 4.5} fill={MARKER_COLORS[m.type]} stroke="white" strokeWidth="1.5"/>
+                <circle cx={mx} cy={my} r={isHov ? 4 : 3} fill={MARKER_COLORS[m.type]} stroke="white" strokeWidth="1"/>
                 {/* Tooltip on hover */}
                 {isHov && (
                   <g>
-                    <rect x={ttX} y={ttY} width="160" height={m.sub ? 52 : 42} rx="6" fill="white"
+                    <rect x={ttX} y={ttY} width="110" height={m.sub ? 36 : 28} rx="4" fill="white"
                       stroke={MARKER_COLORS[m.type]} strokeWidth="0.8" strokeOpacity="0.4"
                       style={{filter:'drop-shadow(0 2px 8px rgba(0,0,0,.14))'}}/>
-                    <text x={ttX+10} y={ttY+14} fontSize="8" fontWeight="700" fill={MARKER_COLORS[m.type]} style={{textTransform:'uppercase',letterSpacing:'0.5px'}}>
+                    <text x={ttX+6} y={ttY+10} fontSize="6" fontWeight="700" fill={MARKER_COLORS[m.type]} style={{textTransform:'uppercase',letterSpacing:'0.5px'}}>
                       {m.type === 'round' ? 'Funding round' : m.type === 'update' ? 'Founder update' : m.type === 'signal' ? 'Signal' : m.type === 'risk' ? 'Risk' : 'Event'}
                     </text>
-                    <text x={ttX+10} y={ttY+27} fontSize="9" fontWeight="600" fill="#111827">
+                    <text x={ttX+6} y={ttY+19} fontSize="7" fontWeight="600" fill="#111827">
                       {(m.label||'').substring(0,24)}{(m.label||'').length>24?'…':''}
                     </text>
-                    {m.sub && <text x={ttX+10} y={ttY+40} fontSize="8.5" fill="#6b7280">{m.sub.substring(0,26)}</text>}
-                    <text x={ttX+10} y={ttY+(m.sub?52:42)-5} fontSize="8" fill="#9ca3af">
+                    {m.sub && <text x={ttX+6} y={ttY+27} fontSize="6.5" fill="#6b7280">{m.sub.substring(0,26)}</text>}
+                    <text x={ttX+6} y={ttY+(m.sub?36:28)-4} fontSize="6" fill="#9ca3af">
                       {m.date.toLocaleDateString('en-US',{month:'short',year:'numeric'})}
                     </text>
                   </g>
@@ -1112,7 +1112,7 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
 
           {/* X axis date labels — small, 3 evenly spaced */}
           {[filtered[0], filtered[Math.floor(filtered.length/2)], filtered[filtered.length-1]].map((p, i) => (
-            <text key={i} x={xOf(p.date)} y={H-3} textAnchor="middle" fontSize="7" fill="#c4c4c4">
+            <text key={i} x={xOf(p.date)} y={H-3} textAnchor="middle" fontSize="5.5" fill="#c4c4c4">
               {p.date.toLocaleDateString('en-US', { month: 'short', year: '2-digit' })}
             </text>
           ))}
@@ -1656,7 +1656,7 @@ const PrimaryInsight = ({ deal, onUpdate, setToast }) => {
               <p style={{ fontSize: 13, color: '#9ca3af', textAlign: 'center', padding: '8px 0' }}>No structured data found — update will be saved as a note.</p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
-                <p style={{ fontSize: 11, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: .6, marginBottom: 4 }}>Confirm what to save</p>
+                <p style={{ fontSize: 9, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: .6, marginBottom: 2 }}>Confirm what to save</p>
                 {[
                   ...(extracted.revenuePoints||[]).map((r,i) => ({
                     key: `rev_${i}`, icon: '📈', label: 'Revenue data point',
