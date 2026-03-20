@@ -1377,9 +1377,7 @@ const PrimaryInsight = ({ deal, onUpdate, setToast }) => {
         {inputMode === 'text' && (
           <div style={{ paddingTop: 14 }}>
             <textarea value={draft} onChange={e => setDraft(e.target.value)} autoFocus
-              placeholder={"Paste a founder email, call notes, or any update here...
-
-Claude will extract revenue figures, funding signals, risks, and key highlights for you to confirm."}
+              placeholder="Paste a founder email, call notes, or any update here... Claude will extract revenue figures, funding signals, risks, and key highlights for you to confirm."
               rows={8} style={{ width: '100%', padding: '10px 12px', border: '1px solid #5B6DC4', borderRadius: 12, fontSize: 13, resize: 'vertical', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit', lineHeight: 1.7 }}/>
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <button onClick={() => extract(draft)} disabled={draft.trim().length < 10}
