@@ -1063,10 +1063,10 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
           <path d={areaPath} fill="url(#valueGrad)"/>
 
           {/* Step line */}
-          <path d={linePath} fill="none" stroke="#C9A84C" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round"/>
+          <path d={linePath} fill="none" stroke="#C9A84C" strokeWidth="1" strokeLinejoin="round" strokeLinecap="round"/>
 
           {/* End dot */}
-          <circle cx={xOf(filtered[filtered.length-1].date)} cy={yOf(endVal)} r="3" fill="#C9A84C"/>
+          <circle cx={xOf(filtered[filtered.length-1].date)} cy={yOf(endVal)} r="2" fill="#C9A84C"/>
 
           {/* Event markers — placed on the value line at their date */}
           {filteredMarkers.map((m, i) => {
@@ -1087,21 +1087,21 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
                 {/* Vertical dashed line from marker to x-axis */}
                 <line x1={mx} y1={my} x2={mx} y2={PT+CH} stroke={MARKER_COLORS[m.type]} strokeWidth="1" strokeDasharray="3,3" strokeOpacity="0.5"/>
                 {/* Dot on the value line */}
-                <circle cx={mx} cy={my} r={isHov ? 5 : 3.5} fill={MARKER_COLORS[m.type]} stroke="white" strokeWidth="1.5"/>
+                <circle cx={mx} cy={my} r={isHov ? 3.5 : 2.5} fill={MARKER_COLORS[m.type]} stroke="white" strokeWidth="1"/>
                 {/* Tooltip on hover */}
                 {isHov && (
                   <g>
-                    <rect x={ttX} y={ttY} width="130" height={m.sub ? 46 : 36} rx="5" fill="white"
+                    <rect x={ttX} y={ttY} width="110" height={m.sub ? 38 : 30} rx="4" fill="white"
                       stroke={MARKER_COLORS[m.type]} strokeWidth="0.8" strokeOpacity="0.4"
                       style={{filter:'drop-shadow(0 2px 8px rgba(0,0,0,.14))'}}/>
-                    <text x={ttX+8} y={ttY+12} fontSize="7.5" fontWeight="700" fill={MARKER_COLORS[m.type]} style={{textTransform:'uppercase',letterSpacing:'0.5px'}}>
+                    <text x={ttX+8} y={ttY+12} fontSize="6" fontWeight="700" fill={MARKER_COLORS[m.type]} style={{textTransform:'uppercase',letterSpacing:'0.5px'}}>
                       {m.type === 'round' ? 'Funding round' : m.type === 'update' ? 'Founder update' : m.type === 'signal' ? 'Signal' : m.type === 'risk' ? 'Risk' : 'Event'}
                     </text>
-                    <text x={ttX+8} y={ttY+24} fontSize="9" fontWeight="600" fill="#111827">
+                    <text x={ttX+8} y={ttY+24} fontSize="7.5" fontWeight="600" fill="#111827">
                       {(m.label||'').substring(0,24)}{(m.label||'').length>24?'…':''}
                     </text>
-                    {m.sub && <text x={ttX+8} y={ttY+34} fontSize="8" fill="#6b7280">{m.sub.substring(0,26)}</text>}
-                    <text x={ttX+8} y={ttY+(m.sub?46:36)-5} fontSize="7" fill="#9ca3af">
+                    {m.sub && <text x={ttX+8} y={ttY+34} fontSize="6.5" fill="#6b7280">{m.sub.substring(0,26)}</text>}
+                    <text x={ttX+8} y={ttY+(m.sub?46:36)-5} fontSize="6" fill="#9ca3af">
                       {m.date.toLocaleDateString('en-US',{month:'short',year:'numeric'})}
                     </text>
                   </g>
@@ -2172,6 +2172,22 @@ const DetailView = ({deal,onUpdate,setToast}) => {
   );
 };
 
+// ── COLLAPSIBLE SECTION ───────────────────────────────────────────────────────
+const CollapsibleSection = ({ label, count, dotColor, textColor, defaultOpen, children }) => {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div>
+      <button onClick={() => setOpen(v => !v)}
+        style={{display:'flex',alignItems:'center',gap:8,background:'none',border:'none',cursor:'pointer',padding:'0 0 10px',width:'100%'}}>
+        <span style={{width:8,height:8,borderRadius:99,background:dotColor,display:'inline-block',flexShrink:0}}/>
+        <p style={{fontSize:11,fontWeight:600,color:textColor,textTransform:'uppercase',letterSpacing:.8,margin:0}}>{label} · {count}</p>
+        <span style={{marginLeft:'auto',fontSize:10,color:'#9ca3af'}}>{open ? '▲' : '▼'}</span>
+      </button>
+      {open && children}
+    </div>
+  );
+};
+
 // ── DEAL CARDS ────────────────────────────────────────────────────────────────
 const InvestedCard = ({deal,onClick}) => {
   const health=calcHealth(deal,[]);
@@ -3092,57 +3108,30 @@ export default function App() {
         </div>
 
         <div style={{display:'flex',flexDirection:'column',gap:16}}>
-          {fInvested.length > 0 && (
-            <div>
-              {/* Live startups */}
-              {fInvested.filter(d => !(d.liquidityEvents||[]).length).length > 0 && (
-                <div style={{marginBottom:16}}>
-                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
-                    <span style={{width:8,height:8,borderRadius:99,background:'#10b981',display:'inline-block'}}/>
-                    <p style={{fontSize:11,fontWeight:600,color:'#6b7280',textTransform:'uppercase',letterSpacing:.8}}>Invested · {fInvested.filter(d => !(d.liquidityEvents||[]).length).length}</p>
+          {fInvested.filter(d => !(d.liquidityEvents||[]).length).length > 0 && (
+            <CollapsibleSection
+              label="Invested"
+              count={fInvested.filter(d => !(d.liquidityEvents||[]).length).length}
+              dotColor="#10b981" textColor="#6b7280" defaultOpen={true}>
+              <div style={{display:'flex',flexDirection:'column',gap:10,marginTop:10}}>
+                {fInvested.filter(d => !(d.liquidityEvents||[]).length).map(d => (
+                  <div key={d.id} style={{position:'relative'}} onClick={selectMode ? () => toggleSelect(d.id) : undefined}>
+                    <InvestedCard deal={d} onClick={selectMode ? undefined : () => { setSelected(d); setPage('detail'); }}/>
+                    {selectMode && <div style={{position:'absolute',top:12,left:12,width:20,height:20,borderRadius:6,border:`2px solid ${selectedIds.has(d.id)?'#5B6DC4':'#d1d5db'}`,background:selectedIds.has(d.id)?'#5B6DC4':'white',display:'flex',alignItems:'center',justifyContent:'center',zIndex:10,pointerEvents:'none'}}>
+                      {selectedIds.has(d.id)&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+                    </div>}
                   </div>
-                  <div style={{display:'flex',flexDirection:'column',gap:10}}>
-                    {fInvested.filter(d => !(d.liquidityEvents||[]).length).map(d => (
-                    <div key={d.id} style={{position:'relative'}} onClick={selectMode ? () => toggleSelect(d.id) : undefined}>
-                      <InvestedCard deal={d} onClick={selectMode ? undefined : () => { setSelected(d); setPage('detail'); }}/>
-                      {selectMode && <div style={{position:'absolute',top:12,left:12,width:20,height:20,borderRadius:6,border:`2px solid ${selectedIds.has(d.id)?'#5B6DC4':'#d1d5db'}`,background:selectedIds.has(d.id)?'#5B6DC4':'white',display:'flex',alignItems:'center',justifyContent:'center',zIndex:10,pointerEvents:'none'}}>
-                        {selectedIds.has(d.id)&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
-                      </div>}
-                    </div>
-                  ))}
-                  </div>
-                </div>
-              )}
-              {/* Realized */}
-              {fInvested.filter(d => (d.liquidityEvents||[]).length > 0).length > 0 && (
-                <div style={{marginBottom:16}}>
-                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
-                    <span style={{width:8,height:8,borderRadius:99,background:'#9ca3af',display:'inline-block'}}/>
-                    <p style={{fontSize:11,fontWeight:600,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.8}}>Realized · {fInvested.filter(d => (d.liquidityEvents||[]).length > 0).length}</p>
-                  </div>
-                  <div style={{display:'flex',flexDirection:'column',gap:10}}>
-                    {fInvested.filter(d => (d.liquidityEvents||[]).length > 0).map(d => (
-                    <div key={d.id} style={{position:'relative'}} onClick={selectMode ? () => toggleSelect(d.id) : undefined}>
-                      <InvestedCard deal={d} onClick={selectMode ? undefined : () => { setSelected(d); setPage('detail'); }}/>
-                      {selectMode && <div style={{position:'absolute',top:12,left:12,width:20,height:20,borderRadius:6,border:`2px solid ${selectedIds.has(d.id)?'#5B6DC4':'#d1d5db'}`,background:selectedIds.has(d.id)?'#5B6DC4':'white',display:'flex',alignItems:'center',justifyContent:'center',zIndex:10,pointerEvents:'none'}}>
-                        {selectedIds.has(d.id)&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
-                      </div>}
-                    </div>
-                  ))}
-                  </div>
-                </div>
-              )}
-            </div>
+                ))}
+              </div>
+            </CollapsibleSection>
           )}
 
-          {/* Fund LP positions */}
           {fFunds.length > 0 && (
-            <div style={{marginBottom:16}}>
-              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
-                <span style={{width:8,height:8,borderRadius:99,background:'#7c3aed',display:'inline-block'}}/>
-                <p style={{fontSize:11,fontWeight:600,color:'#7c3aed',textTransform:'uppercase',letterSpacing:.8}}>Fund LP Positions · {fFunds.length}</p>
-              </div>
-              <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            <CollapsibleSection
+              label="Fund LP Positions"
+              count={fFunds.length}
+              dotColor="#7c3aed" textColor="#7c3aed" defaultOpen={true}>
+              <div style={{display:'flex',flexDirection:'column',gap:10,marginTop:10}}>
                 {fFunds.map(d => {
                   const cb = getCB(d.investment||{});
                   return (
@@ -3172,26 +3161,45 @@ export default function App() {
                   );
                 })}
               </div>
-            </div>
+            </CollapsibleSection>
           )}
+
+          {fInvested.filter(d => (d.liquidityEvents||[]).length > 0).length > 0 && (
+            <CollapsibleSection
+              label="Realized"
+              count={fInvested.filter(d => (d.liquidityEvents||[]).length > 0).length}
+              dotColor="#9ca3af" textColor="#9ca3af" defaultOpen={false}>
+              <div style={{display:'flex',flexDirection:'column',gap:10,marginTop:10}}>
+                {fInvested.filter(d => (d.liquidityEvents||[]).length > 0).map(d => (
+                  <div key={d.id} style={{position:'relative'}} onClick={selectMode ? () => toggleSelect(d.id) : undefined}>
+                    <InvestedCard deal={d} onClick={selectMode ? undefined : () => { setSelected(d); setPage('detail'); }}/>
+                    {selectMode && <div style={{position:'absolute',top:12,left:12,width:20,height:20,borderRadius:6,border:`2px solid ${selectedIds.has(d.id)?'#5B6DC4':'#d1d5db'}`,background:selectedIds.has(d.id)?'#5B6DC4':'white',display:'flex',alignItems:'center',justifyContent:'center',zIndex:10,pointerEvents:'none'}}>
+                      {selectedIds.has(d.id)&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+                    </div>}
+                  </div>
+                ))}
+              </div>
+            </CollapsibleSection>
+          )}
+
           {fWatching.length > 0 && (
-            <div>
-              <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
-                <span style={{width:8,height:8,borderRadius:99,background:'#9ca3af',display:'inline-block'}}/>
-                <p style={{fontSize:11,fontWeight:600,color:'#6b7280',textTransform:'uppercase',letterSpacing:.8}}>Watching · {fWatching.length}</p>
-              </div>
-              <div style={{display:'flex',flexDirection:'column',gap:10}}>
+            <CollapsibleSection
+              label="Watching"
+              count={fWatching.length}
+              dotColor="#9ca3af" textColor="#6b7280" defaultOpen={true}>
+              <div style={{display:'flex',flexDirection:'column',gap:10,marginTop:10}}>
                 {fWatching.map(d => (
-                <div key={d.id} style={{position:'relative'}} onClick={selectMode ? () => toggleSelect(d.id) : undefined}>
-                  <WatchingCard deal={d} onClick={selectMode ? undefined : () => { setSelected(d); setPage('detail'); }}/>
-                  {selectMode && <div style={{position:'absolute',top:12,left:12,width:20,height:20,borderRadius:6,border:`2px solid ${selectedIds.has(d.id)?'#5B6DC4':'#d1d5db'}`,background:selectedIds.has(d.id)?'#5B6DC4':'white',display:'flex',alignItems:'center',justifyContent:'center',zIndex:10,pointerEvents:'none'}}>
-                    {selectedIds.has(d.id)&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
-                  </div>}
-                </div>
-              ))}
+                  <div key={d.id} style={{position:'relative'}} onClick={selectMode ? () => toggleSelect(d.id) : undefined}>
+                    <WatchingCard deal={d} onClick={selectMode ? undefined : () => { setSelected(d); setPage('detail'); }}/>
+                    {selectMode && <div style={{position:'absolute',top:12,left:12,width:20,height:20,borderRadius:6,border:`2px solid ${selectedIds.has(d.id)?'#5B6DC4':'#d1d5db'}`,background:selectedIds.has(d.id)?'#5B6DC4':'white',display:'flex',alignItems:'center',justifyContent:'center',zIndex:10,pointerEvents:'none'}}>
+                      {selectedIds.has(d.id)&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+                    </div>}
+                  </div>
+                ))}
               </div>
-            </div>
+            </CollapsibleSection>
           )}
+
           {filtered.length === 0 && (
             <div style={{textAlign:'center',padding:'60px 20px',color:'#9ca3af'}}>
               <p style={{fontWeight:500,marginBottom:4}}>No companies yet</p>
