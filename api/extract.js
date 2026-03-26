@@ -7,10 +7,12 @@ export default async function handler(req, res) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured' });
 
-  const extractionPrompt = `You are analyzing a founder update for an angel investor's portfolio company "${dealName}".
+  const prompt = `You are analyzing an investment document for an angel investor's portfolio company "${dealName}".
 
-Existing known data:
-- Revenue data points: ${JSON.stringify(existingData?.revenueLog || [])}
+This may be a founder update email, call notes, OR a financial statement (SPV financials, fund statement, Carta report, etc.).
+
+Existing data:
+- Revenue: ${JSON.stringify(existingData?.revenueLog || [])}
 - Fundraise history: ${JSON.stringify(existingData?.fundraiseHistory || [])}
 
 Extract ALL useful investment insights. Return ONLY valid JSON:
@@ -18,9 +20,9 @@ Extract ALL useful investment insights. Return ONLY valid JSON:
 {
   "revenuePoints": [
     {
-      "metric": "ARR" | "MRR" | "Revenue" | "GMV" | "Customers" | "Users",
-      "value": "display string e.g. $2M ARR",
-      "numericValue": 2000000,
+      "metric": "ARR" | "MRR" | "Revenue" | "GMV" | "Customers" | "Users" | "NAV" | "Members Equity",
+      "value": "display string e.g. $760,200 NAV",
+      "numericValue": 760200,
       "date": "YYYY-MM",
       "confidence": "high" | "medium" | "low"
     }
@@ -28,11 +30,11 @@ Extract ALL useful investment insights. Return ONLY valid JSON:
   "fundingSignals": [
     {
       "type": "active_raise" | "closed_round" | "exploring",
-      "roundName": "e.g. Series A",
-      "amount": 5000000,
-      "leadInvestor": "name or null",
-      "participants": ["investor1"],
-      "timeline": "e.g. closing Q2 2025",
+      "roundName": "e.g. Series AA-2",
+      "amount": 740000,
+      "leadInvestor": null,
+      "participants": [],
+      "timeline": null,
       "confidence": "high" | "medium" | "low"
     }
   ],
@@ -43,32 +45,40 @@ Extract ALL useful investment insights. Return ONLY valid JSON:
     { "title": "short title", "description": "1-2 sentences" }
   ],
   "teamChanges": [
-    { "type": "hire" | "departure" | "promotion", "name": "person name or null", "role": "role title", "description": "1 sentence" }
+    { "type": "hire" | "departure" | "promotion", "name": null, "role": "role title", "description": "1 sentence" }
   ],
-  "keyTakeaway": "1-2 sentence summary of the most important thing",
+  "navUpdate": {
+    "nav": 760200,
+    "date": "2025-12",
+    "costBasis": 740000,
+    "totalFees": 22750
+  },
+  "keyTakeaway": "1-2 sentence summary",
   "sentiment": "positive" | "neutral" | "negative" | "mixed"
 }
 
-Rules:
-- Only extract what is explicitly stated or strongly implied
-- For revenue: only include if a specific number or metric is mentioned
-- If nothing found for a category return empty array []
-- numericValue should be raw number in dollars`;
+Special rules for SPV/fund financial statements (Carta, AngelList, etc.):
+- "Members' equity" or "Total members' equity" = NAV → put in navUpdate.nav AND revenuePoints with metric "NAV"
+- "Investment at fair value" = current fair value of the underlying investment
+- "Cost" next to the investment = cost basis → navUpdate.costBasis
+- "Management fees" + "admin fees" = total fees → navUpdate.totalFees
+- Statement date = navUpdate.date
+- If investment is at cost (fair value = cost), note this as a positive: "Marked at cost — no write-down"
+- If unrealized gain/loss is positive, note as positive signal
+
+For all other documents: only extract what is explicitly stated.
+Return empty arrays [] for categories with nothing found.
+numericValue should be raw integer dollars.`;
 
   try {
     let messageContent;
-
     if (pdfBase64) {
-      // Send PDF as document for Claude to read natively
       messageContent = [
-        {
-          type: 'document',
-          source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 },
-        },
-        { type: 'text', text: extractionPrompt },
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdfBase64 } },
+        { type: 'text', text: prompt },
       ];
     } else {
-      messageContent = `${extractionPrompt}\n\nFounder update content:\n---\n${content}\n---`;
+      messageContent = `${prompt}\n\nDocument content:\n---\n${content}\n---`;
     }
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
