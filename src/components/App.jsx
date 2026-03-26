@@ -1874,6 +1874,170 @@ const LiquiditySection = ({deal,onUpdate,setToast}) => {
 };
 
 // ── DETAIL VIEW ───────────────────────────────────────────────────────────────
+const CoInvestorsCollapsed = ({ coInvs }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{marginTop:12,paddingTop:12,borderTop:'1px solid #f3f4f6'}}>
+      <button onClick={()=>setOpen(v=>!v)} style={{display:'flex',alignItems:'center',gap:8,background:'none',border:'none',cursor:'pointer',padding:0,width:'100%'}}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span style={{fontSize:12,color:'#9ca3af',fontWeight:500}}>Co-investors on this round{coInvs.length>0?` (${coInvs.length})`:''}</span>
+        <span style={{fontSize:10,color:'#d1d5db',marginLeft:'auto'}}>{open?'▲':'▼'}</span>
+      </button>
+      {open&&<div style={{marginTop:10}}>
+        {coInvs.length===0&&<p style={{fontSize:12,color:'#d1d5db',fontStyle:'italic'}}>None logged yet</p>}
+        <div style={{display:'flex',flexWrap:'wrap',gap:8,marginTop:coInvs.length?8:0}}>
+          {coInvs.map(ci=>{
+            const rc=ROLE_CFG[ci.role]||ROLE_CFG['co-investor'];
+            return <div key={ci.id} style={{display:'flex',alignItems:'center',gap:6,padding:'4px 10px',borderRadius:99,background:rc.c+'12',border:`1px solid ${rc.c}30`}}>
+              <span style={{width:20,height:20,borderRadius:99,background:rc.c+'25',color:rc.c,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:10,flexShrink:0}}>{ci.name[0].toUpperCase()}</span>
+              <span style={{fontSize:12,fontWeight:500,color:'#374151'}}>{ci.name}</span>
+              {ci.fund&&ci.fund!==ci.name&&<span style={{fontSize:11,color:'#9ca3af'}}>· {ci.fund}</span>}
+              <Pill color={rc.c} bg={rc.c+'15'}>{rc.l}</Pill>
+            </div>;
+          })}
+        </div>
+      </div>}
+    </div>
+  );
+};
+
+// ── FUND NAV CARD ─────────────────────────────────────────────────────────────
+const FundNAVCard = ({ deal, inv, onUpdate, setToast }) => {
+  const [navInput, setNavInput] = useState('');
+  const [navDate, setNavDate] = useState(new Date().toISOString().slice(0,10));
+  const [editing, setEditing] = useState(false);
+  const currentNAV = inv.impliedValue || getCB(inv);
+  const committed = getCB(inv);
+  const lastUpdate = inv.lastValuationDate;
+  const change = currentNAV - committed;
+  const changePct = committed > 0 ? ((change/committed)*100).toFixed(1) : 0;
+  const save = () => {
+    if (!navInput || isNaN(Number(navInput))) return;
+    onUpdate({ ...deal, investment: { ...inv, impliedValue: Number(navInput), lastValuationDate: new Date(navDate).toISOString(), valuationMethod: 'nav-lp' }});
+    setEditing(false); setNavInput(''); setToast('NAV updated');
+  };
+  return (
+    <div style={{background:'#f5f3ff',border:'1px solid #e9d5ff',borderRadius:16,padding:'14px 18px',marginBottom:12}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:editing?12:0}}>
+        <div>
+          <p style={{fontSize:10,color:'#7c3aed',textTransform:'uppercase',letterSpacing:.6,marginBottom:3,fontWeight:600}}>Fund LP · Net Asset Value</p>
+          <div style={{display:'flex',alignItems:'baseline',gap:10}}>
+            <p style={{fontSize:22,fontWeight:700,color:'#111827'}}>{fmtC(currentNAV)}</p>
+            {lastUpdate && <p style={{fontSize:12,color:'#9ca3af'}}>as of {new Date(lastUpdate).toLocaleDateString('en-US',{month:'short',year:'numeric'})}</p>}
+          </div>
+          <p style={{fontSize:12,color:'#6b7280',marginTop:2}}>
+            Committed: {fmtC(committed)} · <span style={{color:change>=0?'#10b981':'#ef4444',fontWeight:500}}>{change>=0?'+':''}{fmtC(change)} ({changePct}%)</span>
+          </p>
+        </div>
+        <button onClick={()=>setEditing(v=>!v)}
+          style={{padding:'7px 14px',background:'white',border:'1px solid #e9d5ff',borderRadius:10,fontSize:12,fontWeight:600,color:'#7c3aed',cursor:'pointer'}}>
+          {editing ? 'Cancel' : 'Update NAV'}
+        </button>
+      </div>
+      {editing && (
+        <div style={{display:'flex',gap:8,alignItems:'flex-end',flexWrap:'wrap'}}>
+          <div style={{flex:1,minWidth:120}}>
+            <p style={{fontSize:11,color:'#7c3aed',marginBottom:4}}>New NAV ($)</p>
+            <input type="number" value={navInput} onChange={e=>setNavInput(e.target.value)}
+              placeholder={String(currentNAV)} autoFocus
+              style={{width:'100%',padding:'8px 10px',border:'1px solid #c4b5fd',borderRadius:8,fontSize:13,boxSizing:'border-box',outline:'none'}}/>
+          </div>
+          <div style={{flex:1,minWidth:120}}>
+            <p style={{fontSize:11,color:'#7c3aed',marginBottom:4}}>As of date</p>
+            <input type="date" value={navDate} onChange={e=>setNavDate(e.target.value)}
+              style={{width:'100%',padding:'8px 10px',border:'1px solid #c4b5fd',borderRadius:8,fontSize:13,boxSizing:'border-box',outline:'none'}}/>
+          </div>
+          <button onClick={save} disabled={!navInput||isNaN(Number(navInput))}
+            style={{padding:'8px 18px',background:'#7c3aed',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',opacity:navInput?1:.4}}>
+            Save
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── DEAL TERMS CARD ───────────────────────────────────────────────────────────
+const DealTermsCard = ({ deal, inv, cb, C, onUpdate, setToast }) => {
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState({
+    structure: deal.terms?.structure || 'Direct',
+    carry: deal.terms?.carry || '',
+    mgmtFee: deal.terms?.mgmtFee || '',
+    mgmtFeeYears: deal.terms?.mgmtFeeYears || '',
+    expenseReserve: deal.terms?.expenseReserve || '',
+    cap: deal.terms?.cap || '',
+    discount: deal.terms?.discount || '',
+  });
+  const t = deal.terms || {};
+  const hasTerms = t.carry || t.mgmtFee || t.expenseReserve || t.cap || t.discount || (t.structure && t.structure !== 'Direct');
+  const save = () => {
+    const amt = inv.amount || 0;
+    const expRes = (Number(form.expenseReserve)||0)/100;
+    const mgmtTotal = ((Number(form.mgmtFee)||0)/100)*(Number(form.mgmtFeeYears)||0);
+    const effectiveCost = (expRes+mgmtTotal)>0 ? Math.round(amt*(1-expRes-mgmtTotal)) : amt;
+    onUpdate({ ...deal, investment: { ...inv, effectiveCost },
+      terms: { structure:form.structure, carry:form.carry?Number(form.carry):null, mgmtFee:form.mgmtFee?Number(form.mgmtFee):null,
+        mgmtFeeYears:form.mgmtFeeYears?Number(form.mgmtFeeYears):null, expenseReserve:form.expenseReserve?Number(form.expenseReserve):null,
+        cap:form.cap?Number(form.cap):null, discount:form.discount?Number(form.discount):null }});
+    setEditing(false); setToast('Terms saved');
+  };
+  const inp2 = {width:'100%',padding:'7px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,boxSizing:'border-box'};
+  const lbl2 = {fontSize:11,color:'#6b7280',display:'block',marginBottom:3};
+  return (
+    <div style={{background:'white',borderRadius:16,overflow:'hidden',marginBottom:12}}>
+      <button onClick={()=>setOpen(v=>!v)}
+        style={{width:'100%',padding:'14px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'none',border:'none',cursor:'pointer'}}>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+          <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Deal terms</span>
+          {hasTerms && !open && <span style={{fontSize:12,color:'#9ca3af'}}>{[t.structure&&t.structure!=='Direct'?t.structure:null, t.carry?`${t.carry}% carry`:null, t.cap?`${fmtC(t.cap)} cap`:null].filter(Boolean).join(' · ')}</span>}
+          {!hasTerms && <span style={{fontSize:12,color:'#d1d5db'}}>Not set</span>}
+        </div>
+        <div style={{display:'flex',alignItems:'center',gap:8}}>
+          {open&&!editing&&<button onClick={e=>{e.stopPropagation();setEditing(true);}} style={{fontSize:12,color:'#5B6DC4',background:'none',border:'none',cursor:'pointer',padding:'2px 8px'}}>Edit</button>}
+          <span style={{color:'#9ca3af',fontSize:11}}>{open?'▲':'▼'}</span>
+        </div>
+      </button>
+      {open&&<div style={{padding:'0 20px 20px',borderTop:'1px solid #f3f4f6'}}>
+        {editing ? (
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,paddingTop:14}}>
+            <div style={{gridColumn:'1/-1'}}>
+              <label style={lbl2}>Structure</label>
+              <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                {['Direct','SPV','Syndicate','Rolling fund'].map(s=>(
+                  <button key={s} onClick={()=>setForm({...form,structure:s})} style={{padding:'4px 12px',borderRadius:99,fontSize:12,fontWeight:500,cursor:'pointer',border:`1.5px solid ${form.structure===s?'#10b981':'#e5e7eb'}`,background:form.structure===s?'#f0fdf4':'white',color:form.structure===s?'#10b981':'#6b7280'}}>{s}</button>
+                ))}
+              </div>
+            </div>
+            <div><label style={lbl2}>Cap ($)</label><input type="number" value={form.cap} onChange={e=>setForm({...form,cap:e.target.value})} placeholder="10000000" style={inp2}/></div>
+            <div><label style={lbl2}>Discount (%)</label><input type="number" value={form.discount} onChange={e=>setForm({...form,discount:e.target.value})} placeholder="20" style={inp2}/></div>
+            <div><label style={lbl2}>Carry (%)</label><input type="number" value={form.carry} onChange={e=>setForm({...form,carry:e.target.value})} placeholder="20" style={inp2}/></div>
+            <div><label style={lbl2}>Mgmt fee (%/yr)</label><input type="number" value={form.mgmtFee} onChange={e=>setForm({...form,mgmtFee:e.target.value})} placeholder="2.5" style={inp2}/></div>
+            <div><label style={lbl2}>Fee years (upfront)</label><input type="number" value={form.mgmtFeeYears} onChange={e=>setForm({...form,mgmtFeeYears:e.target.value})} placeholder="2" style={inp2}/></div>
+            <div><label style={lbl2}>Expense reserve (%)</label><input type="number" value={form.expenseReserve} onChange={e=>setForm({...form,expenseReserve:e.target.value})} placeholder="3" style={inp2}/></div>
+            <div style={{gridColumn:'1/-1',display:'flex',gap:8}}>
+              <button onClick={save} style={{flex:1,padding:'8px',background:'#5B6DC4',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer'}}>Save terms</button>
+              <button onClick={()=>setEditing(false)} style={{padding:'8px 14px',background:'none',border:'none',color:'#6b7280',fontSize:13,cursor:'pointer'}}>Cancel</button>
+            </div>
+          </div>
+        ) : (
+          <div style={{display:'flex',gap:20,flexWrap:'wrap',paddingTop:14}}>
+            {t.structure&&t.structure!=='Direct'&&<div><p style={C.label}>Structure</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{t.structure}</p></div>}
+            {t.cap&&<div><p style={C.label}>Cap</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{fmtC(t.cap)}</p></div>}
+            {t.discount&&<div><p style={C.label}>Discount</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{t.discount}%</p></div>}
+            {t.carry&&<div><p style={C.label}>Carry</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{t.carry}%</p></div>}
+            {t.mgmtFee&&<div><p style={C.label}>Mgmt fee</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{t.mgmtFee}%/yr{t.mgmtFeeYears?` · ${t.mgmtFeeYears}yr upfront`:''}</p></div>}
+            {t.expenseReserve&&<div><p style={C.label}>Expense reserve</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{t.expenseReserve}%</p></div>}
+            {!hasTerms&&<p style={{fontSize:13,color:'#9ca3af',fontStyle:'italic'}}>No terms logged — click Edit to add</p>}
+          </div>
+        )}
+      </div>}
+    </div>
+  );
+};
+
 const DetailView = ({deal,onUpdate,setToast}) => {
   const inv=deal.investment||{};
   const method=getMethod(deal);
@@ -2036,56 +2200,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
 
   return (
     <div style={{padding:20}}>
-      {/* Fund NAV update card — only shown for fund LP positions */}
-      {deal.isFund && (()=>{
-        const [navInput, setNavInput] = useState('');
-        const [navDate, setNavDate] = useState(new Date().toISOString().slice(0,10));
-        const [editing, setEditing] = useState(false);
-        const currentNAV = inv.impliedValue || getCB(inv);
-        const lastUpdate = inv.lastValuationDate;
-        const save = () => {
-          if (!navInput || isNaN(Number(navInput))) return;
-          onUpdate({ ...deal, investment: { ...inv, impliedValue: Number(navInput), lastValuationDate: new Date(navDate).toISOString(), valuationMethod: 'nav-lp' }});
-          setEditing(false); setNavInput(''); setToast('NAV updated');
-        };
-        return (
-          <div style={{background:'#f5f3ff',border:'1px solid #e9d5ff',borderRadius:16,padding:'14px 18px',marginBottom:12}}>
-            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:editing?12:0}}>
-              <div>
-                <p style={{fontSize:10,color:'#7c3aed',textTransform:'uppercase',letterSpacing:.6,marginBottom:3,fontWeight:600}}>Fund LP · Net Asset Value</p>
-                <div style={{display:'flex',alignItems:'baseline',gap:10}}>
-                  <p style={{fontSize:22,fontWeight:700,color:'#111827'}}>{fmtC(currentNAV)}</p>
-                  {lastUpdate && <p style={{fontSize:12,color:'#9ca3af'}}>as of {new Date(lastUpdate).toLocaleDateString('en-US',{month:'short',year:'numeric'})}</p>}
-                </div>
-                <p style={{fontSize:12,color:'#6b7280',marginTop:2}}>Committed: {fmtC(getCB(inv))} · {currentNAV > getCB(inv) ? '+' : ''}{fmtC(currentNAV - getCB(inv))} ({getCB(inv)>0?((currentNAV-getCB(inv))/getCB(inv)*100).toFixed(1):0}%)</p>
-              </div>
-              <button onClick={()=>setEditing(v=>!v)}
-                style={{padding:'7px 14px',background:'white',border:'1px solid #e9d5ff',borderRadius:10,fontSize:12,fontWeight:600,color:'#7c3aed',cursor:'pointer'}}>
-                {editing ? 'Cancel' : 'Update NAV'}
-              </button>
-            </div>
-            {editing && (
-              <div style={{display:'flex',gap:8,alignItems:'flex-end',flexWrap:'wrap'}}>
-                <div style={{flex:1,minWidth:120}}>
-                  <p style={{fontSize:11,color:'#7c3aed',marginBottom:4}}>New NAV ($)</p>
-                  <input type="number" value={navInput} onChange={e=>setNavInput(e.target.value)}
-                    placeholder={String(currentNAV)} autoFocus
-                    style={{width:'100%',padding:'8px 10px',border:'1px solid #c4b5fd',borderRadius:8,fontSize:13,boxSizing:'border-box',outline:'none'}}/>
-                </div>
-                <div style={{flex:1,minWidth:120}}>
-                  <p style={{fontSize:11,color:'#7c3aed',marginBottom:4}}>As of date</p>
-                  <input type="date" value={navDate} onChange={e=>setNavDate(e.target.value)}
-                    style={{width:'100%',padding:'8px 10px',border:'1px solid #c4b5fd',borderRadius:8,fontSize:13,boxSizing:'border-box',outline:'none'}}/>
-                </div>
-                <button onClick={save} disabled={!navInput||isNaN(Number(navInput))}
-                  style={{padding:'8px 18px',background:'#7c3aed',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',opacity:navInput?1:.4}}>
-                  Save
-                </button>
-              </div>
-            )}
-          </div>
-        );
-      })()}
+      {deal.isFund && <FundNAVCard deal={deal} inv={inv} onUpdate={onUpdate} setToast={setToast}/>}
         <div style={{display:'flex',alignItems:'flex-start',gap:14,marginBottom:deal.overview?12:0}}>
           <CompanyLogo name={deal.companyName} website={deal.website} size={52} radius={14} fallbackBg="#f59e0b" fallbackColor="white"/>
           <div style={{flex:1}}>
@@ -2151,29 +2266,9 @@ const DetailView = ({deal,onUpdate,setToast}) => {
         {/* Co-investors on this round — collapsed by default */}
         {(()=>{
           const coInvs = deal.coInvestors||[];
-          const [open, setOpen] = useState(false);
+          if (!coInvs.length && !deal.founders?.length) return null;
           return (
-            <div style={{marginTop:12,paddingTop:12,borderTop:'1px solid #f3f4f6'}}>
-              <button onClick={()=>setOpen(v=>!v)} style={{display:'flex',alignItems:'center',gap:8,background:'none',border:'none',cursor:'pointer',padding:0,width:'100%'}}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                <span style={{fontSize:12,color:'#9ca3af',fontWeight:500}}>Co-investors on this round{coInvs.length>0?` (${coInvs.length})`:''}</span>
-                <span style={{fontSize:10,color:'#d1d5db',marginLeft:'auto'}}>{open?'▲':'▼'}</span>
-              </button>
-              {open&&<div style={{marginTop:10}}>
-                {coInvs.length===0&&<p style={{fontSize:12,color:'#d1d5db',fontStyle:'italic'}}>None logged — add from the Investors section below</p>}
-                <div style={{display:'flex',flexWrap:'wrap',gap:8,marginTop:coInvs.length?8:0}}>
-                  {coInvs.map(ci=>{
-                    const rc=ROLE_CFG[ci.role]||ROLE_CFG['co-investor'];
-                    return <div key={ci.id} style={{display:'flex',alignItems:'center',gap:6,padding:'4px 10px',borderRadius:99,background:rc.c+'12',border:`1px solid ${rc.c}30`}}>
-                      <span style={{width:20,height:20,borderRadius:99,background:rc.c+'25',color:rc.c,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:10,flexShrink:0}}>{ci.name[0].toUpperCase()}</span>
-                      <span style={{fontSize:12,fontWeight:500,color:'#374151'}}>{ci.name}</span>
-                      {ci.fund&&ci.fund!==ci.name&&<span style={{fontSize:11,color:'#9ca3af'}}>· {ci.fund}</span>}
-                      <Pill color={rc.c} bg={rc.c+'15'}>{rc.l}</Pill>
-                    </div>;
-                  })}
-                </div>
-              </div>}
-            </div>
+            <CoInvestorsCollapsed coInvs={coInvs}/>
           );
         })()}
       </div>
@@ -2245,100 +2340,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
         )}
       </div>
 
-      {/* Deal terms card — collapsible, shows structure/fees, editable inline */}
-      {(()=>{
-        const [termsOpen, setTermsOpen] = useState(false);
-        const [editing, setEditing] = useState(false);
-        const [form, setForm] = useState({
-          structure: deal.terms?.structure || 'Direct',
-          carry: deal.terms?.carry || '',
-          mgmtFee: deal.terms?.mgmtFee || '',
-          mgmtFeeYears: deal.terms?.mgmtFeeYears || '',
-          expenseReserve: deal.terms?.expenseReserve || '',
-          cap: deal.terms?.cap || '',
-          discount: deal.terms?.discount || '',
-        });
-        const t = deal.terms || {};
-        const hasTerms = t.carry || t.mgmtFee || t.expenseReserve || t.cap || t.discount;
-        const save = () => {
-          const amt = inv.amount || 0;
-          const expRes = (Number(form.expenseReserve)||0)/100;
-          const mgmtTotal = ((Number(form.mgmtFee)||0)/100)*(Number(form.mgmtFeeYears)||0);
-          const effectiveCost = (expRes+mgmtTotal)>0 ? Math.round(amt*(1-expRes-mgmtTotal)) : amt;
-          onUpdate({
-            ...deal,
-            investment: { ...inv, effectiveCost },
-            terms: {
-              structure: form.structure,
-              carry: form.carry ? Number(form.carry) : null,
-              mgmtFee: form.mgmtFee ? Number(form.mgmtFee) : null,
-              mgmtFeeYears: form.mgmtFeeYears ? Number(form.mgmtFeeYears) : null,
-              expenseReserve: form.expenseReserve ? Number(form.expenseReserve) : null,
-              cap: form.cap ? Number(form.cap) : null,
-              discount: form.discount ? Number(form.discount) : null,
-            }
-          });
-          setEditing(false);
-          setToast('Terms saved');
-        };
-        const inp2 = {width:'100%',padding:'7px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,boxSizing:'border-box'};
-        const lbl2 = {fontSize:11,color:'#6b7280',display:'block',marginBottom:3};
-        return (
-          <div style={{background:'white',borderRadius:16,overflow:'hidden',marginBottom:12}}>
-            <button onClick={()=>setTermsOpen(v=>!v)}
-              style={{width:'100%',padding:'14px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'none',border:'none',cursor:'pointer'}}>
-              <div style={{display:'flex',alignItems:'center',gap:8}}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
-                <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Deal terms</span>
-                {hasTerms && !termsOpen && (
-                  <span style={{fontSize:12,color:'#9ca3af'}}>
-                    {[t.structure&&t.structure!=='Direct'?t.structure:null, t.carry?`${t.carry}% carry`:null, t.cap?`${fmtC(t.cap)} cap`:null].filter(Boolean).join(' · ')}
-                  </span>
-                )}
-                {!hasTerms && <span style={{fontSize:12,color:'#d1d5db'}}>Not set</span>}
-              </div>
-              <div style={{display:'flex',alignItems:'center',gap:8}}>
-                {termsOpen&&!editing&&<button onClick={e=>{e.stopPropagation();setEditing(true);}} style={{fontSize:12,color:'#5B6DC4',background:'none',border:'none',cursor:'pointer',padding:'2px 8px'}}>Edit</button>}
-                <span style={{color:'#9ca3af',fontSize:11}}>{termsOpen?'▲':'▼'}</span>
-              </div>
-            </button>
-            {termsOpen&&<div style={{padding:'0 20px 20px',borderTop:'1px solid #f3f4f6'}}>
-              {editing ? (
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,paddingTop:14}}>
-                  <div style={{gridColumn:'1/-1'}}>
-                    <label style={lbl2}>Structure</label>
-                    <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-                      {['Direct','SPV','Syndicate','Rolling fund'].map(s=>(
-                        <button key={s} onClick={()=>setForm({...form,structure:s})} style={{padding:'4px 12px',borderRadius:99,fontSize:12,fontWeight:500,cursor:'pointer',border:`1.5px solid ${form.structure===s?'#10b981':'#e5e7eb'}`,background:form.structure===s?'#f0fdf4':'white',color:form.structure===s?'#10b981':'#6b7280'}}>{s}</button>
-                      ))}
-                    </div>
-                  </div>
-                  <div><label style={lbl2}>Cap ($)</label><input type="number" value={form.cap} onChange={e=>setForm({...form,cap:e.target.value})} placeholder="10000000" style={inp2}/></div>
-                  <div><label style={lbl2}>Discount (%)</label><input type="number" value={form.discount} onChange={e=>setForm({...form,discount:e.target.value})} placeholder="20" style={inp2}/></div>
-                  <div><label style={lbl2}>Carry (%)</label><input type="number" value={form.carry} onChange={e=>setForm({...form,carry:e.target.value})} placeholder="20" style={inp2}/></div>
-                  <div><label style={lbl2}>Mgmt fee (%/yr)</label><input type="number" value={form.mgmtFee} onChange={e=>setForm({...form,mgmtFee:e.target.value})} placeholder="2.5" style={inp2}/></div>
-                  <div><label style={lbl2}>Fee years (upfront)</label><input type="number" value={form.mgmtFeeYears} onChange={e=>setForm({...form,mgmtFeeYears:e.target.value})} placeholder="2" style={inp2}/></div>
-                  <div><label style={lbl2}>Expense reserve (%)</label><input type="number" value={form.expenseReserve} onChange={e=>setForm({...form,expenseReserve:e.target.value})} placeholder="3" style={inp2}/></div>
-                  <div style={{gridColumn:'1/-1',display:'flex',gap:8}}>
-                    <button onClick={save} style={{flex:1,padding:'8px',background:'#5B6DC4',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer'}}>Save terms</button>
-                    <button onClick={()=>setEditing(false)} style={{padding:'8px 14px',background:'none',border:'none',color:'#6b7280',fontSize:13,cursor:'pointer'}}>Cancel</button>
-                  </div>
-                </div>
-              ) : (
-                <div style={{display:'flex',gap:20,flexWrap:'wrap',paddingTop:14}}>
-                  {t.structure&&t.structure!=='Direct'&&<div><p style={C.label}>Structure</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{t.structure}</p></div>}
-                  {t.cap&&<div><p style={C.label}>Cap</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{fmtC(t.cap)}</p></div>}
-                  {t.discount&&<div><p style={C.label}>Discount</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{t.discount}%</p></div>}
-                  {t.carry&&<div><p style={C.label}>Carry</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{t.carry}%</p></div>}
-                  {t.mgmtFee&&<div><p style={C.label}>Mgmt fee</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{t.mgmtFee}%/yr{t.mgmtFeeYears?` · ${t.mgmtFeeYears}yr upfront`:''}</p></div>}
-                  {t.expenseReserve&&<div><p style={C.label}>Expense reserve</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{t.expenseReserve}%</p></div>}
-                  {!hasTerms&&<p style={{fontSize:13,color:'#9ca3af',fontStyle:'italic'}}>No terms logged — click Edit to add</p>}
-                </div>
-              )}
-            </div>}
-          </div>
-        );
-      })()}
+      <DealTermsCard deal={deal} inv={inv} cb={cb} C={C} onUpdate={onUpdate} setToast={setToast}/>
 
       <MetricsTracker deal={deal} onUpdate={onUpdate}/>
 
