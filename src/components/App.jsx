@@ -10,7 +10,7 @@ const genId = () => Math.random().toString(36).substr(2,9);
 const getCB = (inv={}) => inv.effectiveCost > 0 ? inv.effectiveCost : (inv.costBasis > 0 ? inv.costBasis : inv.amount) || 0;
 
 // ── VALUATION ENGINE ─────────────────────────────────────────────────────────
-const STAGE_MAT = { 'pre-seed':'lab','seed':'pilot','series-a':'scale','series-b':'scale','series-c':'deploy','series-e':'deploy','growth':'deploy','lp-fund':'fund' };
+const STAGE_MAT = { 'pre-seed':'lab','seed':'pilot','bridge':'pilot','series-a':'scale','series-b':'scale','series-c':'deploy','series-e':'deploy','growth':'deploy','lp-fund':'fund' };
 const METRIC_DEFAULTS = {
   lab:   ['TRL level (1–9)', 'Grant / non-dilutive funding ($)', 'Key technical milestone hit'],
   pilot: ['Pilot throughput vs spec (%)', 'Cost per unit vs target ($)', 'LOIs or pilot customers signed'],
@@ -2211,7 +2211,9 @@ const DetailView = ({deal,onUpdate,setToast}) => {
             t.carry ? `${t.carry}% carry` : null,
             t.mgmtFee ? `${t.mgmtFee}%/yr mgmt${t.mgmtFeeYears ? ` · ${t.mgmtFeeYears}yr upfront` : ''}` : null,
             t.expenseReserve ? `${t.expenseReserve}% reserve` : null,
-            deal.dealSource ? `via ${deal.dealSource}` : null,
+            deal.spvSponsor ? `SPV: ${deal.spvSponsor}` : null,
+            deal.roundLead ? `Lead: ${deal.roundLead}` : null,
+            deal.dealSource ? `via ${deal.dealSourceDetail || deal.dealSource}` : null,
           ].filter(Boolean);
           const inp2 = {padding:'5px 8px',border:'1px solid #e5e7eb',borderRadius:7,fontSize:12,width:'100%',boxSizing:'border-box',outline:'none'};
           const lbl2 = {fontSize:10,color:'#9ca3af',display:'block',marginBottom:2};
@@ -2443,7 +2445,7 @@ const AddModal = ({onClose,onAdd}) => {
   const [f,setF]=useState(()=>{
     const mat=STAGE_MAT['seed']||'pilot';
     const defs=METRIC_DEFAULTS[mat]||[];
-    return {name:'',website:'',industry:'',stage:'seed',status:'invested',amount:'',vehicle:'SAFE',investDate:new Date().toISOString().slice(0,10),channel:'',structure:'Direct',carry:'',mgmtFee:'',mgmtFeeYears:'',expenseReserve:'',cap:'',discount:'',founderName:'',founderRole:'CEO',note:'',metric1:defs[0]||'',metric2:defs[1]||'',metric3:defs[2]||''};
+    return {name:'',website:'',industry:'',stage:'seed',status:'invested',amount:'',vehicle:'SAFE',investDate:new Date().toISOString().slice(0,10),channel:'',channelDetail:'',spvSponsor:'',roundLead:'',roundSize:'',postMoney:'',structure:'Direct',carry:'',mgmtFee:'',mgmtFeeYears:'',expenseReserve:'',cap:'',discount:'',founderName:'',founderRole:'CEO',note:'',metric1:defs[0]||'',metric2:defs[1]||'',metric3:defs[2]||''};
   });
 
   const updateStage = (stage) => {
@@ -2478,7 +2480,27 @@ const AddModal = ({onClose,onAdd}) => {
       const mgmtFeeTotal=((Number(f.mgmtFee)||0)/100)*(Number(f.mgmtFeeYears)||0);
       const totalUpfrontFeeRate=expRes+mgmtFeeTotal;
       const effectiveCost=totalUpfrontFeeRate>0?Math.round(amount*(1-totalUpfrontFeeRate)):amount;
-      base.investment={amount,costBasis:amount,effectiveCost,vehicle:f.vehicle,date:invDate,lastUpdateReceived:invDate};
+      const postMoney = Number(f.postMoney)||0;
+      const roundSize = Number(f.roundSize)||0;
+      // Ownership: for SPV, ownership = (SPV size / postMoney), then your slice = check / SPV size * SPV ownership
+      // For direct: ownership = check / postMoney
+      const ownershipPercent = postMoney > 0
+        ? (f.structure === 'SPV' || f.structure === 'Syndicate') && roundSize > 0
+          ? Number(((amount / roundSize) * (roundSize / postMoney) * 100).toFixed(4))
+          : Number(((amount / postMoney) * 100).toFixed(4))
+        : null;
+      base.investment={amount,costBasis:amount,effectiveCost,vehicle:f.vehicle,date:invDate,lastUpdateReceived:invDate,
+        ...(postMoney>0?{entryPostMoneyValuation:postMoney,impliedValuation:postMoney}:{}),
+        ...(ownershipPercent?{ownershipPercent}:{}),
+      };
+      // Auto-create first fundraise history entry if round data provided
+      if (postMoney > 0) {
+        base.fundraiseHistory = [{
+          id: genId(), roundName: f.stage==='series-a'?'Series A':f.stage==='series-b'?'Series B':f.stage==='pre-seed'?'Pre-Seed':f.stage==='seed'?'Seed':'Round',
+          date: invDate, amountRaised: roundSize||null, postMoneyVal: postMoney,
+          ownershipAfter: ownershipPercent, source: 'manual',
+        }];
+      }
       base.createdAt=invDate;base.statusEnteredAt=invDate;
       base.terms={
         structure:f.structure||'Direct',
@@ -2490,7 +2512,7 @@ const AddModal = ({onClose,onAdd}) => {
         discount:f.discount?Number(f.discount):null,
       };
     }
-    if(f.channel){base.dealSource=f.channel;}
+    if(f.channel){base.dealSource=f.channel;} if(f.channelDetail){base.dealSourceDetail=f.channelDetail;} if(f.spvSponsor){base.spvSponsor=f.spvSponsor;} if(f.roundLead){base.roundLead=f.roundLead;}
     onAdd(base);onClose();
   };
 
@@ -2521,8 +2543,13 @@ const AddModal = ({onClose,onAdd}) => {
           <div><label style={lbl}>Industry</label><input value={f.industry} onChange={e=>setF({...f,industry:e.target.value})} placeholder="Climate Tech" style={inp}/></div>
           <div><label style={lbl}>Stage</label>
             <select value={f.stage} onChange={e=>updateStage(e.target.value)} style={inp}>
-              <option value="pre-seed">Pre-seed</option><option value="seed">Seed</option>
-              <option value="series-a">Series A</option><option value="series-b">Series B</option><option value="growth">Growth</option>
+              <option value="pre-seed">Pre-seed</option>
+              <option value="seed">Seed</option>
+              <option value="bridge">Bridge</option>
+              <option value="series-a">Series A</option>
+              <option value="series-b">Series B</option>
+              <option value="series-c">Series C+</option>
+              <option value="growth">Growth</option>
             </select>
           </div>
         </div>
@@ -2535,7 +2562,25 @@ const AddModal = ({onClose,onAdd}) => {
               <option value="SAFE">SAFE</option><option value="Convertible Note">Conv. Note</option><option value="Equity">Equity</option>
             </select>
           </div>
+          <div><label style={lbl}>Round size ($) <span style={{fontWeight:400,color:'#9ca3af'}}>total raise</span></label><input type="number" value={f.roundSize} onChange={e=>setF({...f,roundSize:e.target.value})} placeholder="25000000" style={inp}/></div>
+          <div><label style={lbl}>Post-money val ($)</label><input type="number" value={f.postMoney} onChange={e=>setF({...f,postMoney:e.target.value})} placeholder="600000000" style={inp}/></div>
           <div style={{gridColumn:'1/-1'}}><label style={lbl}>Investment date</label><input type="date" value={f.investDate} onChange={e=>setF({...f,investDate:e.target.value})} style={inp}/></div>
+          {/* Live ownership preview */}
+          {f.amount && f.postMoney && Number(f.postMoney) > 0 && (()=>{
+            const amt = Number(f.amount)||0;
+            const pm = Number(f.postMoney)||0;
+            const rs = Number(f.roundSize)||0;
+            const isSPV = f.structure === 'SPV' || f.structure === 'Syndicate';
+            const own = isSPV && rs > 0
+              ? (amt / rs) * (rs / pm) * 100
+              : (amt / pm) * 100;
+            return (
+              <div style={{gridColumn:'1/-1',background:'#f0fdf4',borderRadius:10,padding:'8px 12px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <span style={{fontSize:12,color:'#6b7280'}}>Implied ownership</span>
+                <span style={{fontSize:13,fontWeight:600,color:'#10b981'}}>{own.toFixed(4)}%</span>
+              </div>
+            );
+          })()}
         </div>}
 
         {/* Deal terms */}
@@ -2583,14 +2628,27 @@ const AddModal = ({onClose,onAdd}) => {
           </div>
         </div>}
 
-        {/* Deal channel */}
-        <div><label style={lbl}>Deal channel <span style={{fontWeight:400,color:'#9ca3af'}}>(how did you find this?)</span></label>
-          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-            {['Syndicate','Angel group','Cold inbound','Warm intro','Network','Accelerator','Fund co-invest','Other'].map(ch=>(
-              <button key={ch} onClick={()=>setF({...f,channel:f.channel===ch?'':ch})} style={{padding:'5px 12px',borderRadius:99,fontSize:12,fontWeight:500,cursor:'pointer',border:`1.5px solid ${f.channel===ch?'#5B6DC4':'#e5e7eb'}`,background:f.channel===ch?'#eef2ff':'white',color:f.channel===ch?'#5B6DC4':'#6b7280'}}>{ch}</button>
-            ))}
+        {/* Deal sourcing */}
+        <div style={{display:'flex',flexDirection:'column',gap:12}}>
+          <div>
+            <label style={lbl}>How did you hear about it? <span style={{fontWeight:400,color:'#9ca3af'}}>deal source</span></label>
+            <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:6}}>
+              {['AngelList','Cap Table Coalition','Syndicate','Angel group','Warm intro','Network','Accelerator','Cold inbound','Other'].map(ch=>(
+                <button key={ch} onClick={()=>setF({...f,channel:f.channel===ch?'':ch})} style={{padding:'4px 11px',borderRadius:99,fontSize:12,fontWeight:500,cursor:'pointer',border:`1.5px solid ${f.channel===ch?'#5B6DC4':'#e5e7eb'}`,background:f.channel===ch?'#eef2ff':'white',color:f.channel===ch?'#5B6DC4':'#6b7280'}}>{ch}</button>
+              ))}
+            </div>
+            <input value={f.channelDetail} onChange={e=>setF({...f,channelDetail:e.target.value})} placeholder="Specific community, person, or platform (e.g. Cap Table Coalition)" style={{...inp,fontSize:12}}/>
           </div>
-          {f.channel==='Other'&&<input value={f.channelNote||''} onChange={e=>setF({...f,channelNote:e.target.value})} placeholder="Describe the channel" style={{...inp,marginTop:8}}/>}
+          {f.status==='invested'&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+            <div>
+              <label style={lbl}>SPV sponsor <span style={{fontWeight:400,color:'#9ca3af'}}>who ran the SPV</span></label>
+              <input value={f.spvSponsor} onChange={e=>setF({...f,spvSponsor:e.target.value})} placeholder="e.g. Bay Bridge Ventures" style={inp}/>
+            </div>
+            <div>
+              <label style={lbl}>Round lead <span style={{fontWeight:400,color:'#9ca3af'}}>who led the round</span></label>
+              <input value={f.roundLead} onChange={e=>setF({...f,roundLead:e.target.value})} placeholder="e.g. a16z (if known)" style={inp}/>
+            </div>
+          </div>}
         </div>
 
         {/* Founder */}
