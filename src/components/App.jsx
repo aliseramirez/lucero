@@ -1964,85 +1964,6 @@ const FundNAVCard = ({ deal, inv, onUpdate, setToast }) => {
 };
 
 // ── DEAL TERMS CARD ───────────────────────────────────────────────────────────
-const DealTermsCard = ({ deal, inv, cb, C, onUpdate, setToast }) => {
-  const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({
-    structure: deal.terms?.structure || 'Direct',
-    carry: deal.terms?.carry || '',
-    mgmtFee: deal.terms?.mgmtFee || '',
-    mgmtFeeYears: deal.terms?.mgmtFeeYears || '',
-    expenseReserve: deal.terms?.expenseReserve || '',
-    cap: deal.terms?.cap || '',
-    discount: deal.terms?.discount || '',
-  });
-  const t = deal.terms || {};
-  const hasTerms = t.carry || t.mgmtFee || t.expenseReserve || t.cap || t.discount || (t.structure && t.structure !== 'Direct');
-  const save = () => {
-    const amt = inv.amount || 0;
-    const expRes = (Number(form.expenseReserve)||0)/100;
-    const mgmtTotal = ((Number(form.mgmtFee)||0)/100)*(Number(form.mgmtFeeYears)||0);
-    const effectiveCost = (expRes+mgmtTotal)>0 ? Math.round(amt*(1-expRes-mgmtTotal)) : amt;
-    onUpdate({ ...deal, investment: { ...inv, effectiveCost },
-      terms: { structure:form.structure, carry:form.carry?Number(form.carry):null, mgmtFee:form.mgmtFee?Number(form.mgmtFee):null,
-        mgmtFeeYears:form.mgmtFeeYears?Number(form.mgmtFeeYears):null, expenseReserve:form.expenseReserve?Number(form.expenseReserve):null,
-        cap:form.cap?Number(form.cap):null, discount:form.discount?Number(form.discount):null }});
-    setEditing(false); setToast('Terms saved');
-  };
-  const inp2 = {width:'100%',padding:'7px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,boxSizing:'border-box'};
-  const lbl2 = {fontSize:11,color:'#6b7280',display:'block',marginBottom:3};
-  return (
-    <div style={{background:'white',borderRadius:16,overflow:'hidden',marginBottom:12}}>
-      <button onClick={()=>setOpen(v=>!v)}
-        style={{width:'100%',padding:'14px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'none',border:'none',cursor:'pointer'}}>
-        <div style={{display:'flex',alignItems:'center',gap:8}}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
-          <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Deal terms</span>
-          {hasTerms && !open && <span style={{fontSize:12,color:'#9ca3af'}}>{[t.structure&&t.structure!=='Direct'?t.structure:null, t.carry?`${t.carry}% carry`:null, t.cap?`${fmtC(t.cap)} cap`:null].filter(Boolean).join(' · ')}</span>}
-          {!hasTerms && <span style={{fontSize:12,color:'#d1d5db'}}>Not set</span>}
-        </div>
-        <div style={{display:'flex',alignItems:'center',gap:8}}>
-          {open&&!editing&&<button onClick={e=>{e.stopPropagation();setEditing(true);}} style={{fontSize:12,color:'#5B6DC4',background:'none',border:'none',cursor:'pointer',padding:'2px 8px'}}>Edit</button>}
-          <span style={{color:'#9ca3af',fontSize:11}}>{open?'▲':'▼'}</span>
-        </div>
-      </button>
-      {open&&<div style={{padding:'0 20px 20px',borderTop:'1px solid #f3f4f6'}}>
-        {editing ? (
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,paddingTop:14}}>
-            <div style={{gridColumn:'1/-1'}}>
-              <label style={lbl2}>Structure</label>
-              <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-                {['Direct','SPV','Syndicate','Rolling fund'].map(s=>(
-                  <button key={s} onClick={()=>setForm({...form,structure:s})} style={{padding:'4px 12px',borderRadius:99,fontSize:12,fontWeight:500,cursor:'pointer',border:`1.5px solid ${form.structure===s?'#10b981':'#e5e7eb'}`,background:form.structure===s?'#f0fdf4':'white',color:form.structure===s?'#10b981':'#6b7280'}}>{s}</button>
-                ))}
-              </div>
-            </div>
-            <div><label style={lbl2}>Cap ($)</label><input type="number" value={form.cap} onChange={e=>setForm({...form,cap:e.target.value})} placeholder="10000000" style={inp2}/></div>
-            <div><label style={lbl2}>Discount (%)</label><input type="number" value={form.discount} onChange={e=>setForm({...form,discount:e.target.value})} placeholder="20" style={inp2}/></div>
-            <div><label style={lbl2}>Carry (%)</label><input type="number" value={form.carry} onChange={e=>setForm({...form,carry:e.target.value})} placeholder="20" style={inp2}/></div>
-            <div><label style={lbl2}>Mgmt fee (%/yr)</label><input type="number" value={form.mgmtFee} onChange={e=>setForm({...form,mgmtFee:e.target.value})} placeholder="2.5" style={inp2}/></div>
-            <div><label style={lbl2}>Fee years (upfront)</label><input type="number" value={form.mgmtFeeYears} onChange={e=>setForm({...form,mgmtFeeYears:e.target.value})} placeholder="2" style={inp2}/></div>
-            <div><label style={lbl2}>Expense reserve (%)</label><input type="number" value={form.expenseReserve} onChange={e=>setForm({...form,expenseReserve:e.target.value})} placeholder="3" style={inp2}/></div>
-            <div style={{gridColumn:'1/-1',display:'flex',gap:8}}>
-              <button onClick={save} style={{flex:1,padding:'8px',background:'#5B6DC4',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer'}}>Save terms</button>
-              <button onClick={()=>setEditing(false)} style={{padding:'8px 14px',background:'none',border:'none',color:'#6b7280',fontSize:13,cursor:'pointer'}}>Cancel</button>
-            </div>
-          </div>
-        ) : (
-          <div style={{display:'flex',gap:20,flexWrap:'wrap',paddingTop:14}}>
-            {t.structure&&t.structure!=='Direct'&&<div><p style={C.label}>Structure</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{t.structure}</p></div>}
-            {t.cap&&<div><p style={C.label}>Cap</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{fmtC(t.cap)}</p></div>}
-            {t.discount&&<div><p style={C.label}>Discount</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{t.discount}%</p></div>}
-            {t.carry&&<div><p style={C.label}>Carry</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{t.carry}%</p></div>}
-            {t.mgmtFee&&<div><p style={C.label}>Mgmt fee</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{t.mgmtFee}%/yr{t.mgmtFeeYears?` · ${t.mgmtFeeYears}yr upfront`:''}</p></div>}
-            {t.expenseReserve&&<div><p style={C.label}>Expense reserve</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{t.expenseReserve}%</p></div>}
-            {!hasTerms&&<p style={{fontSize:13,color:'#9ca3af',fontStyle:'italic'}}>No terms logged — click Edit to add</p>}
-          </div>
-        )}
-      </div>}
-    </div>
-  );
-};
 
 const DetailView = ({deal,onUpdate,setToast}) => {
   const inv=deal.investment||{};
@@ -2263,9 +2184,26 @@ const DetailView = ({deal,onUpdate,setToast}) => {
           {inv.ownershipPercent&&<div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:2}}>Ownership</p><p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{inv.ownershipPercent}%</p></div>}
         </div>
 
-        {/* Compact deal terms strip — only shown when terms exist */}
+        {/* Compact deal terms strip — shows when any terms or channel set, inline editable */}
         {(()=>{
+          const [editing, setEditing] = useState(false);
           const t = deal.terms || {};
+          const [form, setForm] = useState({
+            structure: t.structure||'Direct', carry: t.carry||'', mgmtFee: t.mgmtFee||'',
+            mgmtFeeYears: t.mgmtFeeYears||'', expenseReserve: t.expenseReserve||'',
+            cap: t.cap||'', discount: t.discount||'',
+          });
+          const save = () => {
+            const amt = inv.amount || 0;
+            const expRes = (Number(form.expenseReserve)||0)/100;
+            const mgmtTotal = ((Number(form.mgmtFee)||0)/100)*(Number(form.mgmtFeeYears)||0);
+            const effectiveCost = (expRes+mgmtTotal)>0 ? Math.round(amt*(1-expRes-mgmtTotal)) : amt;
+            onUpdate({ ...deal, investment: {...inv, effectiveCost},
+              terms: { structure:form.structure, carry:form.carry?Number(form.carry):null, mgmtFee:form.mgmtFee?Number(form.mgmtFee):null,
+                mgmtFeeYears:form.mgmtFeeYears?Number(form.mgmtFeeYears):null, expenseReserve:form.expenseReserve?Number(form.expenseReserve):null,
+                cap:form.cap?Number(form.cap):null, discount:form.discount?Number(form.discount):null }});
+            setEditing(false); setToast('Terms saved');
+          };
           const pills = [
             t.structure && t.structure !== 'Direct' ? t.structure : null,
             t.cap ? `${fmtC(t.cap)} cap` : null,
@@ -2275,13 +2213,40 @@ const DetailView = ({deal,onUpdate,setToast}) => {
             t.expenseReserve ? `${t.expenseReserve}% reserve` : null,
             deal.dealSource ? `via ${deal.dealSource}` : null,
           ].filter(Boolean);
-          if (!pills.length) return null;
+          const inp2 = {padding:'5px 8px',border:'1px solid #e5e7eb',borderRadius:7,fontSize:12,width:'100%',boxSizing:'border-box',outline:'none'};
+          const lbl2 = {fontSize:10,color:'#9ca3af',display:'block',marginBottom:2};
           return (
-            <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid #f3f4f6',display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
-              <span style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginRight:2,flexShrink:0}}>Terms</span>
-              {pills.map((p,i) => (
-                <span key={i} style={{fontSize:11,fontWeight:500,color:'#374151',background:'#f3f4f6',borderRadius:99,padding:'2px 8px'}}>{p}</span>
-              ))}
+            <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid #f3f4f6'}}>
+              {!editing ? (
+                <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
+                  <span style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,flexShrink:0}}>Terms</span>
+                  {pills.length ? pills.map((p,i) => (
+                    <span key={i} style={{fontSize:11,fontWeight:500,color:'#374151',background:'#f3f4f6',borderRadius:99,padding:'2px 8px'}}>{p}</span>
+                  )) : <span style={{fontSize:11,color:'#d1d5db',fontStyle:'italic'}}>not set</span>}
+                  <button onClick={()=>setEditing(true)} style={{marginLeft:'auto',fontSize:11,color:'#5B6DC4',background:'none',border:'none',cursor:'pointer',padding:0,flexShrink:0}}>Edit</button>
+                </div>
+              ) : (
+                <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8}}>
+                  <div style={{gridColumn:'1/-1'}}>
+                    <label style={lbl2}>Structure</label>
+                    <div style={{display:'flex',gap:5,flexWrap:'wrap'}}>
+                      {['Direct','SPV','Syndicate','Rolling fund'].map(s=>(
+                        <button key={s} onClick={()=>setForm({...form,structure:s})} style={{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:500,cursor:'pointer',border:`1.5px solid ${form.structure===s?'#10b981':'#e5e7eb'}`,background:form.structure===s?'#f0fdf4':'white',color:form.structure===s?'#10b981':'#6b7280'}}>{s}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div><label style={lbl2}>Cap ($)</label><input type="number" value={form.cap} onChange={e=>setForm({...form,cap:e.target.value})} placeholder="10000000" style={inp2}/></div>
+                  <div><label style={lbl2}>Discount (%)</label><input type="number" value={form.discount} onChange={e=>setForm({...form,discount:e.target.value})} placeholder="20" style={inp2}/></div>
+                  <div><label style={lbl2}>Carry (%)</label><input type="number" value={form.carry} onChange={e=>setForm({...form,carry:e.target.value})} placeholder="20" style={inp2}/></div>
+                  <div><label style={lbl2}>Mgmt fee (%/yr)</label><input type="number" value={form.mgmtFee} onChange={e=>setForm({...form,mgmtFee:e.target.value})} placeholder="2.5" style={inp2}/></div>
+                  <div><label style={lbl2}>Fee years upfront</label><input type="number" value={form.mgmtFeeYears} onChange={e=>setForm({...form,mgmtFeeYears:e.target.value})} placeholder="2" style={inp2}/></div>
+                  <div><label style={lbl2}>Expense reserve (%)</label><input type="number" value={form.expenseReserve} onChange={e=>setForm({...form,expenseReserve:e.target.value})} placeholder="3" style={inp2}/></div>
+                  <div style={{gridColumn:'1/-1',display:'flex',gap:8,marginTop:2}}>
+                    <button onClick={save} style={{flex:1,padding:'6px',background:'#5B6DC4',color:'white',border:'none',borderRadius:8,fontWeight:600,fontSize:12,cursor:'pointer'}}>Save</button>
+                    <button onClick={()=>setEditing(false)} style={{padding:'6px 12px',background:'none',border:'none',color:'#6b7280',fontSize:12,cursor:'pointer'}}>Cancel</button>
+                  </div>
+                </div>
+              )}
             </div>
           );
         })()}
@@ -2377,7 +2342,6 @@ const DetailView = ({deal,onUpdate,setToast}) => {
 
       <FundraiseHistory deal={deal} onUpdate={onUpdate} setToast={setToast}/>
 
-      <DealTermsCard deal={deal} inv={inv} cb={cb} C={C} onUpdate={onUpdate} setToast={setToast}/>
 
       <div style={{marginTop:12}}><DocumentsSection deal={deal} onUpdate={onUpdate} setToast={setToast}/></div>
     </div>
