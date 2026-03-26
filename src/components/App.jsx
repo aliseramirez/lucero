@@ -1202,7 +1202,7 @@ const PrimaryInsight = ({ deal, onUpdate, setToast }) => {
     setExtracted(null);
     setApproved({});
     setDraft('');
-    setToast('Primary insight saved');
+    setToast('Founder update saved');
   };
 
   const toggle = (key) => setApproved(prev => ({ ...prev, [key]: !prev[key] }));
@@ -1215,8 +1215,8 @@ const PrimaryInsight = ({ deal, onUpdate, setToast }) => {
         style={{ width: '100%', padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'none', border: 'none', cursor: 'pointer' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-          <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>Primary Insight</span>
-          <span style={{ fontSize: 11, color: '#9ca3af' }}>founder updates · call notes · emails</span>
+          <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>Founder Updates</span>
+          <span style={{ fontSize: 11, color: '#9ca3af' }}>emails · call notes · updates</span>
           {updates.length > 0 && <span style={{ fontSize: 12, color: '#9ca3af' }}>({updates.length})</span>}
         </div>
         <span style={{ color: '#9ca3af', fontSize: 11 }}>{open ? '▲' : '▼'}</span>
@@ -2420,6 +2420,19 @@ const FeedPage = ({ deals, onUpdate, setToast, onNavigate }) => {
         title: m.title,
         detail: [m.description||null, m.fromAgent?'Logged as milestone on deal page.':null].filter(Boolean).join(' '),
         source: m.source, sourceUrl: m.sourceUrl,
+      });
+    });
+
+    // Founder updates (summary entry in feed, content lives on deal page)
+    (deal.founderUpdates||[]).slice(0,10).forEach(u => {
+      if (!u.date || !u.keyTakeaway) return;
+      allItems.push({
+        id: `update_${deal.id}_${u.id||u.date}`,
+        category: u.sentiment === 'negative' ? 'risk' : 'update',
+        date: new Date(u.date), deal, auto: false,
+        title: u.keyTakeaway,
+        detail: 'Founder update — full content on deal page.',
+        source: null, sourceUrl: null,
       });
     });
 
