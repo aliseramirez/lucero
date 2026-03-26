@@ -2263,6 +2263,29 @@ const DetailView = ({deal,onUpdate,setToast}) => {
           {inv.ownershipPercent&&<div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:2}}>Ownership</p><p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{inv.ownershipPercent}%</p></div>}
         </div>
 
+        {/* Compact deal terms strip — only shown when terms exist */}
+        {(()=>{
+          const t = deal.terms || {};
+          const pills = [
+            t.structure && t.structure !== 'Direct' ? t.structure : null,
+            t.cap ? `${fmtC(t.cap)} cap` : null,
+            t.discount ? `${t.discount}% discount` : null,
+            t.carry ? `${t.carry}% carry` : null,
+            t.mgmtFee ? `${t.mgmtFee}%/yr mgmt${t.mgmtFeeYears ? ` · ${t.mgmtFeeYears}yr upfront` : ''}` : null,
+            t.expenseReserve ? `${t.expenseReserve}% reserve` : null,
+            deal.dealSource ? `via ${deal.dealSource}` : null,
+          ].filter(Boolean);
+          if (!pills.length) return null;
+          return (
+            <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid #f3f4f6',display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
+              <span style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginRight:2,flexShrink:0}}>Terms</span>
+              {pills.map((p,i) => (
+                <span key={i} style={{fontSize:11,fontWeight:500,color:'#374151',background:'#f3f4f6',borderRadius:99,padding:'2px 8px'}}>{p}</span>
+              ))}
+            </div>
+          );
+        })()}
+
         {/* Founders */}
         {deal.founders?.length>0&&<div style={{display:'flex',alignItems:'center',gap:8,marginTop:12,paddingTop:12,borderTop:'1px solid #f3f4f6'}}>
           <span style={{fontSize:13,color:'#6b7280'}}>Founders:</span>
