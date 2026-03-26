@@ -1901,6 +1901,33 @@ const CoInvestorsCollapsed = ({ coInvs }) => {
   );
 };
 
+// ── FUND QUICK NAV ────────────────────────────────────────────────────────────
+const FundQuickNAV = ({ deal, nav, onUpdate }) => {
+  const [open, setOpen] = useState(false);
+  const [val, setVal] = useState('');
+  const save = (e) => {
+    e.stopPropagation();
+    if (!val || isNaN(Number(val))) return;
+    onUpdate({ ...deal, investment: { ...(deal.investment||{}), impliedValue: Number(val), lastValuationDate: new Date().toISOString(), valuationMethod: 'nav-lp' }});
+    setOpen(false); setVal('');
+  };
+  if (!open) return (
+    <button onClick={e=>{e.stopPropagation();setOpen(true);}}
+      style={{width:'100%',padding:'7px 16px',background:'none',border:'none',borderTop:'1px solid #f3f4f6',color:'#7c3aed',fontSize:12,fontWeight:500,cursor:'pointer',textAlign:'left'}}>
+      + Update NAV
+    </button>
+  );
+  return (
+    <div onClick={e=>e.stopPropagation()} style={{borderTop:'1px solid #f3f4f6',padding:'10px 16px',display:'flex',gap:8,alignItems:'center',background:'#faf5ff'}}>
+      <span style={{fontSize:12,color:'#7c3aed',fontWeight:500,flexShrink:0}}>New NAV</span>
+      <input type="number" value={val} onChange={e=>setVal(e.target.value)} placeholder={String(nav)} autoFocus
+        style={{flex:1,padding:'6px 10px',border:'1px solid #c4b5fd',borderRadius:8,fontSize:13,outline:'none'}}/>
+      <button onClick={save} style={{padding:'6px 14px',background:'#7c3aed',color:'white',border:'none',borderRadius:8,fontSize:12,fontWeight:600,cursor:'pointer'}}>Save</button>
+      <button onClick={e=>{e.stopPropagation();setOpen(false);}} style={{padding:'6px 10px',background:'none',border:'none',color:'#9ca3af',fontSize:12,cursor:'pointer'}}>Cancel</button>
+    </div>
+  );
+};
+
 // ── FUND NAV CARD ─────────────────────────────────────────────────────────────
 const FundNAVCard = ({ deal, inv, onUpdate, setToast }) => {
   const [navInput, setNavInput] = useState('');
@@ -2201,6 +2228,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
   return (
     <div style={{padding:20}}>
       {deal.isFund && <FundNAVCard deal={deal} inv={inv} onUpdate={onUpdate} setToast={setToast}/>}
+      <div style={C.card}>
         <div style={{display:'flex',alignItems:'flex-start',gap:14,marginBottom:deal.overview?12:0}}>
           <CompanyLogo name={deal.companyName} website={deal.website} size={52} radius={14} fallbackBg="#f59e0b" fallbackColor="white"/>
           <div style={{flex:1}}>
@@ -3417,30 +3445,7 @@ export default function App() {
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
                         </div>
                         {/* Quick NAV update strip */}
-                        {(()=>{
-                          const [open, setOpen] = useState(false);
-                          const [val, setVal] = useState('');
-                          const save = (e) => {
-                            e.stopPropagation();
-                            if (!val || isNaN(Number(val))) return;
-                            updateDeal({ ...d, investment: { ...(d.investment||{}), impliedValue: Number(val), lastValuationDate: new Date().toISOString(), valuationMethod: 'nav-lp' }});
-                            setOpen(false); setVal('');
-                          };
-                          return open ? (
-                            <div onClick={e=>e.stopPropagation()} style={{borderTop:'1px solid #f3f4f6',padding:'10px 16px',display:'flex',gap:8,alignItems:'center',background:'#faf5ff'}}>
-                              <span style={{fontSize:12,color:'#7c3aed',fontWeight:500,flexShrink:0}}>New NAV</span>
-                              <input type="number" value={val} onChange={e=>setVal(e.target.value)} placeholder={String(nav)} autoFocus
-                                style={{flex:1,padding:'6px 10px',border:'1px solid #c4b5fd',borderRadius:8,fontSize:13,outline:'none'}}/>
-                              <button onClick={save} style={{padding:'6px 14px',background:'#7c3aed',color:'white',border:'none',borderRadius:8,fontSize:12,fontWeight:600,cursor:'pointer'}}>Save</button>
-                              <button onClick={e=>{e.stopPropagation();setOpen(false);}} style={{padding:'6px 10px',background:'none',border:'none',color:'#9ca3af',fontSize:12,cursor:'pointer'}}>Cancel</button>
-                            </div>
-                          ) : (
-                            <button onClick={e=>{e.stopPropagation();setOpen(true);}}
-                              style={{width:'100%',padding:'7px 16px',background:'none',border:'none',borderTop:'1px solid #f3f4f6',color:'#7c3aed',fontSize:12,fontWeight:500,cursor:'pointer',textAlign:'left'}}>
-                              + Update NAV
-                            </button>
-                          );
-                        })()}
+                        <FundQuickNAV deal={d} nav={nav} onUpdate={updateDeal}/>
                       </div>
                       {selectMode && <div style={{position:'absolute',top:12,left:12,width:20,height:20,borderRadius:6,border:`2px solid ${selectedIds.has(d.id)?'#5B6DC4':'#d1d5db'}`,background:selectedIds.has(d.id)?'#5B6DC4':'white',display:'flex',alignItems:'center',justifyContent:'center',zIndex:10,pointerEvents:'none'}}>
                         {selectedIds.has(d.id)&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
