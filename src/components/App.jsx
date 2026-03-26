@@ -1454,6 +1454,7 @@ const PrimaryInsight = ({ deal, onUpdate, setToast }) => {
       const result = await resp.json();
       // Pre-approve all findings
       const initial = {};
+      if (result.navUpdate?.nav) initial['nav_update'] = true;
       (result.revenuePoints||[]).forEach((_,i) => initial[`rev_${i}`] = true);
       (result.fundingSignals||[]).forEach((_,i) => initial[`fund_${i}`] = true);
       (result.risks||[]).forEach((_,i) => initial[`risk_${i}`] = true);
@@ -1541,6 +1542,20 @@ const PrimaryInsight = ({ deal, onUpdate, setToast }) => {
     });
     if (newMilestones.length) updated.milestones = [...(updated.milestones||[]), ...newMilestones];
 
+    // Apply NAV update for SPV/fund financial statements (Carta, AngelList, etc.)
+    if (extracted.navUpdate?.nav && approved['nav_update'] !== false) {
+      const navDate = extracted.navUpdate.date
+        ? new Date(extracted.navUpdate.date).toISOString()
+        : now;
+      updated.investment = {
+        ...(updated.investment||{}),
+        impliedValue: extracted.navUpdate.nav,
+        lastValuationDate: navDate,
+        valuationMethod: 'nav-lp',
+        ...(extracted.navUpdate.costBasis ? { costBasis: extracted.navUpdate.costBasis } : {}),
+      };
+    }
+
     onUpdate(updated);
     setExtracted(null);
     setApproved({});
@@ -1587,8 +1602,14 @@ const PrimaryInsight = ({ deal, onUpdate, setToast }) => {
                 const reader = new FileReader();
                 reader.onload = async ev => {
                   if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
-                    // Send PDF as base64 to server-side API for extraction
-                    const base64 = btoa(String.fromCharCode(...new Uint8Array(ev.target.result)));
+                    // Convert ArrayBuffer to base64 in chunks to avoid call stack overflow on large files
+                    const bytes = new Uint8Array(ev.target.result);
+                    let binary = '';
+                    const chunkSize = 8192;
+                    for (let i = 0; i < bytes.length; i += chunkSize) {
+                      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+                    }
+                    const base64 = btoa(binary);
                     setExtracting(true);
                     setInputMode(null);
                     try {
@@ -1613,7 +1634,9 @@ const PrimaryInsight = ({ deal, onUpdate, setToast }) => {
                       setExtracted({ ...result, rawContent: `[PDF: ${file.name}]` });
                       setApproved(initial);
                     } catch (err) {
+                      console.error('PDF extract error:', err);
                       setToast('PDF extraction failed — try pasting the text instead');
+                      setExtracting(false);
                     } finally {
                       setExtracting(false);
                     }
@@ -1703,6 +1726,12 @@ const PrimaryInsight = ({ deal, onUpdate, setToast }) => {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
                 <p style={{ fontSize: 10, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: .5, marginBottom: 2 }}>Confirm what to save</p>
                 {[
+                  ...(extracted.navUpdate?.nav ? [{
+                    key: 'nav_update', icon: '🏦', label: 'NAV update → Fund position',
+                    title: `${fmtC(extracted.navUpdate.nav)} members' equity`,
+                    sub: `as of ${extracted.navUpdate.date || 'Dec 2025'}${extracted.navUpdate.totalFees ? ` · ${fmtC(extracted.navUpdate.totalFees)} in fees` : ''}`,
+                    color: '#7c3aed', bg: '#f5f3ff',
+                  }] : []),
                   ...(extracted.revenuePoints||[]).map((r,i) => ({
                     key: `rev_${i}`, icon: '📈', label: 'Revenue data point',
                     title: r.value, sub: `${r.metric} · ${r.date} · ${r.confidence} confidence`,
