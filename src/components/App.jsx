@@ -7,7 +7,7 @@ const fmtC = (n) => n >= 1e6 ? `$${(n/1e6).toFixed(1)}M` : n >= 1000 ? `$${(n/10
 const dAgo = (d) => Math.floor((Date.now() - new Date(d)) / 86400000);
 const dUntil = (d) => Math.ceil((new Date(d) - Date.now()) / 86400000);
 const genId = () => Math.random().toString(36).substr(2,9);
-const getCB = (inv={}) => (inv.costBasis > 0 ? inv.costBasis : inv.amount) || 0;
+const getCB = (inv={}) => inv.effectiveCost > 0 ? inv.effectiveCost : (inv.costBasis > 0 ? inv.costBasis : inv.amount) || 0;
 
 // ── VALUATION ENGINE ─────────────────────────────────────────────────────────
 const STAGE_MAT = { 'pre-seed':'lab','seed':'pilot','series-a':'scale','series-b':'scale','series-c':'deploy','series-e':'deploy','growth':'deploy','lp-fund':'fund' };
@@ -877,11 +877,12 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
     events.sort((a, b) => a.date - b.date);
     if (!events.length) return [];
 
-    // Build cumulative value over time
+    // Build cumulative value over time — each point is cost basis deployed
     const points = [];
     let deployed = 0;
     events.forEach(e => {
       deployed += e.cb;
+      // Add a point just before this investment at the old value (for step effect)
       points.push({ date: e.date, value: deployed, type: 'invest', label: e.deal.companyName });
     });
     // Add current total value at today
@@ -997,13 +998,18 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
   // Y axis labels
   const yTicks = [minVal + valRange*0.1, minVal + valRange*0.5, minVal + valRange*0.9];
 
-  // Current value + change
+  // Current value + change — use cost basis as denominator to avoid division by near-zero
   const startVal = filtered[0].value;
   const endVal = filtered[filtered.length - 1].value;
   const change = endVal - startVal;
-  const changePct = startVal > 0 ? ((change / startVal) * 100).toFixed(1) : 0;
+  // For % change: use the full cost basis so it reflects actual ROI, not just the window
+  const pctBase = mode === 'portfolio'
+    ? (allDeals || []).reduce((s, d) => s + getCB(d.investment || {}), 0)
+    : getCB((deal?.investment || {}));
+  const changePct = pctBase > 0 ? ((change / pctBase) * 100).toFixed(1) : 0;
   const isUp = change >= 0;
 
+  // Current value + change
   const MARKER_ICONS = {
     round: '💰', update: '✉', signal: '✦', risk: '⚠', invest: '●',
   };
@@ -1579,8 +1585,29 @@ const PrimaryInsight = ({ deal, onUpdate, setToast }) => {
                 const file = e.target.files[0];
                 if (!file) return;
                 const reader = new FileReader();
-                reader.onload = ev => extract(ev.target.result);
-                reader.readAsText(file);
+                reader.onload = ev => {
+                  if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+                    // PDFs are binary — extract readable text portions only
+                    const bytes = new Uint8Array(ev.target.result);
+                    let text = '';
+                    for (let i = 0; i < bytes.length; i++) {
+                      const c = bytes[i];
+                      if (c >= 32 && c < 127) text += String.fromCharCode(c);
+                      else if (c === 10 || c === 13) text += ' ';
+                    }
+                    // Extract text between BT/ET markers (PDF text blocks)
+                    const btMatches = text.match(/BT[\s\S]{0,500}?ET/g) || [];
+                    const extracted = btMatches.map(b => b.replace(/BT|ET|Tf|Td|Tm|cm|[\[\]<>]/g,'').replace(/\)\s*\(/g,' ').replace(/[()]/g,'').trim()).filter(s=>s.length>3).join(' ');
+                    extract(extracted.length > 50 ? extracted : text.replace(/[^\x20-\x7E\n]/g,' ').replace(/\s+/g,' ').substring(0,8000));
+                  } else {
+                    extract(ev.target.result);
+                  }
+                };
+                if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+                  reader.readAsArrayBuffer(file);
+                } else {
+                  reader.readAsText(file);
+                }
                 e.target.value = '';
               }}/>
           </div>
@@ -2009,7 +2036,56 @@ const DetailView = ({deal,onUpdate,setToast}) => {
 
   return (
     <div style={{padding:20}}>
-      <div style={C.card}>
+      {/* Fund NAV update card — only shown for fund LP positions */}
+      {deal.isFund && (()=>{
+        const [navInput, setNavInput] = useState('');
+        const [navDate, setNavDate] = useState(new Date().toISOString().slice(0,10));
+        const [editing, setEditing] = useState(false);
+        const currentNAV = inv.impliedValue || getCB(inv);
+        const lastUpdate = inv.lastValuationDate;
+        const save = () => {
+          if (!navInput || isNaN(Number(navInput))) return;
+          onUpdate({ ...deal, investment: { ...inv, impliedValue: Number(navInput), lastValuationDate: new Date(navDate).toISOString(), valuationMethod: 'nav-lp' }});
+          setEditing(false); setNavInput(''); setToast('NAV updated');
+        };
+        return (
+          <div style={{background:'#f5f3ff',border:'1px solid #e9d5ff',borderRadius:16,padding:'14px 18px',marginBottom:12}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:editing?12:0}}>
+              <div>
+                <p style={{fontSize:10,color:'#7c3aed',textTransform:'uppercase',letterSpacing:.6,marginBottom:3,fontWeight:600}}>Fund LP · Net Asset Value</p>
+                <div style={{display:'flex',alignItems:'baseline',gap:10}}>
+                  <p style={{fontSize:22,fontWeight:700,color:'#111827'}}>{fmtC(currentNAV)}</p>
+                  {lastUpdate && <p style={{fontSize:12,color:'#9ca3af'}}>as of {new Date(lastUpdate).toLocaleDateString('en-US',{month:'short',year:'numeric'})}</p>}
+                </div>
+                <p style={{fontSize:12,color:'#6b7280',marginTop:2}}>Committed: {fmtC(getCB(inv))} · {currentNAV > getCB(inv) ? '+' : ''}{fmtC(currentNAV - getCB(inv))} ({getCB(inv)>0?((currentNAV-getCB(inv))/getCB(inv)*100).toFixed(1):0}%)</p>
+              </div>
+              <button onClick={()=>setEditing(v=>!v)}
+                style={{padding:'7px 14px',background:'white',border:'1px solid #e9d5ff',borderRadius:10,fontSize:12,fontWeight:600,color:'#7c3aed',cursor:'pointer'}}>
+                {editing ? 'Cancel' : 'Update NAV'}
+              </button>
+            </div>
+            {editing && (
+              <div style={{display:'flex',gap:8,alignItems:'flex-end',flexWrap:'wrap'}}>
+                <div style={{flex:1,minWidth:120}}>
+                  <p style={{fontSize:11,color:'#7c3aed',marginBottom:4}}>New NAV ($)</p>
+                  <input type="number" value={navInput} onChange={e=>setNavInput(e.target.value)}
+                    placeholder={String(currentNAV)} autoFocus
+                    style={{width:'100%',padding:'8px 10px',border:'1px solid #c4b5fd',borderRadius:8,fontSize:13,boxSizing:'border-box',outline:'none'}}/>
+                </div>
+                <div style={{flex:1,minWidth:120}}>
+                  <p style={{fontSize:11,color:'#7c3aed',marginBottom:4}}>As of date</p>
+                  <input type="date" value={navDate} onChange={e=>setNavDate(e.target.value)}
+                    style={{width:'100%',padding:'8px 10px',border:'1px solid #c4b5fd',borderRadius:8,fontSize:13,boxSizing:'border-box',outline:'none'}}/>
+                </div>
+                <button onClick={save} disabled={!navInput||isNaN(Number(navInput))}
+                  style={{padding:'8px 18px',background:'#7c3aed',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',opacity:navInput?1:.4}}>
+                  Save
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })()}
         <div style={{display:'flex',alignItems:'flex-start',gap:14,marginBottom:deal.overview?12:0}}>
           <CompanyLogo name={deal.companyName} website={deal.website} size={52} radius={14} fallbackBg="#f59e0b" fallbackColor="white"/>
           <div style={{flex:1}}>
@@ -2158,7 +2234,111 @@ const DetailView = ({deal,onUpdate,setToast}) => {
           <span style={{width:6,height:6,borderRadius:99,background:STALE_COL[staleness],display:'inline-block'}}/>
           <p style={{fontSize:12,color:STALE_COL[staleness]}}>Mark from {new Date(inv.lastValuationDate).toLocaleDateString('en-US',{month:'short',year:'numeric'})}{staleness==='stale'?' — consider refreshing':staleness==='very-stale'?' — mark is outdated':''}</p>
         </div>}
+
+        {/* Effective cost / fee breakdown — shown when SPV fees exist */}
+        {inv.amount > 0 && inv.effectiveCost > 0 && inv.effectiveCost < inv.amount && (
+          <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid #f3f4f6',display:'flex',gap:16,flexWrap:'wrap'}}>
+            <div><p style={C.label}>Check size</p><p style={{fontSize:14,fontWeight:600,color:'#9ca3af'}}>{fmtC(inv.amount)}</p></div>
+            <div><p style={C.label}>Upfront fees</p><p style={{fontSize:14,fontWeight:600,color:'#ef4444'}}>−{fmtC(inv.amount - inv.effectiveCost)}</p></div>
+            <div><p style={C.label}>Effective equity</p><p style={{fontSize:14,fontWeight:600,color:'#10b981'}}>{fmtC(inv.effectiveCost)}</p></div>
+          </div>
+        )}
       </div>
+
+      {/* Deal terms card — collapsible, shows structure/fees, editable inline */}
+      {(()=>{
+        const [termsOpen, setTermsOpen] = useState(false);
+        const [editing, setEditing] = useState(false);
+        const [form, setForm] = useState({
+          structure: deal.terms?.structure || 'Direct',
+          carry: deal.terms?.carry || '',
+          mgmtFee: deal.terms?.mgmtFee || '',
+          mgmtFeeYears: deal.terms?.mgmtFeeYears || '',
+          expenseReserve: deal.terms?.expenseReserve || '',
+          cap: deal.terms?.cap || '',
+          discount: deal.terms?.discount || '',
+        });
+        const t = deal.terms || {};
+        const hasTerms = t.carry || t.mgmtFee || t.expenseReserve || t.cap || t.discount;
+        const save = () => {
+          const amt = inv.amount || 0;
+          const expRes = (Number(form.expenseReserve)||0)/100;
+          const mgmtTotal = ((Number(form.mgmtFee)||0)/100)*(Number(form.mgmtFeeYears)||0);
+          const effectiveCost = (expRes+mgmtTotal)>0 ? Math.round(amt*(1-expRes-mgmtTotal)) : amt;
+          onUpdate({
+            ...deal,
+            investment: { ...inv, effectiveCost },
+            terms: {
+              structure: form.structure,
+              carry: form.carry ? Number(form.carry) : null,
+              mgmtFee: form.mgmtFee ? Number(form.mgmtFee) : null,
+              mgmtFeeYears: form.mgmtFeeYears ? Number(form.mgmtFeeYears) : null,
+              expenseReserve: form.expenseReserve ? Number(form.expenseReserve) : null,
+              cap: form.cap ? Number(form.cap) : null,
+              discount: form.discount ? Number(form.discount) : null,
+            }
+          });
+          setEditing(false);
+          setToast('Terms saved');
+        };
+        const inp2 = {width:'100%',padding:'7px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,boxSizing:'border-box'};
+        const lbl2 = {fontSize:11,color:'#6b7280',display:'block',marginBottom:3};
+        return (
+          <div style={{background:'white',borderRadius:16,overflow:'hidden',marginBottom:12}}>
+            <button onClick={()=>setTermsOpen(v=>!v)}
+              style={{width:'100%',padding:'14px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'none',border:'none',cursor:'pointer'}}>
+              <div style={{display:'flex',alignItems:'center',gap:8}}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+                <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Deal terms</span>
+                {hasTerms && !termsOpen && (
+                  <span style={{fontSize:12,color:'#9ca3af'}}>
+                    {[t.structure&&t.structure!=='Direct'?t.structure:null, t.carry?`${t.carry}% carry`:null, t.cap?`${fmtC(t.cap)} cap`:null].filter(Boolean).join(' · ')}
+                  </span>
+                )}
+                {!hasTerms && <span style={{fontSize:12,color:'#d1d5db'}}>Not set</span>}
+              </div>
+              <div style={{display:'flex',alignItems:'center',gap:8}}>
+                {termsOpen&&!editing&&<button onClick={e=>{e.stopPropagation();setEditing(true);}} style={{fontSize:12,color:'#5B6DC4',background:'none',border:'none',cursor:'pointer',padding:'2px 8px'}}>Edit</button>}
+                <span style={{color:'#9ca3af',fontSize:11}}>{termsOpen?'▲':'▼'}</span>
+              </div>
+            </button>
+            {termsOpen&&<div style={{padding:'0 20px 20px',borderTop:'1px solid #f3f4f6'}}>
+              {editing ? (
+                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,paddingTop:14}}>
+                  <div style={{gridColumn:'1/-1'}}>
+                    <label style={lbl2}>Structure</label>
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                      {['Direct','SPV','Syndicate','Rolling fund'].map(s=>(
+                        <button key={s} onClick={()=>setForm({...form,structure:s})} style={{padding:'4px 12px',borderRadius:99,fontSize:12,fontWeight:500,cursor:'pointer',border:`1.5px solid ${form.structure===s?'#10b981':'#e5e7eb'}`,background:form.structure===s?'#f0fdf4':'white',color:form.structure===s?'#10b981':'#6b7280'}}>{s}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div><label style={lbl2}>Cap ($)</label><input type="number" value={form.cap} onChange={e=>setForm({...form,cap:e.target.value})} placeholder="10000000" style={inp2}/></div>
+                  <div><label style={lbl2}>Discount (%)</label><input type="number" value={form.discount} onChange={e=>setForm({...form,discount:e.target.value})} placeholder="20" style={inp2}/></div>
+                  <div><label style={lbl2}>Carry (%)</label><input type="number" value={form.carry} onChange={e=>setForm({...form,carry:e.target.value})} placeholder="20" style={inp2}/></div>
+                  <div><label style={lbl2}>Mgmt fee (%/yr)</label><input type="number" value={form.mgmtFee} onChange={e=>setForm({...form,mgmtFee:e.target.value})} placeholder="2.5" style={inp2}/></div>
+                  <div><label style={lbl2}>Fee years (upfront)</label><input type="number" value={form.mgmtFeeYears} onChange={e=>setForm({...form,mgmtFeeYears:e.target.value})} placeholder="2" style={inp2}/></div>
+                  <div><label style={lbl2}>Expense reserve (%)</label><input type="number" value={form.expenseReserve} onChange={e=>setForm({...form,expenseReserve:e.target.value})} placeholder="3" style={inp2}/></div>
+                  <div style={{gridColumn:'1/-1',display:'flex',gap:8}}>
+                    <button onClick={save} style={{flex:1,padding:'8px',background:'#5B6DC4',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer'}}>Save terms</button>
+                    <button onClick={()=>setEditing(false)} style={{padding:'8px 14px',background:'none',border:'none',color:'#6b7280',fontSize:13,cursor:'pointer'}}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{display:'flex',gap:20,flexWrap:'wrap',paddingTop:14}}>
+                  {t.structure&&t.structure!=='Direct'&&<div><p style={C.label}>Structure</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{t.structure}</p></div>}
+                  {t.cap&&<div><p style={C.label}>Cap</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{fmtC(t.cap)}</p></div>}
+                  {t.discount&&<div><p style={C.label}>Discount</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{t.discount}%</p></div>}
+                  {t.carry&&<div><p style={C.label}>Carry</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{t.carry}%</p></div>}
+                  {t.mgmtFee&&<div><p style={C.label}>Mgmt fee</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{t.mgmtFee}%/yr{t.mgmtFeeYears?` · ${t.mgmtFeeYears}yr upfront`:''}</p></div>}
+                  {t.expenseReserve&&<div><p style={C.label}>Expense reserve</p><p style={{fontSize:13,fontWeight:600,color:'#374151'}}>{t.expenseReserve}%</p></div>}
+                  {!hasTerms&&<p style={{fontSize:13,color:'#9ca3af',fontStyle:'italic'}}>No terms logged — click Edit to add</p>}
+                </div>
+              )}
+            </div>}
+          </div>
+        );
+      })()}
 
       <MetricsTracker deal={deal} onUpdate={onUpdate}/>
 
@@ -2267,7 +2447,7 @@ const AddModal = ({onClose,onAdd}) => {
   const [f,setF]=useState(()=>{
     const mat=STAGE_MAT['seed']||'pilot';
     const defs=METRIC_DEFAULTS[mat]||[];
-    return {name:'',website:'',industry:'',stage:'seed',status:'invested',amount:'',vehicle:'SAFE',founderName:'',founderRole:'CEO',note:'',metric1:defs[0]||'',metric2:defs[1]||'',metric3:defs[2]||''};
+    return {name:'',website:'',industry:'',stage:'seed',status:'invested',amount:'',vehicle:'SAFE',investDate:new Date().toISOString().slice(0,10),channel:'',structure:'Direct',carry:'',mgmtFee:'',mgmtFeeYears:'',expenseReserve:'',cap:'',discount:'',founderName:'',founderRole:'CEO',note:'',metric1:defs[0]||'',metric2:defs[1]||'',metric3:defs[2]||''};
   });
 
   const updateStage = (stage) => {
@@ -2295,7 +2475,26 @@ const AddModal = ({onClose,onAdd}) => {
       founderUpdates:[],
       createdAt:now,statusEnteredAt:now
     };
-    if(f.status==='invested'){base.investment={amount:Number(f.amount),costBasis:Number(f.amount),vehicle:f.vehicle,date:now,lastUpdateReceived:now};}
+    if(f.status==='invested'){
+      const invDate=f.investDate?new Date(f.investDate).toISOString():now;
+      const amount=Number(f.amount)||0;
+      const expRes=(Number(f.expenseReserve)||0)/100;
+      const mgmtFeeTotal=((Number(f.mgmtFee)||0)/100)*(Number(f.mgmtFeeYears)||0);
+      const totalUpfrontFeeRate=expRes+mgmtFeeTotal;
+      const effectiveCost=totalUpfrontFeeRate>0?Math.round(amount*(1-totalUpfrontFeeRate)):amount;
+      base.investment={amount,costBasis:amount,effectiveCost,vehicle:f.vehicle,date:invDate,lastUpdateReceived:invDate};
+      base.createdAt=invDate;base.statusEnteredAt=invDate;
+      base.terms={
+        structure:f.structure||'Direct',
+        carry:f.carry?Number(f.carry):null,
+        mgmtFee:f.mgmtFee?Number(f.mgmtFee):null,
+        mgmtFeeYears:f.mgmtFeeYears?Number(f.mgmtFeeYears):null,
+        expenseReserve:f.expenseReserve?Number(f.expenseReserve):null,
+        cap:f.cap?Number(f.cap):null,
+        discount:f.discount?Number(f.discount):null,
+      };
+    }
+    if(f.channel){base.dealSource=f.channel;}
     onAdd(base);onClose();
   };
 
@@ -2340,7 +2539,63 @@ const AddModal = ({onClose,onAdd}) => {
               <option value="SAFE">SAFE</option><option value="Convertible Note">Conv. Note</option><option value="Equity">Equity</option>
             </select>
           </div>
+          <div style={{gridColumn:'1/-1'}}><label style={lbl}>Investment date</label><input type="date" value={f.investDate} onChange={e=>setF({...f,investDate:e.target.value})} style={inp}/></div>
         </div>}
+
+        {/* Deal terms */}
+        {f.status==='invested'&&<div>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+            <label style={lbl}>Deal terms <span style={{fontWeight:400,color:'#9ca3af'}}>(optional)</span></label>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+            {/* Structure */}
+            <div style={{gridColumn:'1/-1'}}>
+              <label style={{...lbl,marginBottom:6}}>Structure</label>
+              <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                {['Direct','SPV','Syndicate','Rolling fund'].map(s=>(
+                  <button key={s} onClick={()=>setF({...f,structure:s})} style={{padding:'4px 12px',borderRadius:99,fontSize:12,fontWeight:500,cursor:'pointer',border:`1.5px solid ${f.structure===s?'#10b981':'#e5e7eb'}`,background:f.structure===s?'#f0fdf4':'white',color:f.structure===s?'#10b981':'#6b7280'}}>{s}</button>
+                ))}
+              </div>
+            </div>
+            {/* Cap + Discount (SAFE/Note) */}
+            {(f.vehicle==='SAFE'||f.vehicle==='Convertible Note')&&<>
+              <div><label style={lbl}>Cap ($)</label><input type="number" value={f.cap} onChange={e=>setF({...f,cap:e.target.value})} placeholder="10000000" style={inp}/></div>
+              <div><label style={lbl}>Discount (%)</label><input type="number" value={f.discount} onChange={e=>setF({...f,discount:e.target.value})} placeholder="20" style={inp}/></div>
+            </>}
+            {/* SPV fees — only shown when SPV or Syndicate */}
+            {(f.structure==='SPV'||f.structure==='Syndicate')&&<>
+              <div style={{gridColumn:'1/-1',borderTop:'1px solid #f3f4f6',paddingTop:8,marginTop:2}}>
+                <p style={{fontSize:11,color:'#9ca3af',marginBottom:8}}>SPV / Syndicate fees</p>
+              </div>
+              <div><label style={lbl}>Carry (%)</label><input type="number" value={f.carry} onChange={e=>setF({...f,carry:e.target.value})} placeholder="20" style={inp}/></div>
+              <div><label style={lbl}>Mgmt fee (%/yr)</label><input type="number" value={f.mgmtFee} onChange={e=>setF({...f,mgmtFee:e.target.value})} placeholder="2.5" style={inp}/></div>
+              <div><label style={lbl}>Fee years (called upfront)</label><input type="number" value={f.mgmtFeeYears} onChange={e=>setF({...f,mgmtFeeYears:e.target.value})} placeholder="2" style={inp}/></div>
+              <div><label style={lbl}>Expense reserve (%)</label><input type="number" value={f.expenseReserve} onChange={e=>setF({...f,expenseReserve:e.target.value})} placeholder="3" style={inp}/></div>
+              {/* Effective cost preview */}
+              {f.amount&&(Number(f.mgmtFee)||Number(f.expenseReserve))?(()=>{
+                const amt=Number(f.amount)||0;
+                const expRes=(Number(f.expenseReserve)||0)/100;
+                const mgmtTotal=((Number(f.mgmtFee)||0)/100)*(Number(f.mgmtFeeYears)||0);
+                const fees=Math.round(amt*(expRes+mgmtTotal));
+                const effective=amt-fees;
+                return <div style={{gridColumn:'1/-1',background:'#f0fdf4',borderRadius:10,padding:'8px 12px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <span style={{fontSize:12,color:'#6b7280'}}>Upfront fees: <span style={{color:'#ef4444',fontWeight:500}}>${fees.toLocaleString()}</span></span>
+                  <span style={{fontSize:12,color:'#166534',fontWeight:600}}>Effective equity: ${effective.toLocaleString()}</span>
+                </div>;
+              })():null}
+            </>}
+          </div>
+        </div>}
+
+        {/* Deal channel */}
+        <div><label style={lbl}>Deal channel <span style={{fontWeight:400,color:'#9ca3af'}}>(how did you find this?)</span></label>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+            {['Syndicate','Angel group','Cold inbound','Warm intro','Network','Accelerator','Fund co-invest','Other'].map(ch=>(
+              <button key={ch} onClick={()=>setF({...f,channel:f.channel===ch?'':ch})} style={{padding:'5px 12px',borderRadius:99,fontSize:12,fontWeight:500,cursor:'pointer',border:`1.5px solid ${f.channel===ch?'#5B6DC4':'#e5e7eb'}`,background:f.channel===ch?'#eef2ff':'white',color:f.channel===ch?'#5B6DC4':'#6b7280'}}>{ch}</button>
+            ))}
+          </div>
+          {f.channel==='Other'&&<input value={f.channelNote||''} onChange={e=>setF({...f,channelNote:e.target.value})} placeholder="Describe the channel" style={{...inp,marginTop:8}}/>}
+        </div>
 
         {/* Founder */}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
@@ -3081,7 +3336,7 @@ export default function App() {
                 { l: 'Net P&L', v: fmtPnL(netPnL), sub: `${totalProceeds > 0 ? fmtC(totalProceeds) + ' returned · ' : ''}${totalWritedowns > 0 ? fmtC(totalWritedowns) + ' lost' : 'no exits yet'}`, c: statC(netPnL) },
                 { l: 'MOIC', v: moic ? `${moic.toFixed(2)}x` : '—', sub: 'blended', c: moic >= 1.5 ? '#10b981' : moic >= 1 ? '#5B6DC4' : '#9ca3af' },
                 { l: 'DPI', v: dpi > 0 ? `${dpi.toFixed(2)}x` : '0.00x', sub: 'distributed/paid-in', c: dpi >= 1 ? '#10b981' : dpi > 0 ? '#5B6DC4' : '#9ca3af' },
-                { l: 'Watching', v: String(deals.filter(d => d.status === 'watching').length), sub: `${portfolio.length} invested`, c: '#5B6DC4' },
+                { l: 'NAV', v: fmtC(totalProceeds + totalUnrealizedImp), sub: 'proceeds + live marks', c: totalProceeds + totalUnrealizedImp >= totalDep ? '#10b981' : '#5B6DC4' },
               ];
               return (
                 <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10}}>
@@ -3134,25 +3389,56 @@ export default function App() {
               <div style={{display:'flex',flexDirection:'column',gap:10,marginTop:10}}>
                 {fFunds.map(d => {
                   const cb = getCB(d.investment||{});
+                  const nav = d.investment?.impliedValue || cb;
+                  const navChange = nav - cb;
+                  const navPct = cb > 0 ? ((navChange/cb)*100).toFixed(1) : 0;
+                  const lastNav = d.investment?.lastValuationDate;
                   return (
                     <div key={d.id} style={{position:'relative'}} onClick={selectMode ? () => toggleSelect(d.id) : undefined}>
-                      <div onClick={selectMode ? undefined : () => { setSelected(d); setPage('detail'); }}
-                        style={{background:'white',borderRadius:16,border:'1px solid #ede9fe',cursor:'pointer',padding:'14px 16px',display:'flex',alignItems:'center',gap:14}}>
-                        <div style={{width:44,height:44,borderRadius:12,background:'#7c3aed20',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-                        </div>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:2}}>
-                            <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>{d.companyName}</span>
-                            <Pill color="#7c3aed" bg="#f5f3ff">LP</Pill>
+                      <div style={{background:'white',borderRadius:16,border:'1px solid #ede9fe',overflow:'hidden'}}>
+                        <div onClick={selectMode ? undefined : () => { setSelected(d); setPage('detail'); }}
+                          style={{cursor:'pointer',padding:'14px 16px',display:'flex',alignItems:'center',gap:14}}>
+                          <div style={{width:44,height:44,borderRadius:12,background:'#7c3aed20',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
                           </div>
-                          <p style={{fontSize:12,color:'#9ca3af'}}>{d.source?.name && d.source.name !== 'AngelList' ? d.source.name : 'Fund investment'}</p>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:2}}>
+                              <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>{d.companyName}</span>
+                              <Pill color="#7c3aed" bg="#f5f3ff">LP</Pill>
+                            </div>
+                            <p style={{fontSize:12,color:'#9ca3af'}}>{d.source?.name && d.source.name !== 'AngelList' ? d.source.name : 'Fund investment'}{lastNav ? ` · NAV as of ${new Date(lastNav).toLocaleDateString('en-US',{month:'short',year:'numeric'})}` : ''}</p>
+                          </div>
+                          <div style={{textAlign:'right',flexShrink:0}}>
+                            <p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{fmtC(nav)}</p>
+                            <p style={{fontSize:12,color:navChange>=0?'#10b981':'#ef4444',fontWeight:500}}>{navChange>=0?'+':''}{fmtC(navChange)} ({navPct}%)</p>
+                          </div>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
                         </div>
-                        <div style={{textAlign:'right',flexShrink:0}}>
-                          <p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{fmtC(cb)}</p>
-                          <p style={{fontSize:12,color:'#9ca3af'}}>LP position</p>
-                        </div>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
+                        {/* Quick NAV update strip */}
+                        {(()=>{
+                          const [open, setOpen] = useState(false);
+                          const [val, setVal] = useState('');
+                          const save = (e) => {
+                            e.stopPropagation();
+                            if (!val || isNaN(Number(val))) return;
+                            updateDeal({ ...d, investment: { ...(d.investment||{}), impliedValue: Number(val), lastValuationDate: new Date().toISOString(), valuationMethod: 'nav-lp' }});
+                            setOpen(false); setVal('');
+                          };
+                          return open ? (
+                            <div onClick={e=>e.stopPropagation()} style={{borderTop:'1px solid #f3f4f6',padding:'10px 16px',display:'flex',gap:8,alignItems:'center',background:'#faf5ff'}}>
+                              <span style={{fontSize:12,color:'#7c3aed',fontWeight:500,flexShrink:0}}>New NAV</span>
+                              <input type="number" value={val} onChange={e=>setVal(e.target.value)} placeholder={String(nav)} autoFocus
+                                style={{flex:1,padding:'6px 10px',border:'1px solid #c4b5fd',borderRadius:8,fontSize:13,outline:'none'}}/>
+                              <button onClick={save} style={{padding:'6px 14px',background:'#7c3aed',color:'white',border:'none',borderRadius:8,fontSize:12,fontWeight:600,cursor:'pointer'}}>Save</button>
+                              <button onClick={e=>{e.stopPropagation();setOpen(false);}} style={{padding:'6px 10px',background:'none',border:'none',color:'#9ca3af',fontSize:12,cursor:'pointer'}}>Cancel</button>
+                            </div>
+                          ) : (
+                            <button onClick={e=>{e.stopPropagation();setOpen(true);}}
+                              style={{width:'100%',padding:'7px 16px',background:'none',border:'none',borderTop:'1px solid #f3f4f6',color:'#7c3aed',fontSize:12,fontWeight:500,cursor:'pointer',textAlign:'left'}}>
+                              + Update NAV
+                            </button>
+                          );
+                        })()}
                       </div>
                       {selectMode && <div style={{position:'absolute',top:12,left:12,width:20,height:20,borderRadius:6,border:`2px solid ${selectedIds.has(d.id)?'#5B6DC4':'#d1d5db'}`,background:selectedIds.has(d.id)?'#5B6DC4':'white',display:'flex',alignItems:'center',justifyContent:'center',zIndex:10,pointerEvents:'none'}}>
                         {selectedIds.has(d.id)&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
