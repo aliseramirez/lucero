@@ -1580,25 +1580,43 @@ const PrimaryInsight = ({ deal, onUpdate, setToast }) => {
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
               Upload file
             </button>
-            <input ref={fileRef} type="file" accept=".txt,.pdf,.md,.eml" style={{ display: 'none' }}
+            <input ref={fileRef} type="file" accept=".txt,.pdf,.md,.eml,.doc,.docx" style={{ display: 'none' }}
               onChange={e => {
                 const file = e.target.files[0];
                 if (!file) return;
                 const reader = new FileReader();
-                reader.onload = ev => {
+                reader.onload = async ev => {
                   if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
-                    // PDFs are binary — extract readable text portions only
-                    const bytes = new Uint8Array(ev.target.result);
-                    let text = '';
-                    for (let i = 0; i < bytes.length; i++) {
-                      const c = bytes[i];
-                      if (c >= 32 && c < 127) text += String.fromCharCode(c);
-                      else if (c === 10 || c === 13) text += ' ';
+                    // Send PDF as base64 to server-side API for extraction
+                    const base64 = btoa(String.fromCharCode(...new Uint8Array(ev.target.result)));
+                    setExtracting(true);
+                    setInputMode(null);
+                    try {
+                      const resp = await fetch('/api/extract', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          content: null,
+                          pdfBase64: base64,
+                          dealName: deal.companyName,
+                          existingData: { revenueLog: deal.revenueLog, fundraiseHistory: deal.fundraiseHistory },
+                        }),
+                      });
+                      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                      const result = await resp.json();
+                      const initial = {};
+                      (result.revenuePoints||[]).forEach((_,i) => initial[`rev_${i}`] = true);
+                      (result.fundingSignals||[]).forEach((_,i) => initial[`fund_${i}`] = true);
+                      (result.risks||[]).forEach((_,i) => initial[`risk_${i}`] = true);
+                      (result.positives||[]).forEach((_,i) => initial[`pos_${i}`] = true);
+                      (result.teamChanges||[]).forEach((_,i) => initial[`team_${i}`] = true);
+                      setExtracted({ ...result, rawContent: `[PDF: ${file.name}]` });
+                      setApproved(initial);
+                    } catch (err) {
+                      setToast('PDF extraction failed — try pasting the text instead');
+                    } finally {
+                      setExtracting(false);
                     }
-                    // Extract text between BT/ET markers (PDF text blocks)
-                    const btMatches = text.match(/BT[\s\S]{0,500}?ET/g) || [];
-                    const extracted = btMatches.map(b => b.replace(/BT|ET|Tf|Td|Tm|cm|[\[\]<>]/g,'').replace(/\)\s*\(/g,' ').replace(/[()]/g,'').trim()).filter(s=>s.length>3).join(' ');
-                    extract(extracted.length > 50 ? extracted : text.replace(/[^\x20-\x7E\n]/g,' ').replace(/\s+/g,' ').substring(0,8000));
                   } else {
                     extract(ev.target.result);
                   }
@@ -3382,8 +3400,6 @@ export default function App() {
             })()}
           </div>
         )}
-
-        {allInvested.length > 1 && <ValueChart allDeals={allInvested} mode="portfolio"/>}
 
         <div style={{marginBottom:14}}>
           <div style={{background:'white',borderRadius:14,border:'1px solid #e5e7eb',padding:'6px 12px',display:'flex',alignItems:'center',gap:10}}>
