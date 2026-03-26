@@ -1062,285 +1062,6 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
 };
 
 // ── SIGNALS SECTION ───────────────────────────────────────────────────────────
-const SignalsSection = ({ deal, onUpdate }) => {
-  const [fetchState, setFetchState] = useState('idle');
-  const [data, setData] = useState(null);
-  const [lastFetched, setLastFetched] = useState(null);
-
-  // Load from cache on mount
-  useEffect(() => {
-    const cache = loadSignalCache();
-    const cached = cache[deal.id];
-    if (cached && (Date.now() - new Date(cached.fetchedAt).getTime()) < SIGNAL_TTL) {
-      setData(cached);
-      setLastFetched(new Date(cached.fetchedAt));
-      setFetchState('done');
-    }
-  }, [deal.id]);
-
-  const doFetch = async () => {
-    setFetchState('loading');
-    try {
-      const result = await fetchExternalSignals(deal);
-      const entry = { ...result, fetchedAt: new Date().toISOString() };
-      const cache = loadSignalCache();
-      cache[deal.id] = entry;
-      saveSignalCache(cache);
-      setData(entry);
-      setLastFetched(new Date());
-      setFetchState('done');
-
-      if (!onUpdate) return;
-      let updated = { ...deal };
-
-      // Funding rounds → fundraiseHistory
-      if (result.momentum?.fundingRounds?.length > 0) {
-        const existing = new Set((deal.fundraiseHistory || []).map(r => r.roundName?.toLowerCase()));
-        const newRounds = result.momentum.fundingRounds
-          .filter(r => r.roundName && !existing.has(r.roundName.toLowerCase()))
-          .map(r => ({
-            id: genId(),
-            roundName: r.roundName,
-            date: r.date ? new Date(r.date).toISOString() : new Date().toISOString(),
-            amountRaised: r.amountRaised || null,
-            postMoneyVal: r.postMoneyVal || null,
-            leadInvestor: r.leadInvestor || '',
-            followOns: r.followOns || [],
-            source: r.source || 'External search',
-            sourceUrl: r.sourceUrl || null,
-            fromAgent: true,
-          }));
-        if (newRounds.length) {
-          updated.fundraiseHistory = [...(updated.fundraiseHistory || []), ...newRounds]
-            .sort((a, b) => new Date(a.date) - new Date(b.date));
-        }
-      }
-
-      // Revenue data → revenueLog
-      if (result.momentum?.revenueData?.length > 0) {
-        const existingDates = new Set((deal.revenueLog || []).map(r => r.date?.substring(0, 7)));
-        const newRevenue = result.momentum.revenueData
-          .filter(r => r.date && !existingDates.has(r.date?.substring(0, 7)))
-          .map(r => ({
-            id: genId(),
-            date: new Date(r.date).toISOString(),
-            metric: r.metric || 'Revenue',
-            value: r.value || '',
-            numericValue: r.numericValue || null,
-            source: r.source || 'External search',
-            sourceUrl: r.sourceUrl || null,
-            fromAgent: true,
-          }));
-        if (newRevenue.length) {
-          updated.revenueLog = [...(updated.revenueLog || []), ...newRevenue]
-            .sort((a, b) => new Date(a.date) - new Date(b.date));
-        }
-      }
-
-      // Momentum + activity + risk signals → milestones
-      const allSignals = [
-        ...(result.momentum?.signals || []),
-        ...(result.activity?.signals || []),
-        ...(result.risk?.signals || []).map(s => ({ ...s, sentiment: 'negative' })),
-      ];
-      if (allSignals.length > 0) {
-        const existing = new Set((deal.milestones || []).map(m => m.title));
-        const newMs = allSignals
-          .filter(s => s.title && !existing.has(s.title))
-          .slice(0, 8)
-          .map(s => ({
-            id: genId(),
-            type: s.type === 'partnership' ? 'partnership' : s.type === 'product' ? 'product' : 'update',
-            title: s.title,
-            description: s.description || '',
-            date: s.date ? new Date(s.date).toISOString() : new Date().toISOString(),
-            source: s.source,
-            sourceUrl: s.sourceUrl || null,
-            fromAgent: true,
-            sentiment: s.sentiment || 'neutral',
-          }));
-        if (newMs.length) updated.milestones = [...(updated.milestones || []), ...newMs];
-      }
-
-      onUpdate(updated);
-    } catch (e) {
-      console.error('Signal fetch failed:', e);
-      setFetchState('error');
-    }
-  };
-
-  const activity = data?.activity;
-  const momentum = data?.momentum;
-  const risk = data?.risk;
-  const hasData = fetchState === 'done' && data;
-
-  const SIG_CFG = {
-    product:    { color: '#f59e0b', bg: '#fffbeb', label: 'Product' },
-    partnership:{ color: '#10b981', bg: '#f0fdf4', label: 'Partnership' },
-    team:       { color: '#7c3aed', bg: '#f5f3ff', label: 'Team' },
-    award:      { color: '#5B6DC4', bg: '#eef2ff', label: 'Award' },
-    news:       { color: '#78716c', bg: '#f5f5f4', label: 'News' },
-    silence:    { color: '#ef4444', bg: '#fef2f2', label: 'Silence' },
-    founder_departure: { color: '#ef4444', bg: '#fef2f2', label: 'Founder left' },
-    pivot:      { color: '#f59e0b', bg: '#fffbeb', label: 'Pivot' },
-    layoffs:    { color: '#ef4444', bg: '#fef2f2', label: 'Layoffs' },
-    domain:     { color: '#ef4444', bg: '#fef2f2', label: 'Domain issue' },
-    other:      { color: '#78716c', bg: '#f5f5f4', label: 'Risk' },
-  };
-
-  return (
-    <div style={{ background:'white', borderRadius:16, padding:20, marginBottom:12 }}>
-      {/* Header row */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: hasData ? 14 : 0 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <span style={{ fontWeight:600, fontSize:14, color:'#111827' }}>External Signals</span>
-          {lastFetched && <span style={{ fontSize:11, color:'#9ca3af' }}>· updated {dAgo(lastFetched)}d ago</span>}
-        </div>
-        <button onClick={doFetch} disabled={fetchState === 'loading'}
-          style={{ display:'flex', alignItems:'center', gap:5, padding:'5px 10px', borderRadius:8, fontSize:12, fontWeight:600,
-            background: fetchState === 'loading' ? '#f3f4f6' : '#eef2ff',
-            color: fetchState === 'loading' ? '#9ca3af' : '#5B6DC4', border:'none',
-            cursor: fetchState === 'loading' ? 'not-allowed' : 'pointer' }}>
-          {fetchState === 'loading'
-            ? <><div style={{ width:10, height:10, border:'1.5px solid #d1d5db', borderTopColor:'#5B6DC4', borderRadius:'50%', animation:'spin 0.8s linear infinite' }}/> Searching…</>
-            : <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.12-7.51"/></svg>{hasData ? 'Refresh' : 'Fetch signals'}</>
-          }
-        </button>
-      </div>
-
-      {/* Idle */}
-      {fetchState === 'idle' && (
-        <p style={{ fontSize:13, color:'#9ca3af', textAlign:'center', padding:'12px 0' }}>
-          Search for activity, momentum, and risk signals across the web.
-        </p>
-      )}
-
-      {/* Error */}
-      {fetchState === 'error' && (
-        <p style={{ fontSize:13, color:'#ef4444', textAlign:'center', padding:'8px 0' }}>
-          Failed to fetch — check connection and try again.
-        </p>
-      )}
-
-      {hasData && (
-        <>
-          {/* 3-bucket status bar */}
-          <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:14 }}>
-            <ActivityDot status={activity?.status}/>
-            <MomentumDot trend={momentum?.trend}/>
-            <RiskDot level={risk?.level}/>
-          </div>
-
-          {/* Summary */}
-          {data.summary && (
-            <div style={{ background:'#f9fafb', borderRadius:10, padding:'10px 14px', marginBottom:12 }}>
-              <p style={{ fontSize:13, color:'#374151', lineHeight:1.6 }}>{data.summary}</p>
-              {activity?.websiteStatus && activity.websiteStatus !== 'unknown' && (
-                <p style={{ fontSize:11, color:'#9ca3af', marginTop:6 }}>
-                  <span style={{ width:6, height:6, borderRadius:99, background: activity.websiteStatus==='active'?'#10b981':activity.websiteStatus==='down'?'#ef4444':'#f59e0b', display:'inline-block', marginRight:5 }}/>
-                  Website {activity.websiteStatus}{activity.websiteSummary ? ` — ${activity.websiteSummary}` : ''}
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Auto-populated banner */}
-          {(momentum?.fundingRounds?.length > 0 || momentum?.revenueData?.length > 0) && (
-            <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', borderRadius:10, padding:'8px 14px', marginBottom:12, display:'flex', gap:14, flexWrap:'wrap', alignItems:'center' }}>
-              <span style={{ fontSize:11, color:'#166534', fontWeight:600 }}>✓ Auto-populated:</span>
-              {momentum.fundingRounds?.length > 0 && <span style={{ fontSize:11, color:'#166534' }}>{momentum.fundingRounds.length} funding round{momentum.fundingRounds.length>1?'s':''} → Fundraise History</span>}
-              {momentum.revenueData?.length > 0 && <span style={{ fontSize:11, color:'#166534' }}>{momentum.revenueData.length} revenue point{momentum.revenueData.length>1?'s':''} → Revenue Log</span>}
-            </div>
-          )}
-
-          {/* Risk alert */}
-          {risk?.level === 'alert' && risk.signals?.length > 0 && (
-            <div style={{ background:'#fef2f2', border:'1px solid #fecaca', borderRadius:10, padding:'10px 14px', marginBottom:12 }}>
-              <p style={{ fontSize:12, fontWeight:600, color:'#dc2626', marginBottom:6 }}>⚠ Risk signals detected</p>
-              {risk.signals.map((s, i) => (
-                <div key={i} style={{ fontSize:12, color:'#7f1d1d', marginBottom: i < risk.signals.length-1 ? 4 : 0 }}>
-                  <span style={{ fontWeight:500 }}>{s.title}</span>{s.description ? ` — ${s.description}` : ''}
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Check-in recommendation */}
-          {data.checkInRecommended && (
-            <div style={{ background:'#fffbeb', border:'1px solid #fde68a', borderRadius:10, padding:'8px 12px', marginBottom:12, display:'flex', alignItems:'center', gap:8 }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-              <p style={{ fontSize:12, color:'#92400e' }}>{data.checkInReason}</p>
-            </div>
-          )}
-
-          {/* Momentum signals */}
-          {momentum?.signals?.length > 0 && (
-            <div style={{ marginBottom:12 }}>
-              <p style={{ fontSize:11, color:'#9ca3af', textTransform:'uppercase', letterSpacing:.6, marginBottom:8 }}>Momentum</p>
-              <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-                {momentum.signals.map((s, i) => {
-                  const cfg = SIG_CFG[s.type] || SIG_CFG.news;
-                  return (
-                    <div key={i} style={{ display:'flex', alignItems:'flex-start', gap:10, padding:'10px 12px', borderRadius:12, background:cfg.bg }}>
-                      <Pill color={cfg.color} bg={cfg.color+'18'}>{cfg.label}</Pill>
-                      <div style={{ flex:1, minWidth:0 }}>
-                        <p style={{ fontSize:13, fontWeight:500, color:'#111827', marginBottom:2 }}>{s.title}</p>
-                        <p style={{ fontSize:12, color:'#6b7280', lineHeight:1.5 }}>{s.description}</p>
-                        {s.sourceUrl && <a href={s.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize:11, color:'#5B6DC4', marginTop:3, display:'inline-block' }}>Source →</a>}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Activity signals */}
-          {activity?.signals?.length > 0 && (
-            <div style={{ marginBottom: risk?.signals?.filter(s => risk.level !== 'alert').length ? 12 : 0 }}>
-              <p style={{ fontSize:11, color:'#9ca3af', textTransform:'uppercase', letterSpacing:.6, marginBottom:8 }}>Activity</p>
-              <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-                {activity.signals.map((s, i) => (
-                  <div key={i} style={{ display:'flex', alignItems:'flex-start', gap:10, padding:'10px 12px', borderRadius:12, background:'#f5f5f4' }}>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <p style={{ fontSize:13, fontWeight:500, color:'#111827', marginBottom:2 }}>{s.title}</p>
-                      <p style={{ fontSize:12, color:'#6b7280', lineHeight:1.5 }}>{s.description}</p>
-                      {s.sourceUrl && <a href={s.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize:11, color:'#5B6DC4', marginTop:3, display:'inline-block' }}>Source →</a>}
-                    </div>
-                    {s.date && <span style={{ fontSize:11, color:'#9ca3af', flexShrink:0 }}>{s.date}</span>}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Watch-level risk signals (not already shown as alert) */}
-          {risk?.level === 'watch' && risk.signals?.length > 0 && (
-            <div>
-              <p style={{ fontSize:11, color:'#9ca3af', textTransform:'uppercase', letterSpacing:.6, marginBottom:8 }}>Risk</p>
-              <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-                {risk.signals.map((s, i) => {
-                  const cfg = SIG_CFG[s.type] || SIG_CFG.other;
-                  return (
-                    <div key={i} style={{ display:'flex', alignItems:'flex-start', gap:10, padding:'10px 12px', borderRadius:12, background:cfg.bg }}>
-                      <Pill color={cfg.color} bg={cfg.color+'18'}>{cfg.label}</Pill>
-                      <div style={{ flex:1, minWidth:0 }}>
-                        <p style={{ fontSize:13, fontWeight:500, color:'#111827', marginBottom:2 }}>{s.title}</p>
-                        <p style={{ fontSize:12, color:'#6b7280', lineHeight:1.5 }}>{s.description}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-};
-
 
 // ── INVESTMENT MEMO ───────────────────────────────────────────────────────────
 // Written once at the moment of decision. The thesis. Editable anytime.
@@ -1965,6 +1686,82 @@ const FundNAVCard = ({ deal, inv, onUpdate, setToast }) => {
 
 // ── DEAL TERMS CARD ───────────────────────────────────────────────────────────
 
+
+// ── AMBIENT SIGNALS HOOK ──────────────────────────────────────────────────────
+// Loads signals on mount, auto-refreshes if stale. Feeds the whole detail page.
+const useSignals = (deal) => {
+  const [signals, setSignals] = useState(null);
+  const [fetching, setFetching] = useState(false);
+  const [lastFetched, setLastFetched] = useState(null);
+
+  useEffect(() => {
+    if (!deal?.id) return;
+    const cache = loadSignalCache();
+    const cached = cache[deal.id];
+    if (cached) {
+      setSignals(cached);
+      setLastFetched(new Date(cached.fetchedAt));
+      // Auto-refresh in background if stale
+      const age = Date.now() - new Date(cached.fetchedAt).getTime();
+      if (age > SIGNAL_TTL) refresh(deal);
+    } else {
+      refresh(deal);
+    }
+  }, [deal?.id]);
+
+  const refresh = async (d) => {
+    if (fetching) return;
+    setFetching(true);
+    try {
+      const result = await fetchExternalSignals(d || deal);
+      const entry = { ...result, fetchedAt: new Date().toISOString() };
+      const cache = loadSignalCache();
+      cache[(d || deal).id] = entry;
+      saveSignalCache(cache);
+      setSignals(entry);
+      setLastFetched(new Date());
+    } catch (e) {
+      console.error('Signal refresh failed:', e);
+    } finally {
+      setFetching(false);
+    }
+  };
+
+  return { signals, fetching, lastFetched, refresh };
+};
+
+// ── AI SUGGESTION CHIP ────────────────────────────────────────────────────────
+// Inline dismissible suggestion. Shows everywhere signals have context to add.
+const AISuggestion = ({ icon, label, detail, source, sourceUrl, onAccept, onDismiss, color = '#5B6DC4', bg = '#eef2ff' }) => {
+  const [dismissed, setDismissed] = useState(false);
+  if (dismissed) return null;
+  return (
+    <div style={{ display:'flex', alignItems:'flex-start', gap:10, padding:'9px 12px', borderRadius:10,
+      background: bg, border:`1px solid ${color}22`, marginTop:8 }}>
+      <span style={{ fontSize:13, flexShrink:0 }}>{icon || '✦'}</span>
+      <div style={{ flex:1, minWidth:0 }}>
+        <p style={{ fontSize:12, fontWeight:600, color, marginBottom:1 }}>{label}</p>
+        {detail && <p style={{ fontSize:12, color:'#374151', lineHeight:1.5 }}>{detail}</p>}
+        {source && (
+          <p style={{ fontSize:11, color:'#9ca3af', marginTop:2 }}>
+            {sourceUrl
+              ? <a href={sourceUrl} target="_blank" rel="noopener noreferrer" style={{ color:'#5B6DC4' }}>via {source} →</a>
+              : `via ${source}`}
+          </p>
+        )}
+      </div>
+      <div style={{ display:'flex', gap:6, flexShrink:0, alignItems:'center' }}>
+        {onAccept && (
+          <button onClick={onAccept} style={{ padding:'3px 10px', background:color, color:'white', border:'none',
+            borderRadius:6, fontSize:11, fontWeight:600, cursor:'pointer' }}>Apply</button>
+        )}
+        <button onClick={() => { setDismissed(true); if (onDismiss) onDismiss(); }}
+          style={{ background:'none', border:'none', color:'#9ca3af', cursor:'pointer', fontSize:13, padding:'2px 4px', lineHeight:1 }}>✕</button>
+      </div>
+    </div>
+  );
+};
+
 const DetailView = ({deal,onUpdate,setToast}) => {
   const inv=deal.investment||{};
   const method=getMethod(deal);
@@ -1976,6 +1773,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
   const [generatingMemo, setGeneratingMemo] = useState(false);
   const [memo, setMemo] = useState(deal.memo || '');
   const [showMemo, setShowMemo] = useState(!!deal.memo);
+  const { signals, fetching: sigFetching, lastFetched: sigLastFetched, refresh: refreshSignals } = useSignals(deal);
 
   const generateMemo = async () => {
     setGeneratingMemo(true);
@@ -2092,8 +1890,27 @@ const DetailView = ({deal,onUpdate,setToast}) => {
 
         <PrimaryInsight deal={deal} onUpdate={onUpdate} setToast={setToast}/>
 
-        {/* Signals */}
-        <SignalsSection deal={deal} onUpdate={onUpdate}/>
+        {/* AI signals — ambient, same as invested view */}
+        {(()=>{
+          const sc = loadSignalCache()[deal.id];
+          if (!sc?.summary) return null;
+          return (
+            <div style={{background:'#1e1b4b',borderRadius:14,padding:'12px 16px',marginBottom:12,display:'flex',gap:12,alignItems:'flex-start'}}>
+              <div style={{width:22,height:22,borderRadius:7,background:'#4338ca',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:1}}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+              </div>
+              <div style={{flex:1}}>
+                <p style={{fontSize:11,color:'#a5b4fc',fontWeight:600,textTransform:'uppercase',letterSpacing:.6,marginBottom:4}}>AI · Signals</p>
+                <p style={{fontSize:13,color:'#e0e7ff',lineHeight:1.5}}>{sc.summary}</p>
+                {sc.risk?.level==='alert'&&sc.risk?.signals?.length>0&&(
+                  <div style={{marginTop:6,padding:'5px 10px',background:'#7f1d1d44',borderRadius:8,border:'1px solid #ef444433'}}>
+                    <p style={{fontSize:12,color:'#fca5a5',fontWeight:500}}>⚠ {sc.risk.signals[0]?.title}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Known investors */}
         {(deal.coInvestors||[]).length>0&&<div style={C.card}>
@@ -2136,17 +1953,24 @@ const DetailView = ({deal,onUpdate,setToast}) => {
               {deal.website&&<a href={deal.website} target="_blank" rel="noopener noreferrer" style={{color:'#9ca3af'}}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>}
             </div>
             <p style={{fontSize:13,color:'#6b7280',marginBottom:6}}>{deal.stage} · {deal.industry}</p>
-            {(()=>{
-              const cached = loadSignalCache()[deal.id];
-              if (!cached) return null;
-              return (
-                <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-                  <ActivityDot status={cached.activity?.status}/>
-                  <MomentumDot trend={cached.momentum?.trend}/>
-                  <RiskDot level={cached.risk?.level}/>
-                </div>
-              );
-            })()}
+            {/* Live signal dots from useSignals hook */}
+            <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
+              {signals ? <>
+                <ActivityDot status={signals.activity?.status}/>
+                <MomentumDot trend={signals.momentum?.trend}/>
+                <RiskDot level={signals.risk?.level}/>
+              </> : sigFetching ? (
+                <span style={{fontSize:11,color:'#9ca3af',display:'flex',alignItems:'center',gap:5}}>
+                  <div style={{width:8,height:8,border:'1.5px solid #d1d5db',borderTopColor:'#5B6DC4',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}/>
+                  Scanning for signals…
+                </span>
+              ) : null}
+              {sigLastFetched && !sigFetching && (
+                <button onClick={()=>refreshSignals()} style={{marginLeft:4,fontSize:10,color:'#d1d5db',background:'none',border:'none',cursor:'pointer',padding:0}}>
+                  ↻ {dAgo(sigLastFetched)}d ago
+                </button>
+              )}
+            </div>
           </div>
           {/* Generate Memo button — top right */}
           <button onClick={generatingMemo ? undefined : generateMemo} disabled={generatingMemo}
@@ -2269,6 +2093,67 @@ const DetailView = ({deal,onUpdate,setToast}) => {
         })()}
       </div>
 
+      {/* ── AI INTELLIGENCE BAR — always present, drives ambient signals ── */}
+      <div style={{marginBottom:12}}>
+        {sigFetching && !signals && (
+          <div style={{background:'#f8f7ff',borderRadius:14,padding:'10px 16px',display:'flex',alignItems:'center',gap:10,border:'1px solid #e0e7ff'}}>
+            <div style={{width:14,height:14,border:'2px solid #c7d2fe',borderTopColor:'#5B6DC4',borderRadius:'50%',animation:'spin 0.8s linear infinite',flexShrink:0}}/>
+            <p style={{fontSize:13,color:'#6b7280'}}>Scanning web for latest signals on {deal.companyName}…</p>
+          </div>
+        )}
+        {signals?.summary && (
+          <div style={{background:'#1e1b4b',borderRadius:14,padding:'12px 16px',display:'flex',gap:12,alignItems:'flex-start'}}>
+            <div style={{width:24,height:24,borderRadius:8,background:'#4338ca',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:1}}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            </div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4}}>
+                <p style={{fontSize:11,color:'#a5b4fc',fontWeight:600,textTransform:'uppercase',letterSpacing:.6}}>
+                  AI · {sigLastFetched ? `updated ${dAgo(sigLastFetched)}d ago` : 'live signals'}
+                </p>
+                <button onClick={()=>refreshSignals()} disabled={sigFetching}
+                  style={{fontSize:11,color:'#818cf8',background:'none',border:'none',cursor:'pointer',padding:0,opacity:sigFetching?.5:1}}>
+                  {sigFetching?'…':'↻ Refresh'}
+                </button>
+              </div>
+              <p style={{fontSize:13,color:'#e0e7ff',lineHeight:1.6}}>{signals.summary}</p>
+              <div style={{display:'flex',gap:6,marginTop:8,flexWrap:'wrap'}}>
+                {signals.activity?.status && (
+                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:99,background:signals.activity.status==='active'?'#064e3b66':'#78350f66',color:signals.activity.status==='active'?'#6ee7b7':'#fcd34d',fontWeight:500}}>
+                    {signals.activity.status==='active'?'● Active':'◎ Low activity'}
+                  </span>
+                )}
+                {signals.momentum?.trend && (
+                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:99,background:'#1e3a5f66',color:'#93c5fd',fontWeight:500}}>
+                    {signals.momentum.trend==='up'?'↑ Momentum':signals.momentum.trend==='down'?'↓ Declining':'→ Stable'}
+                  </span>
+                )}
+                {signals.risk?.level && signals.risk.level !== 'none' && (
+                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:99,background:'#7f1d1d66',color:'#fca5a5',fontWeight:500}}>
+                    {signals.risk.level==='alert'?'⚠ Risk alert':'⚑ Watch'}
+                  </span>
+                )}
+                {signals.checkInRecommended && (
+                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:99,background:'#78350f66',color:'#fcd34d',fontWeight:500}}>☎ Check-in recommended</span>
+                )}
+              </div>
+              {signals.risk?.level === 'alert' && signals.risk?.signals?.length > 0 && (
+                <div style={{marginTop:8,padding:'6px 10px',background:'#7f1d1d44',borderRadius:8,border:'1px solid #ef444433'}}>
+                  <p style={{fontSize:12,color:'#fca5a5',fontWeight:500}}>⚠ {signals.risk.signals[0]?.title}{signals.risk.signals[0]?.description ? ` — ${signals.risk.signals[0].description}` : ''}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        {!sigFetching && !signals && (
+          <button onClick={()=>refreshSignals()}
+            style={{width:'100%',padding:'10px',background:'#f8f7ff',borderRadius:14,border:'1px dashed #c7d2fe',color:'#5B6DC4',fontSize:13,fontWeight:500,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',gap:6}}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            Fetch AI signals for {deal.companyName}
+          </button>
+        )}
+      </div>
+
       {/* Valuation card — first */}
       <div style={C.card}>
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
@@ -2323,6 +2208,30 @@ const DetailView = ({deal,onUpdate,setToast}) => {
           <p style={{fontSize:12,color:STALE_COL[staleness]}}>Mark from {new Date(inv.lastValuationDate).toLocaleDateString('en-US',{month:'short',year:'numeric'})}{staleness==='stale'?' — consider refreshing':staleness==='very-stale'?' — mark is outdated':''}</p>
         </div>}
 
+        {/* AI: suggest updating mark if signals show new round not yet in history */}
+        {signals?.momentum?.fundingRounds?.filter(r => {
+          const existing = new Set((deal.fundraiseHistory||[]).map(x => x.roundName?.toLowerCase()));
+          return r.roundName && !existing.has(r.roundName.toLowerCase()) && r.postMoneyVal;
+        }).map((r, i) => (
+          <AISuggestion key={i}
+            icon="💰"
+            label={`New round detected: ${r.roundName}${r.amountRaised ? ` · ${fmtC(r.amountRaised)}` : ''}`}
+            detail={r.postMoneyVal ? `Post-money: ${fmtC(r.postMoneyVal)}${r.leadInvestor ? ` · Lead: ${r.leadInvestor}` : ''} — update implied value?` : null}
+            source={r.source} sourceUrl={r.sourceUrl}
+            color="#10b981" bg="#f0fdf4"
+            onAccept={() => {
+              const own = inv.ownershipPercent || getCurrentOwnership(deal);
+              const newIV = own && r.postMoneyVal ? Math.round((own/100)*r.postMoneyVal) : null;
+              onUpdate({
+                ...deal,
+                investment: { ...inv, ...(newIV ? {impliedValue: newIV} : {}), impliedValuation: r.postMoneyVal, lastValuationDate: r.date || new Date().toISOString(), valuationMethod: 'last-round' },
+                fundraiseHistory: [...(deal.fundraiseHistory||[]), { id: genId(), roundName: r.roundName, date: r.date || new Date().toISOString(), amountRaised: r.amountRaised||null, postMoneyVal: r.postMoneyVal, leadInvestor: r.leadInvestor||null, source: r.source, sourceUrl: r.sourceUrl, fromAgent: true }].sort((a,b)=>new Date(a.date)-new Date(b.date))
+              });
+              setToast('Mark updated from signals');
+            }}
+          />
+        ))}
+
         {/* Effective cost / fee breakdown */}
         {inv.amount > 0 && inv.effectiveCost > 0 && inv.effectiveCost < inv.amount && (
           <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid #f3f4f6',display:'flex',gap:16,flexWrap:'wrap'}}>
@@ -2338,12 +2247,85 @@ const DetailView = ({deal,onUpdate,setToast}) => {
 
       <ActiveRaiseCard deal={deal} onUpdate={onUpdate} setToast={setToast}/>
 
-      <PrimaryInsight deal={deal} onUpdate={onUpdate} setToast={setToast}/>
+      {/* AI: active raise suggestion from signals */}
+      {signals?.momentum?.fundingRounds?.some(r => r.roundName && !(deal.activeRaise?.roundName)) &&
+        !signals.momentum.fundingRounds.some(r => (deal.fundraiseHistory||[]).some(h => h.roundName?.toLowerCase() === r.roundName?.toLowerCase())) && (
+        <AISuggestion
+          icon="🔔"
+          label={`${signals.momentum.fundingRounds[0].roundName} may be open — signals suggest active raise`}
+          detail={`${signals.momentum.fundingRounds[0].amountRaised ? fmtC(signals.momentum.fundingRounds[0].amountRaised) + ' target' : 'Amount unknown'} · Check if you have pro-rata rights`}
+          source={signals.momentum.fundingRounds[0].source}
+          sourceUrl={signals.momentum.fundingRounds[0].sourceUrl}
+          color="#7c3aed" bg="#f5f3ff"
+          onAccept={() => {
+            const r = signals.momentum.fundingRounds[0];
+            onUpdate({ ...deal, activeRaise: { roundName: r.roundName, targetAmount: r.amountRaised||null, leadInvestor: r.leadInvestor||'', leadStatus:'rumored', participants:'', timeline:'', dilutionPct:'20', fromAgent: true }, monitoring: {...(deal.monitoring||{}), fundraisingStatus:'raising'} });
+            setToast('Active raise logged from signals');
+          }}
+        />
+      )}
 
-      <SignalsSection deal={deal} onUpdate={onUpdate}/>
+      <PrimaryInsight deal={deal} onUpdate={onUpdate} setToast={setToast} signals={signals}/>
+
+      {/* AI: momentum signals injected as milestone suggestions */}
+      {signals?.momentum?.signals?.filter(s => {
+        const existing = new Set((deal.milestones||[]).map(m => m.title));
+        return s.title && !existing.has(s.title);
+      }).slice(0,3).map((s, i) => (
+        <AISuggestion key={i}
+          icon={s.type==='partnership'?'🤝':s.type==='product'?'🚀':s.type==='team'?'👤':'✦'}
+          label={s.title}
+          detail={s.description}
+          source={s.source} sourceUrl={s.sourceUrl}
+          color={s.type==='partnership'?'#10b981':s.type==='product'?'#f59e0b':'#5B6DC4'}
+          bg={s.type==='partnership'?'#f0fdf4':s.type==='product'?'#fffbeb':'#eef2ff'}
+          onAccept={() => {
+            const milestone = { id:genId(), type:s.type||'update', title:s.title, description:s.description||'', date:s.date?new Date(s.date).toISOString():new Date().toISOString(), source:s.source, sourceUrl:s.sourceUrl||null, fromAgent:true, sentiment:'positive' };
+            onUpdate({ ...deal, milestones: [...(deal.milestones||[]), milestone] });
+            setToast('Milestone added from signals');
+          }}
+        />
+      ))}
+
+      {/* AI: risk signals */}
+      {signals?.risk?.level !== 'none' && signals?.risk?.signals?.filter(s => {
+        const existing = new Set((deal.milestones||[]).map(m => m.title));
+        return s.title && !existing.has(s.title);
+      }).slice(0,2).map((s, i) => (
+        <AISuggestion key={i}
+          icon="⚠"
+          label={s.title}
+          detail={s.description}
+          source={s.source} sourceUrl={s.sourceUrl}
+          color="#ef4444" bg="#fef2f2"
+          onAccept={() => {
+            const milestone = { id:genId(), type:'update', title:s.title, description:s.description||'', date:new Date().toISOString(), source:s.source, fromAgent:true, sentiment:'negative' };
+            onUpdate({ ...deal, milestones: [...(deal.milestones||[]), milestone] });
+            setToast('Risk flag logged');
+          }}
+        />
+      ))}
 
       <FundraiseHistory deal={deal} onUpdate={onUpdate} setToast={setToast}/>
 
+      {/* AI: co-investor suggestions from signals — inject into co-investor record */}
+      {signals?.momentum?.signals?.filter(s =>
+        (s.type === 'funding' || s.description?.toLowerCase().includes('led by') || s.description?.toLowerCase().includes('investor')) &&
+        s.title && !(deal.coInvestors||[]).some(ci => s.title.toLowerCase().includes(ci.name?.toLowerCase()))
+      ).slice(0,2).map((s, i) => (
+        <AISuggestion key={`coinv_${i}`}
+          icon="👤"
+          label={`Investor signal: ${s.title}`}
+          detail={s.description}
+          source={s.source} sourceUrl={s.sourceUrl}
+          color="#7c3aed" bg="#f5f3ff"
+          onAccept={() => {
+            const entry = { id:genId(), name: s.title, fund: null, role:'co-investor', checkSize:null, fromAgent:true };
+            onUpdate({ ...deal, coInvestors:[...(deal.coInvestors||[]), entry] });
+            setToast('Investor added from signals');
+          }}
+        />
+      ))}
 
       <div style={{marginTop:12}}><DocumentsSection deal={deal} onUpdate={onUpdate} setToast={setToast}/></div>
     </div>
@@ -2351,6 +2333,205 @@ const DetailView = ({deal,onUpdate,setToast}) => {
 };
 
 // ── COLLAPSIBLE SECTION ───────────────────────────────────────────────────────
+// ── FEED PAGE ─────────────────────────────────────────────────────────────────
+const FeedPage = ({ deals, onUpdate, setToast, onNavigate }) => {
+  const [companyFilter, setCompanyFilter] = useState('all');
+  const signalCache = loadSignalCache();
+
+  const TYPE_CFG = {
+    funding:    { color:'#5B6DC4', label:'Funding round' },
+    partnership:{ color:'#10b981', label:'Partnership' },
+    product:    { color:'#f59e0b', label:'Product' },
+    team:       { color:'#7c3aed', label:'Team' },
+    risk:       { color:'#ef4444', label:'Risk' },
+    signal:     { color:'#5B6DC4', label:'Signal' },
+    valuation:  { color:'#7c3aed', label:'Mark updated' },
+    nav:        { color:'#7c3aed', label:'NAV updated' },
+    update:     { color:'#6b7280', label:'Milestone' },
+  };
+
+  // Auto-apply all signals on mount
+  useEffect(() => {
+    deals.forEach(deal => {
+      const signals = signalCache[deal.id];
+      if (!signals) return;
+      let updated = { ...deal };
+      let changed = false;
+      const inv = deal.investment || {};
+      const existingTitles = new Set((deal.milestones||[]).map(m => m.title));
+      const existingRounds = new Set((deal.fundraiseHistory||[]).map(r => r.roundName?.toLowerCase()));
+
+      // Auto-apply new funding rounds
+      (signals.momentum?.fundingRounds || []).forEach(r => {
+        if (!r.roundName || existingRounds.has(r.roundName.toLowerCase())) return;
+        const own = inv.ownershipPercent || getCurrentOwnership(deal);
+        const newIV = own && r.postMoneyVal ? Math.round((own/100)*r.postMoneyVal) : null;
+        updated = {
+          ...updated,
+          investment: { ...updated.investment, ...(newIV ? {impliedValue:newIV, lastValuationDate:r.date||new Date().toISOString(), valuationMethod:'last-round'} : {}), impliedValuation:r.postMoneyVal||null },
+          fundraiseHistory: [...(updated.fundraiseHistory||[]), { id:genId(), roundName:r.roundName, date:r.date||new Date().toISOString(), amountRaised:r.amountRaised||null, postMoneyVal:r.postMoneyVal||null, leadInvestor:r.leadInvestor||null, source:r.source, sourceUrl:r.sourceUrl||null, fromAgent:true }].sort((a,b)=>new Date(a.date)-new Date(b.date)),
+        };
+        changed = true;
+      });
+
+      // Auto-apply milestones
+      const newMs = [];
+      [...(signals.momentum?.signals||[]), ...(signals.activity?.signals||[])].forEach(s => {
+        if (!s.title || existingTitles.has(s.title)) return;
+        newMs.push({ id:genId(), type:s.type||'update', title:s.title, description:s.description||'', date:s.date?new Date(s.date).toISOString():new Date().toISOString(), source:s.source, sourceUrl:s.sourceUrl||null, fromAgent:true, sentiment:'positive' });
+        changed = true;
+      });
+      (signals.risk?.signals||[]).forEach(s => {
+        if (!s.title || existingTitles.has(s.title)) return;
+        newMs.push({ id:genId(), type:'update', title:s.title, description:s.description||'', date:new Date().toISOString(), source:s.source, sourceUrl:s.sourceUrl||null, fromAgent:true, sentiment:'negative' });
+        changed = true;
+      });
+      if (newMs.length) updated = { ...updated, milestones:[...(updated.milestones||[]),...newMs] };
+      if (changed) onUpdate(updated);
+    });
+  }, []);
+
+  // Build changelog
+  const allItems = [];
+  deals.forEach(deal => {
+    const inv = deal.investment || {};
+
+    // Funding rounds
+    (deal.fundraiseHistory||[]).forEach(r => {
+      if (!r.date) return;
+      const own = inv.ownershipPercent || getCurrentOwnership(deal);
+      const newIV = own && r.postMoneyVal ? Math.round((own/100)*r.postMoneyVal) : null;
+      allItems.push({
+        id: `round_${deal.id}_${r.id||r.roundName}`,
+        category: 'funding', date: new Date(r.date), deal, auto: !!r.fromAgent,
+        title: `${r.roundName}${r.amountRaised ? ` · ${fmtC(r.amountRaised)}` : ''}`,
+        detail: [r.postMoneyVal?`Post-money: ${fmtC(r.postMoneyVal)}`:null, r.leadInvestor?`Lead: ${r.leadInvestor}`:null, newIV&&inv.impliedValue===newIV?`Mark updated → ${fmtC(newIV)}`:null, r.fromAgent?'Logged to fundraise history.':null].filter(Boolean).join(' · '),
+        source: r.source, sourceUrl: r.sourceUrl,
+      });
+    });
+
+    // Milestones
+    (deal.milestones||[]).forEach(m => {
+      if (!m.date || !m.title) return;
+      allItems.push({
+        id: `ms_${deal.id}_${m.id||m.title}`,
+        category: m.sentiment==='negative'?'risk':(m.type||'update'),
+        date: new Date(m.date), deal, auto: !!m.fromAgent,
+        title: m.title,
+        detail: [m.description||null, m.fromAgent?'Logged as milestone on deal page.':null].filter(Boolean).join(' '),
+        source: m.source, sourceUrl: m.sourceUrl,
+      });
+    });
+
+    // Mark/NAV changes
+    if (inv.lastValuationDate && inv.impliedValue && inv.impliedValue !== getCB(inv)) {
+      const pct = ((inv.impliedValue - getCB(inv)) / getCB(inv) * 100).toFixed(1);
+      const moic = (inv.impliedValue / getCB(inv)).toFixed(2);
+      allItems.push({
+        id: `mark_${deal.id}_${inv.lastValuationDate}`,
+        category: deal.isFund ? 'nav' : 'valuation',
+        date: new Date(inv.lastValuationDate), deal, auto: true,
+        title: deal.isFund ? `NAV ${fmtC(getCB(inv))} → ${fmtC(inv.impliedValue)} · +${pct}%` : `Mark ${fmtC(getCB(inv))} → ${fmtC(inv.impliedValue)} · ${moic}x TVPI`,
+        detail: deal.isFund
+          ? `Members' equity ${fmtC(inv.impliedValue)} · cost ${fmtC(getCB(inv))}. Applied to fund position.`
+          : `${getMethodLabel(inv.valuationMethod||'last-round')} · Applied to portfolio.`,
+        source: null, sourceUrl: null,
+      });
+    }
+  });
+
+  // Deduplicate and sort newest first
+  const seen = new Set();
+  const items = allItems.filter(i => { if (seen.has(i.id)) return false; seen.add(i.id); return true; }).sort((a,b) => b.date - a.date);
+  const shown = items.filter(i => companyFilter === 'all' || i.deal.companyName === companyFilter);
+  const companies = ['all', ...new Set(deals.filter(d => items.some(i=>i.deal.id===d.id)).map(d=>d.companyName))];
+
+  const fmtDate = (d) => {
+    const diff = Math.floor((Date.now() - d.getTime()) / 86400000);
+    if (diff === 0) return 'Today';
+    if (diff === 1) return 'Yesterday';
+    if (diff < 7) return `${diff}d ago`;
+    return d.toLocaleDateString('en-US', {month:'short', day:'numeric', year: d.getFullYear() < new Date().getFullYear() ? 'numeric' : undefined});
+  };
+
+  return (
+    <div style={{maxWidth:640, margin:'0 auto', padding:'20px 16px'}}>
+      <div style={{marginBottom:18}}>
+        <p style={{fontSize:17, fontWeight:700, color:'#111827', marginBottom:3}}>Feed</p>
+        <p style={{fontSize:13, color:'#9ca3af'}}>Auto-updated · {deals.length} companies · milestones and marks applied as they happen</p>
+      </div>
+      {companies.length > 2 && (
+        <div style={{display:'flex', gap:6, flexWrap:'wrap', marginBottom:18}}>
+          {companies.slice(0,10).map(c => (
+            <button key={c} onClick={()=>setCompanyFilter(c)}
+              style={{padding:'3px 10px', borderRadius:99, fontSize:11, fontWeight:500, cursor:'pointer',
+                border:`1.5px solid ${companyFilter===c?'#5B6DC4':'#e5e7eb'}`,
+                background:companyFilter===c?'#eef2ff':'white',
+                color:companyFilter===c?'#5B6DC4':'#6b7280'}}>
+              {c==='all'?'All companies':c}
+            </button>
+          ))}
+        </div>
+      )}
+      {shown.length === 0 ? (
+        <div style={{textAlign:'center', padding:'60px 20px', color:'#9ca3af'}}>
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{margin:'0 auto 12px', display:'block', opacity:.3}}><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          <p style={{fontWeight:500, marginBottom:4}}>Nothing yet</p>
+          <p style={{fontSize:13}}>Open a deal page — signals fetch automatically and appear here.</p>
+        </div>
+      ) : (
+        <div>
+          {shown.map((item, idx) => {
+            const cfg = TYPE_CFG[item.category] || TYPE_CFG.update;
+            const prev = shown[idx-1];
+            const showDiv = !prev || fmtDate(item.date) !== fmtDate(prev.date);
+            return (
+              <div key={item.id}>
+                {showDiv && (
+                  <div style={{display:'flex', alignItems:'center', gap:8, margin:'18px 0 10px'}}>
+                    <div style={{flex:1, height:'1px', background:'#f3f4f6'}}/>
+                    <span style={{fontSize:11, color:'#9ca3af', fontWeight:500, letterSpacing:.4}}>{fmtDate(item.date)}</span>
+                    <div style={{flex:1, height:'1px', background:'#f3f4f6'}}/>
+                  </div>
+                )}
+                <div style={{background:'white', borderRadius:12, border:'0.5px solid #e5e7eb', padding:'13px 16px', marginBottom:6, display:'flex', alignItems:'flex-start', gap:12}}>
+                  <div onClick={()=>onNavigate(item.deal)}
+                    style={{width:34, height:34, borderRadius:item.deal.isFund?'99px':'9px', background:'#f59e0b', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, fontSize:13, color:'white', flexShrink:0, cursor:'pointer'}}>
+                    {item.deal.companyName[0]}
+                  </div>
+                  <div style={{flex:1, minWidth:0}}>
+                    <div style={{display:'flex', alignItems:'center', gap:6, marginBottom:4, flexWrap:'wrap'}}>
+                      <span onClick={()=>onNavigate(item.deal)} style={{fontSize:12, fontWeight:600, color:'#111827', cursor:'pointer'}}>{item.deal.companyName}</span>
+                      <span style={{fontSize:11, padding:'1px 7px', borderRadius:99, background:cfg.color+'18', color:cfg.color, fontWeight:500}}>{cfg.label}</span>
+                      {item.auto && (
+                        <span style={{display:'inline-flex', alignItems:'center', gap:3, padding:'1px 6px', borderRadius:99, fontSize:10, fontWeight:500, background:'#f3f4f6', color:'#9ca3af'}}>
+                          <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                          auto
+                        </span>
+                      )}
+                      <span style={{fontSize:11, color:'#9ca3af', marginLeft:'auto'}}>{fmtDate(item.date)}</span>
+                    </div>
+                    <p style={{fontSize:13, fontWeight:500, color:'#111827', marginBottom:item.detail?3:0, lineHeight:1.4}}>{item.title}</p>
+                    {item.detail && <p style={{fontSize:12, color:'#6b7280', lineHeight:1.5}}>{item.detail}</p>}
+                    {item.sourceUrl && (
+                      <a href={item.sourceUrl} target="_blank" rel="noopener noreferrer"
+                        style={{fontSize:11, color:cfg.color, display:'inline-flex', alignItems:'center', gap:3, marginTop:5, textDecoration:'none'}}>
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        {item.source||'Source'} →
+                      </a>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+
 const CollapsibleSection = ({ label, count, dotColor, textColor, defaultOpen, children }) => {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -3261,6 +3442,34 @@ export default function App() {
   const fFunds = filtered.filter(d => d.status === 'invested' && d.isFund);
   const fWatching = filtered.filter(d => d.status === 'watching');
 
+  if (page === 'feed') return (
+    <div style={{minHeight:'100vh',background:'#f9fafb',fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif'}}>
+      <div style={{background:'white',borderBottom:'1px solid #e5e7eb',position:'sticky',top:0,zIndex:10}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 32px'}}>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <div style={{width:34,height:34,borderRadius:10,background:'#4A1942',display:'flex',alignItems:'center',justifyContent:'center'}}>
+              <svg width="18" height="18" viewBox="0 0 38 38" fill="none"><circle cx="19" cy="19" r="4.5" fill="#F5DFA0"/><line x1="19" y1="3" x2="19" y2="10" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/><line x1="19" y1="28" x2="19" y2="35" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/><line x1="3" y1="19" x2="10" y2="19" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/><line x1="28" y1="19" x2="35" y2="19" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/></svg>
+            </div>
+            <span style={{fontWeight:800,fontSize:16,color:'#111827',letterSpacing:'-0.3px'}}>Lucero</span>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:4,background:'#f3f4f6',borderRadius:10,padding:'4px'}}>
+            <button onClick={()=>setPage('list')}
+              style={{padding:'6px 14px',borderRadius:7,border:'none',cursor:'pointer',fontSize:13,fontWeight:600,background:'transparent',color:'#6b7280'}}>
+              Portfolio
+            </button>
+            <button onClick={()=>setPage('feed')}
+              style={{padding:'6px 14px',borderRadius:7,border:'none',cursor:'pointer',fontSize:13,fontWeight:600,background:'white',color:'#111827',boxShadow:'0 1px 3px rgba(0,0,0,.08)'}}>
+              Feed
+            </button>
+          </div>
+          <UserMenu user={user} onLogout={signOut}/>
+        </div>
+      </div>
+      <FeedPage deals={deals} onUpdate={updateDeal} setToast={setToast} onNavigate={(deal)=>{ setSelected(deal); setPage('detail'); }}/>
+      {toast && <Toast msg={typeof toast === 'string' ? toast : toast.message} onClose={() => setToast(null)}/>}
+    </div>
+  );
+
   if (page === 'detail' && selected) return (
     <div style={{minHeight:'100vh',background:'#f9fafb',fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif'}}>
       <div style={{background:'white',borderBottom:'1px solid #e5e7eb',position:'sticky',top:0,zIndex:10}}>
@@ -3300,6 +3509,16 @@ export default function App() {
               </svg>
             </div>
             <span style={{fontWeight:800,fontSize:16,color:'#111827',letterSpacing:'-0.3px'}}>Lucero</span>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:4,background:'#f3f4f6',borderRadius:10,padding:'4px'}}>
+            <button onClick={()=>setPage('list')}
+              style={{padding:'6px 14px',borderRadius:7,border:'none',cursor:'pointer',fontSize:13,fontWeight:600,background:'white',color:'#111827',boxShadow:'0 1px 3px rgba(0,0,0,.08)'}}>
+              Portfolio
+            </button>
+            <button onClick={()=>setPage('feed')}
+              style={{padding:'6px 14px',borderRadius:7,border:'none',cursor:'pointer',fontSize:13,fontWeight:600,background:'transparent',color:'#6b7280'}}>
+              Feed
+            </button>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:10}}>
             {selectMode ? (
