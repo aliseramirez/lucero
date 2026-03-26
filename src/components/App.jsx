@@ -1623,19 +1623,30 @@ const PrimaryInsight = ({ deal, onUpdate, setToast }) => {
                           existingData: { revenueLog: deal.revenueLog, fundraiseHistory: deal.fundraiseHistory },
                         }),
                       });
-                      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                      if (!resp.ok) {
+                        const errBody = await resp.json().catch(() => ({}));
+                        throw new Error(errBody.error || `HTTP ${resp.status}`);
+                      }
                       const result = await resp.json();
+                      if (result.error) throw new Error(result.error);
                       const initial = {};
+                      if (result.navUpdate?.nav) initial['nav_update'] = true;
                       (result.revenuePoints||[]).forEach((_,i) => initial[`rev_${i}`] = true);
                       (result.fundingSignals||[]).forEach((_,i) => initial[`fund_${i}`] = true);
                       (result.risks||[]).forEach((_,i) => initial[`risk_${i}`] = true);
                       (result.positives||[]).forEach((_,i) => initial[`pos_${i}`] = true);
                       (result.teamChanges||[]).forEach((_,i) => initial[`team_${i}`] = true);
+                      const hasAnything = result.navUpdate?.nav || (result.revenuePoints||[]).length || (result.fundingSignals||[]).length || (result.positives||[]).length || (result.risks||[]).length;
+                      if (!hasAnything) {
+                        setToast('PDF parsed but no data found — try pasting the text');
+                        setExtracting(false);
+                        return;
+                      }
                       setExtracted({ ...result, rawContent: `[PDF: ${file.name}]` });
                       setApproved(initial);
                     } catch (err) {
                       console.error('PDF extract error:', err);
-                      setToast('PDF extraction failed — try pasting the text instead');
+                      setToast(`PDF failed: ${err.message}`);
                       setExtracting(false);
                     } finally {
                       setExtracting(false);
@@ -2366,7 +2377,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
               ? <p style={{...C.val,color:'#9ca3af'}}>—</p>
               : <p style={{...C.val,color:iv>=cb?'#10b981':'#ef4444'}}>{fmtC(iv)}</p>}
           </div>
-          <div><p style={C.label}>MOIC</p>
+          <div><p style={C.label}>TVPI</p>
             {method==='mark-at-cost'
               ? <p style={{...C.val,color:'#9ca3af'}}>1.0x</p>
               : moic ? <p style={{...C.val,color:moic>=1.5?'#10b981':moic>=1?'#5B6DC4':'#ef4444'}}>{moic.toFixed(2)}x</p>
@@ -2384,7 +2395,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
             <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:3}}>Proj. value</p>
               <p style={{fontSize:14,fontWeight:700,color:projected.projectedIV&&projected.projectedIV>=cb?'#7c3aed':'#ef4444'}}>{projected.projectedIV?fmtC(projected.projectedIV):'—'}</p>
             </div>
-            <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:3}}>Proj. MOIC</p>
+            <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:3}}>Proj. TVPI</p>
               <p style={{fontSize:14,fontWeight:700,color:projected.projectedMOIC>=1.5?'#7c3aed':projected.projectedMOIC>=1?'#5B6DC4':'#ef4444'}}>{projected.projectedMOIC?`${projected.projectedMOIC.toFixed(2)}x`:'—'}</p>
             </div>
             <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:3}}>Proj. ownership</p>
@@ -2397,7 +2408,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
         </div>}
 
         {method==='mark-at-cost'&&<div style={{marginTop:10,paddingTop:10,borderTop:'1px solid #f3f4f6'}}>
-          <p style={{fontSize:12,color:'#9ca3af',fontStyle:'italic',marginBottom:8}}>{health.mat==='lab'?'Lab/bench stage — marked at cost. MOIC not meaningful pre-demonstration.':'Pilot stage — marked at cost until next priced round.'}</p>
+          <p style={{fontSize:12,color:'#9ca3af',fontStyle:'italic',marginBottom:8}}>{health.mat==='lab'?'Lab/bench stage — marked at cost. TVPI not meaningful pre-demonstration.':'Pilot stage — marked at cost until next priced round. TVPI = 1.0x.'}</p>
           {inv.vehicle==='SAFE'&&deal.terms?.cap&&(()=>{const pct=deal.terms.cap>0?((cb/(deal.terms.cap+cb))*100):null;return <div style={{background:'#f9fafb',borderRadius:12,padding:'10px 14px'}}><p style={{fontSize:13,color:'#374151'}}>At your <strong>{fmtC(deal.terms.cap)}</strong> cap, you own approx <strong style={{color:'#5B6DC4'}}>~{pct?.toFixed(2)}%</strong> on conversion.{deal.terms.mfn&&<span style={{color:'#6b7280'}}> · MFN</span>}</p><p style={{fontSize:11,color:'#9ca3af',marginTop:4}}>Pre-dilution from option pool.</p></div>;})()}
         </div>}
         {method!=='mark-at-cost'&&inv.lastValuationDate&&<div style={{display:'flex',alignItems:'center',gap:6,marginTop:10}}>
@@ -3408,11 +3419,11 @@ export default function App() {
                 return v > 0 ? `+${abs}` : `−${abs}`;
               };
               const stats = [
-                { l: 'Deployed', v: fmtC(totalDep), sub: 'total cost basis', c: '#111827' },
-                { l: 'Live Value', v: fmtC(totalUnrealizedImp), sub: 'unrealized marks', c: '#111827' },
-                { l: 'Net P&L', v: fmtPnL(netPnL), sub: `${totalProceeds > 0 ? fmtC(totalProceeds) + ' returned · ' : ''}${totalWritedowns > 0 ? fmtC(totalWritedowns) + ' lost' : 'no exits yet'}`, c: statC(netPnL) },
-                { l: 'MOIC', v: moic ? `${moic.toFixed(2)}x` : '—', sub: 'blended', c: moic >= 1.5 ? '#10b981' : moic >= 1 ? '#5B6DC4' : '#9ca3af' },
-                { l: 'DPI', v: dpi > 0 ? `${dpi.toFixed(2)}x` : '0.00x', sub: 'distributed/paid-in', c: dpi >= 1 ? '#10b981' : dpi > 0 ? '#5B6DC4' : '#9ca3af' },
+                { l: 'Paid-In', v: fmtC(totalDep), sub: 'total deployed', c: '#111827' },
+                { l: 'RVPI', v: fmtC(totalUnrealizedImp), sub: 'residual value / paid-in', c: '#111827' },
+                { l: 'Unrealized G/L', v: fmtPnL(netPnL), sub: `${totalProceeds > 0 ? fmtC(totalProceeds) + ' returned · ' : ''}${totalWritedowns > 0 ? fmtC(totalWritedowns) + ' written down' : 'no exits yet'}`, c: statC(netPnL) },
+                { l: 'TVPI', v: moic ? `${moic.toFixed(2)}x` : '—', sub: 'total value / paid-in', c: moic >= 1.5 ? '#10b981' : moic >= 1 ? '#5B6DC4' : '#9ca3af' },
+                { l: 'DPI', v: dpi > 0 ? `${dpi.toFixed(2)}x` : '0.00x', sub: 'distributed / paid-in', c: dpi >= 1 ? '#10b981' : dpi > 0 ? '#5B6DC4' : '#9ca3af' },
                 { l: 'NAV', v: fmtC(totalProceeds + totalUnrealizedImp), sub: 'proceeds + live marks', c: totalProceeds + totalUnrealizedImp >= totalDep ? '#10b981' : '#5B6DC4' },
               ];
               return (
