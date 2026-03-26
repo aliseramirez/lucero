@@ -7,10 +7,10 @@ const fmtC = (n) => n >= 1e6 ? `$${(n/1e6).toFixed(1)}M` : n >= 1000 ? `$${(n/10
 const dAgo = (d) => Math.floor((Date.now() - new Date(d)) / 86400000);
 const dUntil = (d) => Math.ceil((new Date(d) - Date.now()) / 86400000);
 const genId = () => Math.random().toString(36).substr(2,9);
-const getCB = (inv={}) => (inv.costBasis > 0 ? inv.costBasis : inv.amount) || 0;
+const getCB = (inv={}) => inv.effectiveCost > 0 ? inv.effectiveCost : (inv.costBasis > 0 ? inv.costBasis : inv.amount) || 0;
 
 // ── VALUATION ENGINE ─────────────────────────────────────────────────────────
-const STAGE_MAT = { 'pre-seed':'lab','seed':'pilot','series-a':'scale','series-b':'scale','series-c':'deploy','series-e':'deploy','growth':'deploy','lp-fund':'fund' };
+const STAGE_MAT = { 'pre-seed':'lab','seed':'pilot','bridge':'pilot','series-a':'scale','series-b':'scale','series-c':'deploy','series-e':'deploy','growth':'deploy','lp-fund':'fund' };
 const METRIC_DEFAULTS = {
   lab:   ['TRL level (1–9)', 'Grant / non-dilutive funding ($)', 'Key technical milestone hit'],
   pilot: ['Pilot throughput vs spec (%)', 'Cost per unit vs target ($)', 'LOIs or pilot customers signed'],
@@ -263,105 +263,7 @@ const CompanyLogo = ({name, website, size=44, radius=12, fallbackBg='#f3f4f6', f
   );
 };
 
-const MetricsTracker = ({deal, onUpdate}) => {
-  const metrics = deal.metricsToWatch || [];
-  const log = deal.metricsLog || {};
-  const [active, setActive] = useState(null);
-  const [inputVal, setInputVal] = useState('');
-  const [inputDate, setInputDate] = useState(new Date().toISOString().slice(0,10));
-  const [showReadings, setShowReadings] = useState(null);
-
-  const logEntry = (key) => {
-    if (!inputVal || isNaN(Number(inputVal))) return;
-    const entry = { v: Number(inputVal), date: new Date(inputDate).toISOString() };
-    onUpdate({ ...deal, metricsLog: { ...log, [key]: [...(log[key]||[]), entry].sort((a,b)=>new Date(a.date)-new Date(b.date)) }});
-    setActive(null); setInputVal(''); setInputDate(new Date().toISOString().slice(0,10));
-  };
-
-  const deleteReading = (key, idx) => {
-    const updated = [...(log[key]||[])]; updated.splice(idx,1);
-    onUpdate({...deal, metricsLog:{...log,[key]:updated}});
-  };
-
-  const MiniLine = ({ readings, color='#5B6DC4' }) => {
-    if (!readings || readings.length < 2) return <span style={{fontSize:11,color:'#d1d5db'}}>no readings yet</span>;
-    const W=80, H=28, P=3;
-    const vals = readings.map(r=>r.v);
-    const mn=Math.min(...vals), mx=Math.max(...vals), rng=mx-mn||1;
-    const pts = readings.map((r,i)=>[P+(i/(readings.length-1))*(W-P*2), P+((mx-r.v)/rng)*(H-P*2)]);
-    const poly = pts.map(([x,y])=>`${x},${y}`).join(' ');
-    const latest = readings[readings.length-1];
-    const prev = readings[readings.length-2];
-    const dir = latest.v > prev.v ? '↑' : latest.v < prev.v ? '↓' : '→';
-    const dirColor = latest.v > prev.v ? '#10b981' : latest.v < prev.v ? '#ef4444' : '#9ca3af';
-    return (
-      <div style={{display:'flex',alignItems:'center',gap:10}}>
-        <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
-          <polyline points={poly} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/>
-          <circle cx={pts[pts.length-1][0]} cy={pts[pts.length-1][1]} r="2.5" fill={color}/>
-        </svg>
-        <div style={{display:'flex',alignItems:'baseline',gap:4}}>
-          <span style={{fontSize:13,fontWeight:700,color:'#111827'}}>{latest.v.toLocaleString()}</span>
-          <span style={{fontSize:13,fontWeight:600,color:dirColor}}>{dir}</span>
-        </div>
-      </div>
-    );
-  };
-
-  if (!metrics.length) return null;
-
-  return (
-    <div style={{background:'white',borderRadius:16,padding:20,marginBottom:12}}>
-      <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:14}}>
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        <span style={{fontSize:14,fontWeight:600,color:'#111827'}}>Traction Metrics</span>
-        <span style={{fontSize:11,color:'#9ca3af'}}>{metrics.length} tracked</span>
-      </div>
-      <div style={{display:'flex',flexDirection:'column',gap:0}}>
-        {metrics.map((metric, i) => {
-          const readings = log[metric] || [];
-          const isLogging = active === metric;
-          return (
-            <div key={metric} style={{paddingTop:i===0?0:12,marginTop:i===0?0:12,borderTop:i===0?'none':'1px solid #f9fafb'}}>
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
-                <span style={{fontSize:13,color:'#374151',fontWeight:500,flex:1,minWidth:0,marginRight:12}}>{metric}</span>
-                {!isLogging&&<button onClick={()=>{setActive(metric);setInputVal('');}} style={{fontSize:12,color:'#5B6DC4',background:'none',border:'none',cursor:'pointer',padding:0,flexShrink:0}}>+ Log</button>}
-              </div>
-              {isLogging?(
-                <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
-                  <input type="number" value={inputVal} onChange={e=>setInputVal(e.target.value)} placeholder="Value" autoFocus style={{width:90,padding:'6px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none'}}/>
-                  <input type="date" value={inputDate} onChange={e=>setInputDate(e.target.value)} style={{padding:'6px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none'}}/>
-                  <button onClick={()=>logEntry(metric)} disabled={!inputVal||isNaN(Number(inputVal))} style={{padding:'6px 14px',background:'#5B6DC4',color:'white',border:'none',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',opacity:inputVal?1:.5}}>Save</button>
-                  <button onClick={()=>setActive(null)} style={{padding:'6px 10px',background:'none',border:'none',color:'#9ca3af',fontSize:13,cursor:'pointer'}}>Cancel</button>
-                </div>
-              ):readings.length===0?(
-                <p style={{fontSize:12,color:'#d1d5db',fontStyle:'italic'}}>No readings yet</p>
-              ):(
-                <div>
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                    <MiniLine readings={readings} color={['#5B6DC4','#f59e0b','#7c3aed'][i%3]}/>
-                    <div style={{display:'flex',alignItems:'center',gap:8}}>
-                      <span style={{fontSize:11,color:'#9ca3af'}}>{readings.length} reading{readings.length!==1?'s':''}</span>
-                      <button onClick={()=>setShowReadings(showReadings===metric?null:metric)} style={{fontSize:11,color:'#9ca3af',background:'none',border:'none',cursor:'pointer',padding:0}}>{showReadings===metric?'▲':'▼'}</button>
-                    </div>
-                  </div>
-                  {showReadings===metric&&<div style={{marginTop:8,display:'flex',flexDirection:'column',gap:4}}>
-                    {readings.map((r,ri)=>(
-                      <div key={ri} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 8px',background:'#f9fafb',borderRadius:8}}>
-                        <span style={{fontSize:12,color:'#374151',flex:1}}>{r.v.toLocaleString()} · {new Date(r.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</span>
-                        <button onClick={()=>deleteReading(metric,ri)} style={{color:'#d1d5db',background:'none',border:'none',cursor:'pointer',padding:2,fontSize:11}}>✕</button>
-                      </div>
-                    ))}
-                  </div>}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
+const MetricsTracker = () => null;
 
 // ── SECTIONS ─────────────────────────────────────────────────────────────────
 const DOC_TYPES = ['SAFE','Term Sheet','Cap Table','Pitch Deck','Due Diligence','Financial Model','Legal','Other'];
@@ -877,11 +779,12 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
     events.sort((a, b) => a.date - b.date);
     if (!events.length) return [];
 
-    // Build cumulative value over time
+    // Build cumulative value over time — each point is cost basis deployed
     const points = [];
     let deployed = 0;
     events.forEach(e => {
       deployed += e.cb;
+      // Add a point just before this investment at the old value (for step effect)
       points.push({ date: e.date, value: deployed, type: 'invest', label: e.deal.companyName });
     });
     // Add current total value at today
@@ -893,6 +796,8 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
   // ── Build event markers ──────────────────────────────────────────────────────
   const buildMarkers = (d) => {
     const markers = [];
+
+    // Funding rounds — always show, highest value signal
     (d.fundraiseHistory || []).forEach(r => {
       if (r.date) markers.push({
         date: new Date(r.date), type: 'round',
@@ -900,30 +805,47 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
         sub: [r.amountRaised ? fmtC(r.amountRaised) : null, r.leadInvestor || null].filter(Boolean).join(' · ') || null,
       });
     });
-    (d.founderUpdates || []).slice(0, 6).forEach(u => {
-      if (u.date) markers.push({
-        date: new Date(u.date), type: 'update',
-        label: u.keyTakeaway ? u.keyTakeaway.substring(0, 50) : 'Founder update',
-        sub: null,
-      });
+
+    // Active raise signal
+    if (d.activeRaise?.openedAt) markers.push({
+      date: new Date(d.activeRaise.openedAt), type: 'round',
+      label: `${d.activeRaise.roundName || 'Round'} opened`,
+      sub: d.activeRaise.targetAmount ? fmtC(d.activeRaise.targetAmount) : null,
     });
-    (d.milestones || []).filter(m => m.fromPrimary || m.fromAgent).slice(0, 6).forEach(m => {
-      if (m.date) markers.push({
+
+    // Milestones — only value-impacting types: fundraising, partnership, product, exit signals
+    // Skip generic 'update' type unless tagged fromPrimary with explicit positive/negative sentiment
+    const VALUE_TYPES = ['fundraising', 'partnership', 'product', 'revenue', 'team', 'regulatory'];
+    (d.milestones || []).forEach(m => {
+      if (!m.date) return;
+      const isValueType = VALUE_TYPES.includes(m.type);
+      const isSignificantUpdate = m.type === 'update' && (m.sentiment === 'positive' || m.sentiment === 'negative') && m.fromPrimary;
+      if (!isValueType && !isSignificantUpdate) return;
+      markers.push({
         date: new Date(m.date),
         type: m.sentiment === 'negative' ? 'risk' : 'signal',
         label: m.title?.substring(0, 50) || '',
-        sub: m.description ? m.description.substring(0, 40) : null,
+        sub: m.description ? m.description.substring(0, 45) : null,
       });
     });
-    // Also include external signal fetch dates
-    try {
-      const cache = loadSignalCache()[d.id];
-      if (cache?.fetchedAt) markers.push({
-        date: new Date(cache.fetchedAt), type: 'signal',
-        label: 'External signals fetched',
-        sub: cache.activity?.status ? `Activity: ${cache.activity.status}` : null,
+
+    // Founder updates — only include if they have a substantive keyTakeaway
+    // and are NOT just routine check-ins (filter out short/generic ones)
+    (d.founderUpdates || []).slice(0, 10).forEach(u => {
+      if (!u.date) return;
+      const takeaway = u.keyTakeaway || '';
+      // Skip if no takeaway or looks like a generic check-in
+      if (takeaway.length < 20) return;
+      // Skip if sentiment is neutral/unknown — only show positive/negative signals
+      if (u.sentiment === 'neutral' || !u.sentiment) return;
+      markers.push({
+        date: new Date(u.date),
+        type: u.sentiment === 'negative' ? 'risk' : 'update',
+        label: takeaway.substring(0, 50),
+        sub: null,
       });
-    } catch {}
+    });
+
     return markers.sort((a, b) => a.date - b.date);
   };
 
@@ -997,13 +919,18 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
   // Y axis labels
   const yTicks = [minVal + valRange*0.1, minVal + valRange*0.5, minVal + valRange*0.9];
 
-  // Current value + change
+  // Current value + change — use cost basis as denominator to avoid division by near-zero
   const startVal = filtered[0].value;
   const endVal = filtered[filtered.length - 1].value;
   const change = endVal - startVal;
-  const changePct = startVal > 0 ? ((change / startVal) * 100).toFixed(1) : 0;
+  // For % change: use the full cost basis so it reflects actual ROI, not just the window
+  const pctBase = mode === 'portfolio'
+    ? (allDeals || []).reduce((s, d) => s + getCB(d.investment || {}), 0)
+    : getCB((deal?.investment || {}));
+  const changePct = pctBase > 0 ? ((change / pctBase) * 100).toFixed(1) : 0;
   const isUp = change >= 0;
 
+  // Current value + change
   const MARKER_ICONS = {
     round: '💰', update: '✉', signal: '✦', risk: '⚠', invest: '●',
   };
@@ -1125,7 +1052,7 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
           {['round','invest','update','signal','risk'].filter(t => filteredMarkers.some(m=>m.type===t)).map(t => (
             <span key={t} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#6b7280' }}>
               <span style={{ width: 8, height: 8, borderRadius: 99, background: MARKER_COLORS[t], display: 'inline-block' }}/>
-              {t === 'round' ? 'Fund / round' : t === 'invest' ? 'Investment' : t === 'update' ? 'Founder update' : t === 'signal' ? 'Signal' : 'Risk'}
+              {t === 'round' ? 'Funding round' : t === 'invest' ? 'Investment' : t === 'update' ? 'Key update' : t === 'signal' ? 'Milestone' : 'Risk flag'}
             </span>
           ))}
         </div>
@@ -1448,6 +1375,7 @@ const PrimaryInsight = ({ deal, onUpdate, setToast }) => {
       const result = await resp.json();
       // Pre-approve all findings
       const initial = {};
+      if (result.navUpdate?.nav) initial['nav_update'] = true;
       (result.revenuePoints||[]).forEach((_,i) => initial[`rev_${i}`] = true);
       (result.fundingSignals||[]).forEach((_,i) => initial[`fund_${i}`] = true);
       (result.risks||[]).forEach((_,i) => initial[`risk_${i}`] = true);
@@ -1535,6 +1463,20 @@ const PrimaryInsight = ({ deal, onUpdate, setToast }) => {
     });
     if (newMilestones.length) updated.milestones = [...(updated.milestones||[]), ...newMilestones];
 
+    // Apply NAV update for SPV/fund financial statements (Carta, AngelList, etc.)
+    if (extracted.navUpdate?.nav && approved['nav_update'] !== false) {
+      const navDate = extracted.navUpdate.date
+        ? new Date(extracted.navUpdate.date).toISOString()
+        : now;
+      updated.investment = {
+        ...(updated.investment||{}),
+        impliedValue: extracted.navUpdate.nav,
+        lastValuationDate: navDate,
+        valuationMethod: 'nav-lp',
+        ...(extracted.navUpdate.costBasis ? { costBasis: extracted.navUpdate.costBasis } : {}),
+      };
+    }
+
     onUpdate(updated);
     setExtracted(null);
     setApproved({});
@@ -1574,13 +1516,71 @@ const PrimaryInsight = ({ deal, onUpdate, setToast }) => {
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
               Upload file
             </button>
-            <input ref={fileRef} type="file" accept=".txt,.pdf,.md,.eml" style={{ display: 'none' }}
+            <input ref={fileRef} type="file" accept=".txt,.pdf,.md,.eml,.doc,.docx" style={{ display: 'none' }}
               onChange={e => {
                 const file = e.target.files[0];
                 if (!file) return;
                 const reader = new FileReader();
-                reader.onload = ev => extract(ev.target.result);
-                reader.readAsText(file);
+                reader.onload = async ev => {
+                  if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+                    // Convert ArrayBuffer to base64 in chunks to avoid call stack overflow on large files
+                    const bytes = new Uint8Array(ev.target.result);
+                    let binary = '';
+                    const chunkSize = 8192;
+                    for (let i = 0; i < bytes.length; i += chunkSize) {
+                      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+                    }
+                    const base64 = btoa(binary);
+                    setExtracting(true);
+                    setInputMode(null);
+                    try {
+                      const resp = await fetch('/api/extract', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          content: null,
+                          pdfBase64: base64,
+                          dealName: deal.companyName,
+                          existingData: { revenueLog: deal.revenueLog, fundraiseHistory: deal.fundraiseHistory },
+                        }),
+                      });
+                      if (!resp.ok) {
+                        const errBody = await resp.json().catch(() => ({}));
+                        throw new Error(errBody.error || `HTTP ${resp.status}`);
+                      }
+                      const result = await resp.json();
+                      if (result.error) throw new Error(result.error);
+                      const initial = {};
+                      if (result.navUpdate?.nav) initial['nav_update'] = true;
+                      (result.revenuePoints||[]).forEach((_,i) => initial[`rev_${i}`] = true);
+                      (result.fundingSignals||[]).forEach((_,i) => initial[`fund_${i}`] = true);
+                      (result.risks||[]).forEach((_,i) => initial[`risk_${i}`] = true);
+                      (result.positives||[]).forEach((_,i) => initial[`pos_${i}`] = true);
+                      (result.teamChanges||[]).forEach((_,i) => initial[`team_${i}`] = true);
+                      const hasAnything = result.navUpdate?.nav || (result.revenuePoints||[]).length || (result.fundingSignals||[]).length || (result.positives||[]).length || (result.risks||[]).length;
+                      if (!hasAnything) {
+                        setToast('PDF parsed but no data found — try pasting the text');
+                        setExtracting(false);
+                        return;
+                      }
+                      setExtracted({ ...result, rawContent: `[PDF: ${file.name}]` });
+                      setApproved(initial);
+                    } catch (err) {
+                      console.error('PDF extract error:', err);
+                      setToast(`PDF failed: ${err.message}`);
+                      setExtracting(false);
+                    } finally {
+                      setExtracting(false);
+                    }
+                  } else {
+                    extract(ev.target.result);
+                  }
+                };
+                if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+                  reader.readAsArrayBuffer(file);
+                } else {
+                  reader.readAsText(file);
+                }
                 e.target.value = '';
               }}/>
           </div>
@@ -1658,6 +1658,12 @@ const PrimaryInsight = ({ deal, onUpdate, setToast }) => {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
                 <p style={{ fontSize: 10, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: .5, marginBottom: 2 }}>Confirm what to save</p>
                 {[
+                  ...(extracted.navUpdate?.nav ? [{
+                    key: 'nav_update', icon: '🏦', label: 'NAV update → Fund position',
+                    title: `${fmtC(extracted.navUpdate.nav)} members' equity`,
+                    sub: `as of ${extracted.navUpdate.date || 'Dec 2025'}${extracted.navUpdate.totalFees ? ` · ${fmtC(extracted.navUpdate.totalFees)} in fees` : ''}`,
+                    color: '#7c3aed', bg: '#f5f3ff',
+                  }] : []),
                   ...(extracted.revenuePoints||[]).map((r,i) => ({
                     key: `rev_${i}`, icon: '📈', label: 'Revenue data point',
                     title: r.value, sub: `${r.metric} · ${r.date} · ${r.confidence} confidence`,
@@ -1847,6 +1853,118 @@ const LiquiditySection = ({deal,onUpdate,setToast}) => {
 };
 
 // ── DETAIL VIEW ───────────────────────────────────────────────────────────────
+const CoInvestorsCollapsed = ({ coInvs }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{marginTop:12,paddingTop:12,borderTop:'1px solid #f3f4f6'}}>
+      <button onClick={()=>setOpen(v=>!v)} style={{display:'flex',alignItems:'center',gap:8,background:'none',border:'none',cursor:'pointer',padding:0,width:'100%'}}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span style={{fontSize:12,color:'#9ca3af',fontWeight:500}}>Co-investors on this round{coInvs.length>0?` (${coInvs.length})`:''}</span>
+        <span style={{fontSize:10,color:'#d1d5db',marginLeft:'auto'}}>{open?'▲':'▼'}</span>
+      </button>
+      {open&&<div style={{marginTop:10}}>
+        {coInvs.length===0&&<p style={{fontSize:12,color:'#d1d5db',fontStyle:'italic'}}>None logged yet</p>}
+        <div style={{display:'flex',flexWrap:'wrap',gap:8,marginTop:coInvs.length?8:0}}>
+          {coInvs.map(ci=>{
+            const rc=ROLE_CFG[ci.role]||ROLE_CFG['co-investor'];
+            return <div key={ci.id} style={{display:'flex',alignItems:'center',gap:6,padding:'4px 10px',borderRadius:99,background:rc.c+'12',border:`1px solid ${rc.c}30`}}>
+              <span style={{width:20,height:20,borderRadius:99,background:rc.c+'25',color:rc.c,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:10,flexShrink:0}}>{ci.name[0].toUpperCase()}</span>
+              <span style={{fontSize:12,fontWeight:500,color:'#374151'}}>{ci.name}</span>
+              {ci.fund&&ci.fund!==ci.name&&<span style={{fontSize:11,color:'#9ca3af'}}>· {ci.fund}</span>}
+              <Pill color={rc.c} bg={rc.c+'15'}>{rc.l}</Pill>
+            </div>;
+          })}
+        </div>
+      </div>}
+    </div>
+  );
+};
+
+// ── FUND QUICK NAV ────────────────────────────────────────────────────────────
+const FundQuickNAV = ({ deal, nav, onUpdate }) => {
+  const [open, setOpen] = useState(false);
+  const [val, setVal] = useState('');
+  const save = (e) => {
+    e.stopPropagation();
+    if (!val || isNaN(Number(val))) return;
+    onUpdate({ ...deal, investment: { ...(deal.investment||{}), impliedValue: Number(val), lastValuationDate: new Date().toISOString(), valuationMethod: 'nav-lp' }});
+    setOpen(false); setVal('');
+  };
+  if (!open) return (
+    <button onClick={e=>{e.stopPropagation();setOpen(true);}}
+      style={{width:'100%',padding:'7px 16px',background:'none',border:'none',borderTop:'1px solid #f3f4f6',color:'#7c3aed',fontSize:12,fontWeight:500,cursor:'pointer',textAlign:'left'}}>
+      + Update NAV
+    </button>
+  );
+  return (
+    <div onClick={e=>e.stopPropagation()} style={{borderTop:'1px solid #f3f4f6',padding:'10px 16px',display:'flex',gap:8,alignItems:'center',background:'#faf5ff'}}>
+      <span style={{fontSize:12,color:'#7c3aed',fontWeight:500,flexShrink:0}}>New NAV</span>
+      <input type="number" value={val} onChange={e=>setVal(e.target.value)} placeholder={String(nav)} autoFocus
+        style={{flex:1,padding:'6px 10px',border:'1px solid #c4b5fd',borderRadius:8,fontSize:13,outline:'none'}}/>
+      <button onClick={save} style={{padding:'6px 14px',background:'#7c3aed',color:'white',border:'none',borderRadius:8,fontSize:12,fontWeight:600,cursor:'pointer'}}>Save</button>
+      <button onClick={e=>{e.stopPropagation();setOpen(false);}} style={{padding:'6px 10px',background:'none',border:'none',color:'#9ca3af',fontSize:12,cursor:'pointer'}}>Cancel</button>
+    </div>
+  );
+};
+
+// ── FUND NAV CARD ─────────────────────────────────────────────────────────────
+const FundNAVCard = ({ deal, inv, onUpdate, setToast }) => {
+  const [navInput, setNavInput] = useState('');
+  const [navDate, setNavDate] = useState(new Date().toISOString().slice(0,10));
+  const [editing, setEditing] = useState(false);
+  const currentNAV = inv.impliedValue || getCB(inv);
+  const committed = getCB(inv);
+  const lastUpdate = inv.lastValuationDate;
+  const change = currentNAV - committed;
+  const changePct = committed > 0 ? ((change/committed)*100).toFixed(1) : 0;
+  const save = () => {
+    if (!navInput || isNaN(Number(navInput))) return;
+    onUpdate({ ...deal, investment: { ...inv, impliedValue: Number(navInput), lastValuationDate: new Date(navDate).toISOString(), valuationMethod: 'nav-lp' }});
+    setEditing(false); setNavInput(''); setToast('NAV updated');
+  };
+  return (
+    <div style={{background:'#f5f3ff',border:'1px solid #e9d5ff',borderRadius:16,padding:'14px 18px',marginBottom:12}}>
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:editing?12:0}}>
+        <div>
+          <p style={{fontSize:10,color:'#7c3aed',textTransform:'uppercase',letterSpacing:.6,marginBottom:3,fontWeight:600}}>Fund LP · Net Asset Value</p>
+          <div style={{display:'flex',alignItems:'baseline',gap:10}}>
+            <p style={{fontSize:22,fontWeight:700,color:'#111827'}}>{fmtC(currentNAV)}</p>
+            {lastUpdate && <p style={{fontSize:12,color:'#9ca3af'}}>as of {new Date(lastUpdate).toLocaleDateString('en-US',{month:'short',year:'numeric'})}</p>}
+          </div>
+          <p style={{fontSize:12,color:'#6b7280',marginTop:2}}>
+            Committed: {fmtC(committed)} · <span style={{color:change>=0?'#10b981':'#ef4444',fontWeight:500}}>{change>=0?'+':''}{fmtC(change)} ({changePct}%)</span>
+          </p>
+        </div>
+        <button onClick={()=>setEditing(v=>!v)}
+          style={{padding:'7px 14px',background:'white',border:'1px solid #e9d5ff',borderRadius:10,fontSize:12,fontWeight:600,color:'#7c3aed',cursor:'pointer'}}>
+          {editing ? 'Cancel' : 'Update NAV'}
+        </button>
+      </div>
+      {editing && (
+        <div style={{display:'flex',gap:8,alignItems:'flex-end',flexWrap:'wrap'}}>
+          <div style={{flex:1,minWidth:120}}>
+            <p style={{fontSize:11,color:'#7c3aed',marginBottom:4}}>New NAV ($)</p>
+            <input type="number" value={navInput} onChange={e=>setNavInput(e.target.value)}
+              placeholder={String(currentNAV)} autoFocus
+              style={{width:'100%',padding:'8px 10px',border:'1px solid #c4b5fd',borderRadius:8,fontSize:13,boxSizing:'border-box',outline:'none'}}/>
+          </div>
+          <div style={{flex:1,minWidth:120}}>
+            <p style={{fontSize:11,color:'#7c3aed',marginBottom:4}}>As of date</p>
+            <input type="date" value={navDate} onChange={e=>setNavDate(e.target.value)}
+              style={{width:'100%',padding:'8px 10px',border:'1px solid #c4b5fd',borderRadius:8,fontSize:13,boxSizing:'border-box',outline:'none'}}/>
+          </div>
+          <button onClick={save} disabled={!navInput||isNaN(Number(navInput))}
+            style={{padding:'8px 18px',background:'#7c3aed',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',opacity:navInput?1:.4}}>
+            Save
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── DEAL TERMS CARD ───────────────────────────────────────────────────────────
+
 const DetailView = ({deal,onUpdate,setToast}) => {
   const inv=deal.investment||{};
   const method=getMethod(deal);
@@ -1971,7 +2089,6 @@ const DetailView = ({deal,onUpdate,setToast}) => {
         </div>}
 
         {/* Traction metrics — same as invested */}
-        <MetricsTracker deal={deal} onUpdate={onUpdate}/>
 
         <PrimaryInsight deal={deal} onUpdate={onUpdate} setToast={setToast}/>
 
@@ -2009,6 +2126,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
 
   return (
     <div style={{padding:20}}>
+      {deal.isFund && <FundNAVCard deal={deal} inv={inv} onUpdate={onUpdate} setToast={setToast}/>}
       <div style={C.card}>
         <div style={{display:'flex',alignItems:'flex-start',gap:14,marginBottom:deal.overview?12:0}}>
           <CompanyLogo name={deal.companyName} website={deal.website} size={52} radius={14} fallbackBg="#f59e0b" fallbackColor="white"/>
@@ -2066,6 +2184,75 @@ const DetailView = ({deal,onUpdate,setToast}) => {
           {inv.ownershipPercent&&<div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:2}}>Ownership</p><p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{inv.ownershipPercent}%</p></div>}
         </div>
 
+        {/* Compact deal terms strip — shows when any terms or channel set, inline editable */}
+        {(()=>{
+          const [editing, setEditing] = useState(false);
+          const t = deal.terms || {};
+          const [form, setForm] = useState({
+            structure: t.structure||'Direct', carry: t.carry||'', mgmtFee: t.mgmtFee||'',
+            mgmtFeeYears: t.mgmtFeeYears||'', expenseReserve: t.expenseReserve||'',
+            cap: t.cap||'', discount: t.discount||'',
+          });
+          const save = () => {
+            const amt = inv.amount || 0;
+            const expRes = (Number(form.expenseReserve)||0)/100;
+            const mgmtTotal = ((Number(form.mgmtFee)||0)/100)*(Number(form.mgmtFeeYears)||0);
+            const effectiveCost = (expRes+mgmtTotal)>0 ? Math.round(amt*(1-expRes-mgmtTotal)) : amt;
+            onUpdate({ ...deal, investment: {...inv, effectiveCost},
+              terms: { structure:form.structure, carry:form.carry?Number(form.carry):null, mgmtFee:form.mgmtFee?Number(form.mgmtFee):null,
+                mgmtFeeYears:form.mgmtFeeYears?Number(form.mgmtFeeYears):null, expenseReserve:form.expenseReserve?Number(form.expenseReserve):null,
+                cap:form.cap?Number(form.cap):null, discount:form.discount?Number(form.discount):null }});
+            setEditing(false); setToast('Terms saved');
+          };
+          const pills = [
+            t.structure && t.structure !== 'Direct' ? t.structure : null,
+            t.cap ? `${fmtC(t.cap)} cap` : null,
+            t.discount ? `${t.discount}% discount` : null,
+            t.carry ? `${t.carry}% carry` : null,
+            t.mgmtFee ? `${t.mgmtFee}%/yr mgmt${t.mgmtFeeYears ? ` · ${t.mgmtFeeYears}yr upfront` : ''}` : null,
+            t.expenseReserve ? `${t.expenseReserve}% reserve` : null,
+            deal.spvSponsor ? `SPV: ${deal.spvSponsor}` : null,
+            deal.roundLead ? `Lead: ${deal.roundLead}` : null,
+            deal.dealSource ? `via ${deal.dealSourceDetail || deal.dealSource}` : null,
+          ].filter(Boolean);
+          const inp2 = {padding:'5px 8px',border:'1px solid #e5e7eb',borderRadius:7,fontSize:12,width:'100%',boxSizing:'border-box',outline:'none'};
+          const lbl2 = {fontSize:10,color:'#9ca3af',display:'block',marginBottom:2};
+          return (
+            <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid #f3f4f6'}}>
+              {!editing ? (
+                <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
+                  <span style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,flexShrink:0}}>Terms</span>
+                  {pills.length ? pills.map((p,i) => (
+                    <span key={i} style={{fontSize:11,fontWeight:500,color:'#374151',background:'#f3f4f6',borderRadius:99,padding:'2px 8px'}}>{p}</span>
+                  )) : <span style={{fontSize:11,color:'#d1d5db',fontStyle:'italic'}}>not set</span>}
+                  <button onClick={()=>setEditing(true)} style={{marginLeft:'auto',fontSize:11,color:'#5B6DC4',background:'none',border:'none',cursor:'pointer',padding:0,flexShrink:0}}>Edit</button>
+                </div>
+              ) : (
+                <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8}}>
+                  <div style={{gridColumn:'1/-1'}}>
+                    <label style={lbl2}>Structure</label>
+                    <div style={{display:'flex',gap:5,flexWrap:'wrap'}}>
+                      {['Direct','SPV','Syndicate','Rolling fund'].map(s=>(
+                        <button key={s} onClick={()=>setForm({...form,structure:s})} style={{padding:'3px 10px',borderRadius:99,fontSize:11,fontWeight:500,cursor:'pointer',border:`1.5px solid ${form.structure===s?'#10b981':'#e5e7eb'}`,background:form.structure===s?'#f0fdf4':'white',color:form.structure===s?'#10b981':'#6b7280'}}>{s}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div><label style={lbl2}>Cap ($)</label><input type="number" value={form.cap} onChange={e=>setForm({...form,cap:e.target.value})} placeholder="10000000" style={inp2}/></div>
+                  <div><label style={lbl2}>Discount (%)</label><input type="number" value={form.discount} onChange={e=>setForm({...form,discount:e.target.value})} placeholder="20" style={inp2}/></div>
+                  <div><label style={lbl2}>Carry (%)</label><input type="number" value={form.carry} onChange={e=>setForm({...form,carry:e.target.value})} placeholder="20" style={inp2}/></div>
+                  <div><label style={lbl2}>Mgmt fee (%/yr)</label><input type="number" value={form.mgmtFee} onChange={e=>setForm({...form,mgmtFee:e.target.value})} placeholder="2.5" style={inp2}/></div>
+                  <div><label style={lbl2}>Fee years upfront</label><input type="number" value={form.mgmtFeeYears} onChange={e=>setForm({...form,mgmtFeeYears:e.target.value})} placeholder="2" style={inp2}/></div>
+                  <div><label style={lbl2}>Expense reserve (%)</label><input type="number" value={form.expenseReserve} onChange={e=>setForm({...form,expenseReserve:e.target.value})} placeholder="3" style={inp2}/></div>
+                  <div style={{gridColumn:'1/-1',display:'flex',gap:8,marginTop:2}}>
+                    <button onClick={save} style={{flex:1,padding:'6px',background:'#5B6DC4',color:'white',border:'none',borderRadius:8,fontWeight:600,fontSize:12,cursor:'pointer'}}>Save</button>
+                    <button onClick={()=>setEditing(false)} style={{padding:'6px 12px',background:'none',border:'none',color:'#6b7280',fontSize:12,cursor:'pointer'}}>Cancel</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {/* Founders */}
         {deal.founders?.length>0&&<div style={{display:'flex',alignItems:'center',gap:8,marginTop:12,paddingTop:12,borderTop:'1px solid #f3f4f6'}}>
           <span style={{fontSize:13,color:'#6b7280'}}>Founders:</span>
@@ -2075,37 +2262,14 @@ const DetailView = ({deal,onUpdate,setToast}) => {
         {/* Co-investors on this round — collapsed by default */}
         {(()=>{
           const coInvs = deal.coInvestors||[];
-          const [open, setOpen] = useState(false);
+          if (!coInvs.length && !deal.founders?.length) return null;
           return (
-            <div style={{marginTop:12,paddingTop:12,borderTop:'1px solid #f3f4f6'}}>
-              <button onClick={()=>setOpen(v=>!v)} style={{display:'flex',alignItems:'center',gap:8,background:'none',border:'none',cursor:'pointer',padding:0,width:'100%'}}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                <span style={{fontSize:12,color:'#9ca3af',fontWeight:500}}>Co-investors on this round{coInvs.length>0?` (${coInvs.length})`:''}</span>
-                <span style={{fontSize:10,color:'#d1d5db',marginLeft:'auto'}}>{open?'▲':'▼'}</span>
-              </button>
-              {open&&<div style={{marginTop:10}}>
-                {coInvs.length===0&&<p style={{fontSize:12,color:'#d1d5db',fontStyle:'italic'}}>None logged — add from the Investors section below</p>}
-                <div style={{display:'flex',flexWrap:'wrap',gap:8,marginTop:coInvs.length?8:0}}>
-                  {coInvs.map(ci=>{
-                    const rc=ROLE_CFG[ci.role]||ROLE_CFG['co-investor'];
-                    return <div key={ci.id} style={{display:'flex',alignItems:'center',gap:6,padding:'4px 10px',borderRadius:99,background:rc.c+'12',border:`1px solid ${rc.c}30`}}>
-                      <span style={{width:20,height:20,borderRadius:99,background:rc.c+'25',color:rc.c,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700,fontSize:10,flexShrink:0}}>{ci.name[0].toUpperCase()}</span>
-                      <span style={{fontSize:12,fontWeight:500,color:'#374151'}}>{ci.name}</span>
-                      {ci.fund&&ci.fund!==ci.name&&<span style={{fontSize:11,color:'#9ca3af'}}>· {ci.fund}</span>}
-                      <Pill color={rc.c} bg={rc.c+'15'}>{rc.l}</Pill>
-                    </div>;
-                  })}
-                </div>
-              </div>}
-            </div>
+            <CoInvestorsCollapsed coInvs={coInvs}/>
           );
         })()}
       </div>
 
-      <ValueChart deal={deal} mode="deal"/>
-
-      <ActiveRaiseCard deal={deal} onUpdate={onUpdate} setToast={setToast}/>
-
+      {/* Valuation card — first */}
       <div style={C.card}>
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
           <div style={{display:'flex',alignItems:'center',gap:8}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg><span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Valuation</span></div>
@@ -2120,7 +2284,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
               ? <p style={{...C.val,color:'#9ca3af'}}>—</p>
               : <p style={{...C.val,color:iv>=cb?'#10b981':'#ef4444'}}>{fmtC(iv)}</p>}
           </div>
-          <div><p style={C.label}>MOIC</p>
+          <div><p style={C.label}>TVPI</p>
             {method==='mark-at-cost'
               ? <p style={{...C.val,color:'#9ca3af'}}>1.0x</p>
               : moic ? <p style={{...C.val,color:moic>=1.5?'#10b981':moic>=1?'#5B6DC4':'#ef4444'}}>{moic.toFixed(2)}x</p>
@@ -2138,7 +2302,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
             <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:3}}>Proj. value</p>
               <p style={{fontSize:14,fontWeight:700,color:projected.projectedIV&&projected.projectedIV>=cb?'#7c3aed':'#ef4444'}}>{projected.projectedIV?fmtC(projected.projectedIV):'—'}</p>
             </div>
-            <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:3}}>Proj. MOIC</p>
+            <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:3}}>Proj. TVPI</p>
               <p style={{fontSize:14,fontWeight:700,color:projected.projectedMOIC>=1.5?'#7c3aed':projected.projectedMOIC>=1?'#5B6DC4':'#ef4444'}}>{projected.projectedMOIC?`${projected.projectedMOIC.toFixed(2)}x`:'—'}</p>
             </div>
             <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:3}}>Proj. ownership</p>
@@ -2151,22 +2315,36 @@ const DetailView = ({deal,onUpdate,setToast}) => {
         </div>}
 
         {method==='mark-at-cost'&&<div style={{marginTop:10,paddingTop:10,borderTop:'1px solid #f3f4f6'}}>
-          <p style={{fontSize:12,color:'#9ca3af',fontStyle:'italic',marginBottom:8}}>{health.mat==='lab'?'Lab/bench stage — marked at cost. MOIC not meaningful pre-demonstration.':'Pilot stage — marked at cost until next priced round.'}</p>
+          <p style={{fontSize:12,color:'#9ca3af',fontStyle:'italic',marginBottom:8}}>{health.mat==='lab'?'Lab/bench stage — marked at cost. TVPI not meaningful pre-demonstration.':'Pilot stage — marked at cost until next priced round. TVPI = 1.0x.'}</p>
           {inv.vehicle==='SAFE'&&deal.terms?.cap&&(()=>{const pct=deal.terms.cap>0?((cb/(deal.terms.cap+cb))*100):null;return <div style={{background:'#f9fafb',borderRadius:12,padding:'10px 14px'}}><p style={{fontSize:13,color:'#374151'}}>At your <strong>{fmtC(deal.terms.cap)}</strong> cap, you own approx <strong style={{color:'#5B6DC4'}}>~{pct?.toFixed(2)}%</strong> on conversion.{deal.terms.mfn&&<span style={{color:'#6b7280'}}> · MFN</span>}</p><p style={{fontSize:11,color:'#9ca3af',marginTop:4}}>Pre-dilution from option pool.</p></div>;})()}
         </div>}
         {method!=='mark-at-cost'&&inv.lastValuationDate&&<div style={{display:'flex',alignItems:'center',gap:6,marginTop:10}}>
           <span style={{width:6,height:6,borderRadius:99,background:STALE_COL[staleness],display:'inline-block'}}/>
           <p style={{fontSize:12,color:STALE_COL[staleness]}}>Mark from {new Date(inv.lastValuationDate).toLocaleDateString('en-US',{month:'short',year:'numeric'})}{staleness==='stale'?' — consider refreshing':staleness==='very-stale'?' — mark is outdated':''}</p>
         </div>}
+
+        {/* Effective cost / fee breakdown */}
+        {inv.amount > 0 && inv.effectiveCost > 0 && inv.effectiveCost < inv.amount && (
+          <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid #f3f4f6',display:'flex',gap:16,flexWrap:'wrap'}}>
+            <div><p style={C.label}>Check size</p><p style={{fontSize:14,fontWeight:600,color:'#9ca3af'}}>{fmtC(inv.amount)}</p></div>
+            <div><p style={C.label}>Upfront fees</p><p style={{fontSize:14,fontWeight:600,color:'#ef4444'}}>−{fmtC(inv.amount - inv.effectiveCost)}</p></div>
+            <div><p style={C.label}>Effective equity</p><p style={{fontSize:14,fontWeight:600,color:'#10b981'}}>{fmtC(inv.effectiveCost)}</p></div>
+          </div>
+        )}
       </div>
 
-      <MetricsTracker deal={deal} onUpdate={onUpdate}/>
+      {/* Chart — below valuation */}
+      <ValueChart deal={deal} mode="deal"/>
+
+      <ActiveRaiseCard deal={deal} onUpdate={onUpdate} setToast={setToast}/>
 
       <PrimaryInsight deal={deal} onUpdate={onUpdate} setToast={setToast}/>
 
       <SignalsSection deal={deal} onUpdate={onUpdate}/>
 
       <FundraiseHistory deal={deal} onUpdate={onUpdate} setToast={setToast}/>
+
+
       <div style={{marginTop:12}}><DocumentsSection deal={deal} onUpdate={onUpdate} setToast={setToast}/></div>
     </div>
   );
@@ -2267,7 +2445,7 @@ const AddModal = ({onClose,onAdd}) => {
   const [f,setF]=useState(()=>{
     const mat=STAGE_MAT['seed']||'pilot';
     const defs=METRIC_DEFAULTS[mat]||[];
-    return {name:'',website:'',industry:'',stage:'seed',status:'invested',amount:'',vehicle:'SAFE',founderName:'',founderRole:'CEO',note:'',metric1:defs[0]||'',metric2:defs[1]||'',metric3:defs[2]||''};
+    return {name:'',website:'',industry:'',stage:'seed',status:'invested',amount:'',vehicle:'SAFE',investDate:new Date().toISOString().slice(0,10),channel:'',channelDetail:'',spvSponsor:'',roundLead:'',roundSize:'',postMoney:'',structure:'Direct',carry:'',mgmtFee:'',mgmtFeeYears:'',expenseReserve:'',cap:'',discount:'',founderName:'',founderRole:'CEO',note:'',metric1:defs[0]||'',metric2:defs[1]||'',metric3:defs[2]||''};
   });
 
   const updateStage = (stage) => {
@@ -2295,7 +2473,46 @@ const AddModal = ({onClose,onAdd}) => {
       founderUpdates:[],
       createdAt:now,statusEnteredAt:now
     };
-    if(f.status==='invested'){base.investment={amount:Number(f.amount),costBasis:Number(f.amount),vehicle:f.vehicle,date:now,lastUpdateReceived:now};}
+    if(f.status==='invested'){
+      const invDate=f.investDate?new Date(f.investDate).toISOString():now;
+      const amount=Number(f.amount)||0;
+      const expRes=(Number(f.expenseReserve)||0)/100;
+      const mgmtFeeTotal=((Number(f.mgmtFee)||0)/100)*(Number(f.mgmtFeeYears)||0);
+      const totalUpfrontFeeRate=expRes+mgmtFeeTotal;
+      const effectiveCost=totalUpfrontFeeRate>0?Math.round(amount*(1-totalUpfrontFeeRate)):amount;
+      const postMoney = Number(f.postMoney)||0;
+      const roundSize = Number(f.roundSize)||0;
+      // Ownership: for SPV, ownership = (SPV size / postMoney), then your slice = check / SPV size * SPV ownership
+      // For direct: ownership = check / postMoney
+      const ownershipPercent = postMoney > 0
+        ? (f.structure === 'SPV' || f.structure === 'Syndicate') && roundSize > 0
+          ? Number(((amount / roundSize) * (roundSize / postMoney) * 100).toFixed(4))
+          : Number(((amount / postMoney) * 100).toFixed(4))
+        : null;
+      base.investment={amount,costBasis:amount,effectiveCost,vehicle:f.vehicle,date:invDate,lastUpdateReceived:invDate,
+        ...(postMoney>0?{entryPostMoneyValuation:postMoney,impliedValuation:postMoney}:{}),
+        ...(ownershipPercent?{ownershipPercent}:{}),
+      };
+      // Auto-create first fundraise history entry if round data provided
+      if (postMoney > 0) {
+        base.fundraiseHistory = [{
+          id: genId(), roundName: f.stage==='series-a'?'Series A':f.stage==='series-b'?'Series B':f.stage==='pre-seed'?'Pre-Seed':f.stage==='seed'?'Seed':'Round',
+          date: invDate, amountRaised: roundSize||null, postMoneyVal: postMoney,
+          ownershipAfter: ownershipPercent, source: 'manual',
+        }];
+      }
+      base.createdAt=invDate;base.statusEnteredAt=invDate;
+      base.terms={
+        structure:f.structure||'Direct',
+        carry:f.carry?Number(f.carry):null,
+        mgmtFee:f.mgmtFee?Number(f.mgmtFee):null,
+        mgmtFeeYears:f.mgmtFeeYears?Number(f.mgmtFeeYears):null,
+        expenseReserve:f.expenseReserve?Number(f.expenseReserve):null,
+        cap:f.cap?Number(f.cap):null,
+        discount:f.discount?Number(f.discount):null,
+      };
+    }
+    if(f.channel){base.dealSource=f.channel;} if(f.channelDetail){base.dealSourceDetail=f.channelDetail;} if(f.spvSponsor){base.spvSponsor=f.spvSponsor;} if(f.roundLead){base.roundLead=f.roundLead;}
     onAdd(base);onClose();
   };
 
@@ -2326,8 +2543,13 @@ const AddModal = ({onClose,onAdd}) => {
           <div><label style={lbl}>Industry</label><input value={f.industry} onChange={e=>setF({...f,industry:e.target.value})} placeholder="Climate Tech" style={inp}/></div>
           <div><label style={lbl}>Stage</label>
             <select value={f.stage} onChange={e=>updateStage(e.target.value)} style={inp}>
-              <option value="pre-seed">Pre-seed</option><option value="seed">Seed</option>
-              <option value="series-a">Series A</option><option value="series-b">Series B</option><option value="growth">Growth</option>
+              <option value="pre-seed">Pre-seed</option>
+              <option value="seed">Seed</option>
+              <option value="bridge">Bridge</option>
+              <option value="series-a">Series A</option>
+              <option value="series-b">Series B</option>
+              <option value="series-c">Series C+</option>
+              <option value="growth">Growth</option>
             </select>
           </div>
         </div>
@@ -2340,7 +2562,94 @@ const AddModal = ({onClose,onAdd}) => {
               <option value="SAFE">SAFE</option><option value="Convertible Note">Conv. Note</option><option value="Equity">Equity</option>
             </select>
           </div>
+          <div><label style={lbl}>Round size ($) <span style={{fontWeight:400,color:'#9ca3af'}}>total raise</span></label><input type="number" value={f.roundSize} onChange={e=>setF({...f,roundSize:e.target.value})} placeholder="25000000" style={inp}/></div>
+          <div><label style={lbl}>Post-money val ($)</label><input type="number" value={f.postMoney} onChange={e=>setF({...f,postMoney:e.target.value})} placeholder="600000000" style={inp}/></div>
+          <div style={{gridColumn:'1/-1'}}><label style={lbl}>Investment date</label><input type="date" value={f.investDate} onChange={e=>setF({...f,investDate:e.target.value})} style={inp}/></div>
+          {/* Live ownership preview */}
+          {f.amount && f.postMoney && Number(f.postMoney) > 0 && (()=>{
+            const amt = Number(f.amount)||0;
+            const pm = Number(f.postMoney)||0;
+            const rs = Number(f.roundSize)||0;
+            const isSPV = f.structure === 'SPV' || f.structure === 'Syndicate';
+            const own = isSPV && rs > 0
+              ? (amt / rs) * (rs / pm) * 100
+              : (amt / pm) * 100;
+            return (
+              <div style={{gridColumn:'1/-1',background:'#f0fdf4',borderRadius:10,padding:'8px 12px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <span style={{fontSize:12,color:'#6b7280'}}>Implied ownership</span>
+                <span style={{fontSize:13,fontWeight:600,color:'#10b981'}}>{own.toFixed(4)}%</span>
+              </div>
+            );
+          })()}
         </div>}
+
+        {/* Deal terms */}
+        {f.status==='invested'&&<div>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+            <label style={lbl}>Deal terms <span style={{fontWeight:400,color:'#9ca3af'}}>(optional)</span></label>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+            {/* Structure */}
+            <div style={{gridColumn:'1/-1'}}>
+              <label style={{...lbl,marginBottom:6}}>Structure</label>
+              <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                {['Direct','SPV','Syndicate','Rolling fund'].map(s=>(
+                  <button key={s} onClick={()=>setF({...f,structure:s})} style={{padding:'4px 12px',borderRadius:99,fontSize:12,fontWeight:500,cursor:'pointer',border:`1.5px solid ${f.structure===s?'#10b981':'#e5e7eb'}`,background:f.structure===s?'#f0fdf4':'white',color:f.structure===s?'#10b981':'#6b7280'}}>{s}</button>
+                ))}
+              </div>
+            </div>
+            {/* Cap + Discount (SAFE/Note) */}
+            {(f.vehicle==='SAFE'||f.vehicle==='Convertible Note')&&<>
+              <div><label style={lbl}>Cap ($)</label><input type="number" value={f.cap} onChange={e=>setF({...f,cap:e.target.value})} placeholder="10000000" style={inp}/></div>
+              <div><label style={lbl}>Discount (%)</label><input type="number" value={f.discount} onChange={e=>setF({...f,discount:e.target.value})} placeholder="20" style={inp}/></div>
+            </>}
+            {/* SPV fees — only shown when SPV or Syndicate */}
+            {(f.structure==='SPV'||f.structure==='Syndicate')&&<>
+              <div style={{gridColumn:'1/-1',borderTop:'1px solid #f3f4f6',paddingTop:8,marginTop:2}}>
+                <p style={{fontSize:11,color:'#9ca3af',marginBottom:8}}>SPV / Syndicate fees</p>
+              </div>
+              <div><label style={lbl}>Carry (%)</label><input type="number" value={f.carry} onChange={e=>setF({...f,carry:e.target.value})} placeholder="20" style={inp}/></div>
+              <div><label style={lbl}>Mgmt fee (%/yr)</label><input type="number" value={f.mgmtFee} onChange={e=>setF({...f,mgmtFee:e.target.value})} placeholder="2.5" style={inp}/></div>
+              <div><label style={lbl}>Fee years (called upfront)</label><input type="number" value={f.mgmtFeeYears} onChange={e=>setF({...f,mgmtFeeYears:e.target.value})} placeholder="2" style={inp}/></div>
+              <div><label style={lbl}>Expense reserve (%)</label><input type="number" value={f.expenseReserve} onChange={e=>setF({...f,expenseReserve:e.target.value})} placeholder="3" style={inp}/></div>
+              {/* Effective cost preview */}
+              {f.amount&&(Number(f.mgmtFee)||Number(f.expenseReserve))?(()=>{
+                const amt=Number(f.amount)||0;
+                const expRes=(Number(f.expenseReserve)||0)/100;
+                const mgmtTotal=((Number(f.mgmtFee)||0)/100)*(Number(f.mgmtFeeYears)||0);
+                const fees=Math.round(amt*(expRes+mgmtTotal));
+                const effective=amt-fees;
+                return <div style={{gridColumn:'1/-1',background:'#f0fdf4',borderRadius:10,padding:'8px 12px',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <span style={{fontSize:12,color:'#6b7280'}}>Upfront fees: <span style={{color:'#ef4444',fontWeight:500}}>${fees.toLocaleString()}</span></span>
+                  <span style={{fontSize:12,color:'#166534',fontWeight:600}}>Effective equity: ${effective.toLocaleString()}</span>
+                </div>;
+              })():null}
+            </>}
+          </div>
+        </div>}
+
+        {/* Deal sourcing */}
+        <div style={{display:'flex',flexDirection:'column',gap:12}}>
+          <div>
+            <label style={lbl}>How did you hear about it? <span style={{fontWeight:400,color:'#9ca3af'}}>deal source</span></label>
+            <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:6}}>
+              {['AngelList','Cap Table Coalition','Syndicate','Angel group','Warm intro','Network','Accelerator','Cold inbound','Other'].map(ch=>(
+                <button key={ch} onClick={()=>setF({...f,channel:f.channel===ch?'':ch})} style={{padding:'4px 11px',borderRadius:99,fontSize:12,fontWeight:500,cursor:'pointer',border:`1.5px solid ${f.channel===ch?'#5B6DC4':'#e5e7eb'}`,background:f.channel===ch?'#eef2ff':'white',color:f.channel===ch?'#5B6DC4':'#6b7280'}}>{ch}</button>
+              ))}
+            </div>
+            <input value={f.channelDetail} onChange={e=>setF({...f,channelDetail:e.target.value})} placeholder="Specific community, person, or platform (e.g. Cap Table Coalition)" style={{...inp,fontSize:12}}/>
+          </div>
+          {f.status==='invested'&&<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+            <div>
+              <label style={lbl}>SPV sponsor <span style={{fontWeight:400,color:'#9ca3af'}}>who ran the SPV</span></label>
+              <input value={f.spvSponsor} onChange={e=>setF({...f,spvSponsor:e.target.value})} placeholder="e.g. Bay Bridge Ventures" style={inp}/>
+            </div>
+            <div>
+              <label style={lbl}>Round lead <span style={{fontWeight:400,color:'#9ca3af'}}>who led the round</span></label>
+              <input value={f.roundLead} onChange={e=>setF({...f,roundLead:e.target.value})} placeholder="e.g. a16z (if known)" style={inp}/>
+            </div>
+          </div>}
+        </div>
 
         {/* Founder */}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
@@ -2348,29 +2657,7 @@ const AddModal = ({onClose,onAdd}) => {
           <div><label style={lbl}>Role</label><input value={f.founderRole} onChange={e=>setF({...f,founderRole:e.target.value})} placeholder="CEO" style={inp}/></div>
         </div>
 
-        {/* Traction metrics */}
-        {(()=>{
-          const mat = STAGE_MAT[f.stage]||'lab';
-          const defs = METRIC_DEFAULTS[mat]||[];
-          if(mat==='deploy'||mat==='fund') return (
-            <div style={{padding:'10px 14px',background:'#f9fafb',borderRadius:10,border:'1px solid #f3f4f6'}}>
-              <p style={{fontSize:13,color:'#9ca3af'}}>At {f.stage} stage, revenue is the primary metric — no traction proxies needed.</p>
-            </div>
-          );
-          return (
-            <div>
-              <label style={lbl}>Traction metrics <span style={{fontWeight:400,color:'#9ca3af'}}>— pre-filled for {f.stage} stage, edit freely</span></label>
-              <div style={{display:'flex',flexDirection:'column',gap:8}}>
-                {['metric1','metric2','metric3'].map((k,i)=>(
-                  <input key={k} value={f[k]} onChange={e=>setF({...f,[k]:e.target.value})}
-                    placeholder={defs[i]||`Metric ${i+1}`}
-                    style={{...inp,borderColor:f[k]?'#5B6DC4':'#e5e7eb'}}/>
-                ))}
-              </div>
-              <p style={{fontSize:11,color:'#9ca3af',marginTop:6}}>Log readings on the deal page after each founder call</p>
-            </div>
-          );
-        })()}
+
 
         {/* Initial note */}
         <div>
@@ -3076,12 +3363,12 @@ export default function App() {
                 return v > 0 ? `+${abs}` : `−${abs}`;
               };
               const stats = [
-                { l: 'Deployed', v: fmtC(totalDep), sub: 'total cost basis', c: '#111827' },
-                { l: 'Live Value', v: fmtC(totalUnrealizedImp), sub: 'unrealized marks', c: '#111827' },
-                { l: 'Net P&L', v: fmtPnL(netPnL), sub: `${totalProceeds > 0 ? fmtC(totalProceeds) + ' returned · ' : ''}${totalWritedowns > 0 ? fmtC(totalWritedowns) + ' lost' : 'no exits yet'}`, c: statC(netPnL) },
-                { l: 'MOIC', v: moic ? `${moic.toFixed(2)}x` : '—', sub: 'blended', c: moic >= 1.5 ? '#10b981' : moic >= 1 ? '#5B6DC4' : '#9ca3af' },
-                { l: 'DPI', v: dpi > 0 ? `${dpi.toFixed(2)}x` : '0.00x', sub: 'distributed/paid-in', c: dpi >= 1 ? '#10b981' : dpi > 0 ? '#5B6DC4' : '#9ca3af' },
-                { l: 'Watching', v: String(deals.filter(d => d.status === 'watching').length), sub: `${portfolio.length} invested`, c: '#5B6DC4' },
+                { l: 'Paid-In', v: fmtC(totalDep), sub: 'total deployed', c: '#111827' },
+                { l: 'RVPI', v: fmtC(totalUnrealizedImp), sub: 'residual value / paid-in', c: '#111827' },
+                { l: 'Unrealized G/L', v: fmtPnL(netPnL), sub: `${totalProceeds > 0 ? fmtC(totalProceeds) + ' returned · ' : ''}${totalWritedowns > 0 ? fmtC(totalWritedowns) + ' written down' : 'no exits yet'}`, c: statC(netPnL) },
+                { l: 'TVPI', v: moic ? `${moic.toFixed(2)}x` : '—', sub: 'total value / paid-in', c: moic >= 1.5 ? '#10b981' : moic >= 1 ? '#5B6DC4' : '#9ca3af' },
+                { l: 'DPI', v: dpi > 0 ? `${dpi.toFixed(2)}x` : '0.00x', sub: 'distributed / paid-in', c: dpi >= 1 ? '#10b981' : dpi > 0 ? '#5B6DC4' : '#9ca3af' },
+                { l: 'NAV', v: fmtC(totalProceeds + totalUnrealizedImp), sub: 'proceeds + live marks', c: totalProceeds + totalUnrealizedImp >= totalDep ? '#10b981' : '#5B6DC4' },
               ];
               return (
                 <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10}}>
@@ -3097,8 +3384,6 @@ export default function App() {
             })()}
           </div>
         )}
-
-        {allInvested.length > 1 && <ValueChart allDeals={allInvested} mode="portfolio"/>}
 
         <div style={{marginBottom:14}}>
           <div style={{background:'white',borderRadius:14,border:'1px solid #e5e7eb',padding:'6px 12px',display:'flex',alignItems:'center',gap:10}}>
@@ -3134,25 +3419,33 @@ export default function App() {
               <div style={{display:'flex',flexDirection:'column',gap:10,marginTop:10}}>
                 {fFunds.map(d => {
                   const cb = getCB(d.investment||{});
+                  const nav = d.investment?.impliedValue || cb;
+                  const navChange = nav - cb;
+                  const navPct = cb > 0 ? ((navChange/cb)*100).toFixed(1) : 0;
+                  const lastNav = d.investment?.lastValuationDate;
                   return (
                     <div key={d.id} style={{position:'relative'}} onClick={selectMode ? () => toggleSelect(d.id) : undefined}>
-                      <div onClick={selectMode ? undefined : () => { setSelected(d); setPage('detail'); }}
-                        style={{background:'white',borderRadius:16,border:'1px solid #ede9fe',cursor:'pointer',padding:'14px 16px',display:'flex',alignItems:'center',gap:14}}>
-                        <div style={{width:44,height:44,borderRadius:12,background:'#7c3aed20',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-                        </div>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:2}}>
-                            <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>{d.companyName}</span>
-                            <Pill color="#7c3aed" bg="#f5f3ff">LP</Pill>
+                      <div style={{background:'white',borderRadius:16,border:'1px solid #ede9fe',overflow:'hidden'}}>
+                        <div onClick={selectMode ? undefined : () => { setSelected(d); setPage('detail'); }}
+                          style={{cursor:'pointer',padding:'14px 16px',display:'flex',alignItems:'center',gap:14}}>
+                          <div style={{width:44,height:44,borderRadius:12,background:'#7c3aed20',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
                           </div>
-                          <p style={{fontSize:12,color:'#9ca3af'}}>{d.source?.name && d.source.name !== 'AngelList' ? d.source.name : 'Fund investment'}</p>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:2}}>
+                              <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>{d.companyName}</span>
+                              <Pill color="#7c3aed" bg="#f5f3ff">LP</Pill>
+                            </div>
+                            <p style={{fontSize:12,color:'#9ca3af'}}>{d.source?.name && d.source.name !== 'AngelList' ? d.source.name : 'Fund investment'}{lastNav ? ` · NAV as of ${new Date(lastNav).toLocaleDateString('en-US',{month:'short',year:'numeric'})}` : ''}</p>
+                          </div>
+                          <div style={{textAlign:'right',flexShrink:0}}>
+                            <p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{fmtC(nav)}</p>
+                            <p style={{fontSize:12,color:navChange>=0?'#10b981':'#ef4444',fontWeight:500}}>{navChange>=0?'+':''}{fmtC(navChange)} ({navPct}%)</p>
+                          </div>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
                         </div>
-                        <div style={{textAlign:'right',flexShrink:0}}>
-                          <p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{fmtC(cb)}</p>
-                          <p style={{fontSize:12,color:'#9ca3af'}}>LP position</p>
-                        </div>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
+                        {/* Quick NAV update strip */}
+                        <FundQuickNAV deal={d} nav={nav} onUpdate={updateDeal}/>
                       </div>
                       {selectMode && <div style={{position:'absolute',top:12,left:12,width:20,height:20,borderRadius:6,border:`2px solid ${selectedIds.has(d.id)?'#5B6DC4':'#d1d5db'}`,background:selectedIds.has(d.id)?'#5B6DC4':'white',display:'flex',alignItems:'center',justifyContent:'center',zIndex:10,pointerEvents:'none'}}>
                         {selectedIds.has(d.id)&&<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
