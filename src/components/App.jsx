@@ -796,6 +796,8 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
   // ── Build event markers ──────────────────────────────────────────────────────
   const buildMarkers = (d) => {
     const markers = [];
+
+    // Funding rounds — always show, highest value signal
     (d.fundraiseHistory || []).forEach(r => {
       if (r.date) markers.push({
         date: new Date(r.date), type: 'round',
@@ -803,30 +805,47 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
         sub: [r.amountRaised ? fmtC(r.amountRaised) : null, r.leadInvestor || null].filter(Boolean).join(' · ') || null,
       });
     });
-    (d.founderUpdates || []).slice(0, 6).forEach(u => {
-      if (u.date) markers.push({
-        date: new Date(u.date), type: 'update',
-        label: u.keyTakeaway ? u.keyTakeaway.substring(0, 50) : 'Founder update',
-        sub: null,
-      });
+
+    // Active raise signal
+    if (d.activeRaise?.openedAt) markers.push({
+      date: new Date(d.activeRaise.openedAt), type: 'round',
+      label: `${d.activeRaise.roundName || 'Round'} opened`,
+      sub: d.activeRaise.targetAmount ? fmtC(d.activeRaise.targetAmount) : null,
     });
-    (d.milestones || []).filter(m => m.fromPrimary || m.fromAgent).slice(0, 6).forEach(m => {
-      if (m.date) markers.push({
+
+    // Milestones — only value-impacting types: fundraising, partnership, product, exit signals
+    // Skip generic 'update' type unless tagged fromPrimary with explicit positive/negative sentiment
+    const VALUE_TYPES = ['fundraising', 'partnership', 'product', 'revenue', 'team', 'regulatory'];
+    (d.milestones || []).forEach(m => {
+      if (!m.date) return;
+      const isValueType = VALUE_TYPES.includes(m.type);
+      const isSignificantUpdate = m.type === 'update' && (m.sentiment === 'positive' || m.sentiment === 'negative') && m.fromPrimary;
+      if (!isValueType && !isSignificantUpdate) return;
+      markers.push({
         date: new Date(m.date),
         type: m.sentiment === 'negative' ? 'risk' : 'signal',
         label: m.title?.substring(0, 50) || '',
-        sub: m.description ? m.description.substring(0, 40) : null,
+        sub: m.description ? m.description.substring(0, 45) : null,
       });
     });
-    // Also include external signal fetch dates
-    try {
-      const cache = loadSignalCache()[d.id];
-      if (cache?.fetchedAt) markers.push({
-        date: new Date(cache.fetchedAt), type: 'signal',
-        label: 'External signals fetched',
-        sub: cache.activity?.status ? `Activity: ${cache.activity.status}` : null,
+
+    // Founder updates — only include if they have a substantive keyTakeaway
+    // and are NOT just routine check-ins (filter out short/generic ones)
+    (d.founderUpdates || []).slice(0, 10).forEach(u => {
+      if (!u.date) return;
+      const takeaway = u.keyTakeaway || '';
+      // Skip if no takeaway or looks like a generic check-in
+      if (takeaway.length < 20) return;
+      // Skip if sentiment is neutral/unknown — only show positive/negative signals
+      if (u.sentiment === 'neutral' || !u.sentiment) return;
+      markers.push({
+        date: new Date(u.date),
+        type: u.sentiment === 'negative' ? 'risk' : 'update',
+        label: takeaway.substring(0, 50),
+        sub: null,
       });
-    } catch {}
+    });
+
     return markers.sort((a, b) => a.date - b.date);
   };
 
@@ -1033,7 +1052,7 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
           {['round','invest','update','signal','risk'].filter(t => filteredMarkers.some(m=>m.type===t)).map(t => (
             <span key={t} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#6b7280' }}>
               <span style={{ width: 8, height: 8, borderRadius: 99, background: MARKER_COLORS[t], display: 'inline-block' }}/>
-              {t === 'round' ? 'Fund / round' : t === 'invest' ? 'Investment' : t === 'update' ? 'Founder update' : t === 'signal' ? 'Signal' : 'Risk'}
+              {t === 'round' ? 'Funding round' : t === 'invest' ? 'Investment' : t === 'update' ? 'Key update' : t === 'signal' ? 'Milestone' : 'Risk flag'}
             </span>
           ))}
         </div>
@@ -2260,10 +2279,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
         })()}
       </div>
 
-      <ValueChart deal={deal} mode="deal"/>
-
-      <ActiveRaiseCard deal={deal} onUpdate={onUpdate} setToast={setToast}/>
-
+      {/* Valuation card — first */}
       <div style={C.card}>
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
           <div style={{display:'flex',alignItems:'center',gap:8}}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg><span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Valuation</span></div>
@@ -2317,7 +2333,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
           <p style={{fontSize:12,color:STALE_COL[staleness]}}>Mark from {new Date(inv.lastValuationDate).toLocaleDateString('en-US',{month:'short',year:'numeric'})}{staleness==='stale'?' — consider refreshing':staleness==='very-stale'?' — mark is outdated':''}</p>
         </div>}
 
-        {/* Effective cost / fee breakdown — shown when SPV fees exist */}
+        {/* Effective cost / fee breakdown */}
         {inv.amount > 0 && inv.effectiveCost > 0 && inv.effectiveCost < inv.amount && (
           <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid #f3f4f6',display:'flex',gap:16,flexWrap:'wrap'}}>
             <div><p style={C.label}>Check size</p><p style={{fontSize:14,fontWeight:600,color:'#9ca3af'}}>{fmtC(inv.amount)}</p></div>
@@ -2327,14 +2343,19 @@ const DetailView = ({deal,onUpdate,setToast}) => {
         )}
       </div>
 
-      <DealTermsCard deal={deal} inv={inv} cb={cb} C={C} onUpdate={onUpdate} setToast={setToast}/>
+      {/* Chart — below valuation */}
+      <ValueChart deal={deal} mode="deal"/>
 
+      <ActiveRaiseCard deal={deal} onUpdate={onUpdate} setToast={setToast}/>
 
       <PrimaryInsight deal={deal} onUpdate={onUpdate} setToast={setToast}/>
 
       <SignalsSection deal={deal} onUpdate={onUpdate}/>
 
       <FundraiseHistory deal={deal} onUpdate={onUpdate} setToast={setToast}/>
+
+      <DealTermsCard deal={deal} inv={inv} cb={cb} C={C} onUpdate={onUpdate} setToast={setToast}/>
+
       <div style={{marginTop:12}}><DocumentsSection deal={deal} onUpdate={onUpdate} setToast={setToast}/></div>
     </div>
   );
