@@ -263,105 +263,7 @@ const CompanyLogo = ({name, website, size=44, radius=12, fallbackBg='#f3f4f6', f
   );
 };
 
-const MetricsTracker = ({deal, onUpdate}) => {
-  const metrics = deal.metricsToWatch || [];
-  const log = deal.metricsLog || {};
-  const [active, setActive] = useState(null);
-  const [inputVal, setInputVal] = useState('');
-  const [inputDate, setInputDate] = useState(new Date().toISOString().slice(0,10));
-  const [showReadings, setShowReadings] = useState(null);
-
-  const logEntry = (key) => {
-    if (!inputVal || isNaN(Number(inputVal))) return;
-    const entry = { v: Number(inputVal), date: new Date(inputDate).toISOString() };
-    onUpdate({ ...deal, metricsLog: { ...log, [key]: [...(log[key]||[]), entry].sort((a,b)=>new Date(a.date)-new Date(b.date)) }});
-    setActive(null); setInputVal(''); setInputDate(new Date().toISOString().slice(0,10));
-  };
-
-  const deleteReading = (key, idx) => {
-    const updated = [...(log[key]||[])]; updated.splice(idx,1);
-    onUpdate({...deal, metricsLog:{...log,[key]:updated}});
-  };
-
-  const MiniLine = ({ readings, color='#5B6DC4' }) => {
-    if (!readings || readings.length < 2) return <span style={{fontSize:11,color:'#d1d5db'}}>no readings yet</span>;
-    const W=80, H=28, P=3;
-    const vals = readings.map(r=>r.v);
-    const mn=Math.min(...vals), mx=Math.max(...vals), rng=mx-mn||1;
-    const pts = readings.map((r,i)=>[P+(i/(readings.length-1))*(W-P*2), P+((mx-r.v)/rng)*(H-P*2)]);
-    const poly = pts.map(([x,y])=>`${x},${y}`).join(' ');
-    const latest = readings[readings.length-1];
-    const prev = readings[readings.length-2];
-    const dir = latest.v > prev.v ? '↑' : latest.v < prev.v ? '↓' : '→';
-    const dirColor = latest.v > prev.v ? '#10b981' : latest.v < prev.v ? '#ef4444' : '#9ca3af';
-    return (
-      <div style={{display:'flex',alignItems:'center',gap:10}}>
-        <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
-          <polyline points={poly} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/>
-          <circle cx={pts[pts.length-1][0]} cy={pts[pts.length-1][1]} r="2.5" fill={color}/>
-        </svg>
-        <div style={{display:'flex',alignItems:'baseline',gap:4}}>
-          <span style={{fontSize:13,fontWeight:700,color:'#111827'}}>{latest.v.toLocaleString()}</span>
-          <span style={{fontSize:13,fontWeight:600,color:dirColor}}>{dir}</span>
-        </div>
-      </div>
-    );
-  };
-
-  if (!metrics.length) return null;
-
-  return (
-    <div style={{background:'white',borderRadius:16,padding:20,marginBottom:12}}>
-      <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:14}}>
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-        <span style={{fontSize:14,fontWeight:600,color:'#111827'}}>Traction Metrics</span>
-        <span style={{fontSize:11,color:'#9ca3af'}}>{metrics.length} tracked</span>
-      </div>
-      <div style={{display:'flex',flexDirection:'column',gap:0}}>
-        {metrics.map((metric, i) => {
-          const readings = log[metric] || [];
-          const isLogging = active === metric;
-          return (
-            <div key={metric} style={{paddingTop:i===0?0:12,marginTop:i===0?0:12,borderTop:i===0?'none':'1px solid #f9fafb'}}>
-              <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:6}}>
-                <span style={{fontSize:13,color:'#374151',fontWeight:500,flex:1,minWidth:0,marginRight:12}}>{metric}</span>
-                {!isLogging&&<button onClick={()=>{setActive(metric);setInputVal('');}} style={{fontSize:12,color:'#5B6DC4',background:'none',border:'none',cursor:'pointer',padding:0,flexShrink:0}}>+ Log</button>}
-              </div>
-              {isLogging?(
-                <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
-                  <input type="number" value={inputVal} onChange={e=>setInputVal(e.target.value)} placeholder="Value" autoFocus style={{width:90,padding:'6px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none'}}/>
-                  <input type="date" value={inputDate} onChange={e=>setInputDate(e.target.value)} style={{padding:'6px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,outline:'none'}}/>
-                  <button onClick={()=>logEntry(metric)} disabled={!inputVal||isNaN(Number(inputVal))} style={{padding:'6px 14px',background:'#5B6DC4',color:'white',border:'none',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',opacity:inputVal?1:.5}}>Save</button>
-                  <button onClick={()=>setActive(null)} style={{padding:'6px 10px',background:'none',border:'none',color:'#9ca3af',fontSize:13,cursor:'pointer'}}>Cancel</button>
-                </div>
-              ):readings.length===0?(
-                <p style={{fontSize:12,color:'#d1d5db',fontStyle:'italic'}}>No readings yet</p>
-              ):(
-                <div>
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                    <MiniLine readings={readings} color={['#5B6DC4','#f59e0b','#7c3aed'][i%3]}/>
-                    <div style={{display:'flex',alignItems:'center',gap:8}}>
-                      <span style={{fontSize:11,color:'#9ca3af'}}>{readings.length} reading{readings.length!==1?'s':''}</span>
-                      <button onClick={()=>setShowReadings(showReadings===metric?null:metric)} style={{fontSize:11,color:'#9ca3af',background:'none',border:'none',cursor:'pointer',padding:0}}>{showReadings===metric?'▲':'▼'}</button>
-                    </div>
-                  </div>
-                  {showReadings===metric&&<div style={{marginTop:8,display:'flex',flexDirection:'column',gap:4}}>
-                    {readings.map((r,ri)=>(
-                      <div key={ri} style={{display:'flex',alignItems:'center',gap:8,padding:'4px 8px',background:'#f9fafb',borderRadius:8}}>
-                        <span style={{fontSize:12,color:'#374151',flex:1}}>{r.v.toLocaleString()} · {new Date(r.date).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</span>
-                        <button onClick={()=>deleteReading(metric,ri)} style={{color:'#d1d5db',background:'none',border:'none',cursor:'pointer',padding:2,fontSize:11}}>✕</button>
-                      </div>
-                    ))}
-                  </div>}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
+const MetricsTracker = () => null;
 
 // ── SECTIONS ─────────────────────────────────────────────────────────────────
 const DOC_TYPES = ['SAFE','Term Sheet','Cap Table','Pitch Deck','Due Diligence','Financial Model','Legal','Other'];
@@ -2247,7 +2149,6 @@ const DetailView = ({deal,onUpdate,setToast}) => {
         </div>}
 
         {/* Traction metrics — same as invested */}
-        <MetricsTracker deal={deal} onUpdate={onUpdate}/>
 
         <PrimaryInsight deal={deal} onUpdate={onUpdate} setToast={setToast}/>
 
@@ -2428,7 +2329,6 @@ const DetailView = ({deal,onUpdate,setToast}) => {
 
       <DealTermsCard deal={deal} inv={inv} cb={cb} C={C} onUpdate={onUpdate} setToast={setToast}/>
 
-      <MetricsTracker deal={deal} onUpdate={onUpdate}/>
 
       <PrimaryInsight deal={deal} onUpdate={onUpdate} setToast={setToast}/>
 
@@ -2691,29 +2591,7 @@ const AddModal = ({onClose,onAdd}) => {
           <div><label style={lbl}>Role</label><input value={f.founderRole} onChange={e=>setF({...f,founderRole:e.target.value})} placeholder="CEO" style={inp}/></div>
         </div>
 
-        {/* Traction metrics */}
-        {(()=>{
-          const mat = STAGE_MAT[f.stage]||'lab';
-          const defs = METRIC_DEFAULTS[mat]||[];
-          if(mat==='deploy'||mat==='fund') return (
-            <div style={{padding:'10px 14px',background:'#f9fafb',borderRadius:10,border:'1px solid #f3f4f6'}}>
-              <p style={{fontSize:13,color:'#9ca3af'}}>At {f.stage} stage, revenue is the primary metric — no traction proxies needed.</p>
-            </div>
-          );
-          return (
-            <div>
-              <label style={lbl}>Traction metrics <span style={{fontWeight:400,color:'#9ca3af'}}>— pre-filled for {f.stage} stage, edit freely</span></label>
-              <div style={{display:'flex',flexDirection:'column',gap:8}}>
-                {['metric1','metric2','metric3'].map((k,i)=>(
-                  <input key={k} value={f[k]} onChange={e=>setF({...f,[k]:e.target.value})}
-                    placeholder={defs[i]||`Metric ${i+1}`}
-                    style={{...inp,borderColor:f[k]?'#5B6DC4':'#e5e7eb'}}/>
-                ))}
-              </div>
-              <p style={{fontSize:11,color:'#9ca3af',marginTop:6}}>Log readings on the deal page after each founder call</p>
-            </div>
-          );
-        })()}
+
 
         {/* Initial note */}
         <div>
