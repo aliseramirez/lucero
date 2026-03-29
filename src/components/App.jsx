@@ -2008,8 +2008,9 @@ const DetailView = ({deal,onUpdate,setToast}) => {
           {inv.ownershipPercent&&<div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:2}}>Ownership</p><p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{inv.ownershipPercent}%</p></div>}
         </div>
 
-        {/* Compact deal terms strip — shows when any terms or channel set, inline editable */}
+        {/* Compact deal terms strip — collapsible */}
         {(()=>{
+          const [open, setOpen] = useState(false);
           const [editing, setEditing] = useState(false);
           const t = deal.terms || {};
           const [form, setForm] = useState({
@@ -2043,16 +2044,29 @@ const DetailView = ({deal,onUpdate,setToast}) => {
           const lbl2 = {fontSize:10,color:'#9ca3af',display:'block',marginBottom:2};
           return (
             <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid #f3f4f6'}}>
-              {!editing ? (
-                <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
-                  <span style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,flexShrink:0}}>Terms</span>
+              {/* Toggle row — always visible */}
+              <button onClick={()=>{ setOpen(v=>!v); setEditing(false); }}
+                style={{width:'100%',display:'flex',alignItems:'center',gap:6,background:'none',border:'none',cursor:'pointer',padding:0,textAlign:'left'}}>
+                <span style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,flexShrink:0}}>Terms</span>
+                {!open && pills.length > 0 && (
+                  <span style={{fontSize:11,color:'#9ca3af',overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis',flex:1}}>
+                    {pills.slice(0,3).join(' · ')}{pills.length > 3 ? ` +${pills.length-3}` : ''}
+                  </span>
+                )}
+                {!open && pills.length === 0 && <span style={{fontSize:11,color:'#d1d5db',fontStyle:'italic',flex:1}}>not set</span>}
+                <span style={{fontSize:10,color:'#c4c4c4',marginLeft:'auto',flexShrink:0}}>{open ? '▲' : '▼'}</span>
+              </button>
+              {/* Expanded content */}
+              {open && !editing && (
+                <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',marginTop:8}}>
                   {pills.length ? pills.map((p,i) => (
                     <span key={i} style={{fontSize:11,fontWeight:500,color:'#374151',background:'#f3f4f6',borderRadius:99,padding:'2px 8px'}}>{p}</span>
                   )) : <span style={{fontSize:11,color:'#d1d5db',fontStyle:'italic'}}>not set</span>}
                   <button onClick={()=>setEditing(true)} style={{marginLeft:'auto',fontSize:11,color:'#5B6DC4',background:'none',border:'none',cursor:'pointer',padding:0,flexShrink:0}}>Edit</button>
                 </div>
-              ) : (
-                <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8}}>
+              )}
+              {open && editing && (
+                <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginTop:8}}>
                   <div style={{gridColumn:'1/-1'}}>
                     <label style={lbl2}>Structure</label>
                     <div style={{display:'flex',gap:5,flexWrap:'wrap'}}>
