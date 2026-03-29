@@ -2600,8 +2600,8 @@ const InvestedCard = ({deal,onClick}) => {
   );
 
   return (
-    <div onClick={onClick} style={{background:'white',borderRadius:16,border:`1px solid ${health.needsCheckIn?'#fde68a':'#e5e7eb'}`,cursor:'pointer',overflow:'hidden'}}>
-      {health.needsCheckIn&&<div style={{padding:'6px 16px',background:'#fffbeb',borderBottom:'1px solid #fde68a',display:'flex',gap:8,alignItems:'center'}}><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span style={{fontSize:12,fontWeight:500,color:'#92400e'}}>{health.checkInReason}</span></div>}
+    <div onClick={onClick} style={{background:'white',borderRadius:16,border:'1px solid #e5e7eb',cursor:'pointer',overflow:'hidden'}}>
+
       <div style={{padding:'14px 16px',display:'flex',alignItems:'center',gap:14}}>
         <CompanyLogo name={deal.companyName} website={deal.website} size={44} radius={12} fallbackBg="#f59e0b" fallbackColor="white"/>
         <div style={{flex:1,minWidth:0}}>
@@ -2609,7 +2609,6 @@ const InvestedCard = ({deal,onClick}) => {
             <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>{deal.companyName}</span>
           </div>
           <p style={{fontSize:12,color:'#6b7280'}}>{deal.industry} · {deal.stage}</p>
-          {health.factors.filter(f=>f.t!=='info').slice(0,1).map((f,i)=><div key={i} style={{display:'flex',alignItems:'center',gap:6,marginTop:4}}><span style={{width:6,height:6,borderRadius:99,background:f.t==='positive'?'#10b981':f.t==='negative'?'#ef4444':'#f59e0b',display:'inline-block'}}/><span style={{fontSize:11,color:'#9ca3af'}}>{f.l}</span></div>)}
         </div>
         <div style={{textAlign:'right',flexShrink:0}}>
           <p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{fmtC(cb)}</p>
