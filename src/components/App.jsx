@@ -2000,12 +2000,10 @@ const DetailView = ({deal,onUpdate,setToast}) => {
 
         {deal.overview&&<p style={{fontSize:14,color:'#374151',lineHeight:1.6,marginBottom:12}}>{deal.overview}</p>}
 
-        {/* Investment quick stats */}
+        {/* Investment quick stats — vehicle + date only; amount/ownership live in Valuation card */}
         <div style={{display:'flex',gap:20,paddingTop:12,borderTop:'1px solid #f3f4f6',flexWrap:'wrap'}}>
-          <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:2}}>Invested</p><p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{fmtC(cb)}</p></div>
           <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:2}}>Vehicle</p><p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{inv.vehicle||'—'}</p></div>
           <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:2}}>Date</p><p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{inv.date?new Date(inv.date).toLocaleDateString('en-US',{month:'short',year:'numeric'}):'—'}</p></div>
-          {inv.ownershipPercent&&<div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:2}}>Ownership</p><p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{inv.ownershipPercent}%</p></div>}
         </div>
 
         {/* Compact deal terms strip — collapsible */}
@@ -2246,12 +2244,12 @@ const DetailView = ({deal,onUpdate,setToast}) => {
           />
         ))}
 
-        {/* Effective cost / fee breakdown */}
+        {/* Fee breakdown — inline note, no duplicate of cost basis */}
         {inv.amount > 0 && inv.effectiveCost > 0 && inv.effectiveCost < inv.amount && (
-          <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid #f3f4f6',display:'flex',gap:16,flexWrap:'wrap'}}>
-            <div><p style={C.label}>Check size</p><p style={{fontSize:14,fontWeight:600,color:'#9ca3af'}}>{fmtC(inv.amount)}</p></div>
-            <div><p style={C.label}>Upfront fees</p><p style={{fontSize:14,fontWeight:600,color:'#ef4444'}}>−{fmtC(inv.amount - inv.effectiveCost)}</p></div>
-            <div><p style={C.label}>Effective equity</p><p style={{fontSize:14,fontWeight:600,color:'#10b981'}}>{fmtC(inv.effectiveCost)}</p></div>
+          <div style={{marginTop:10,paddingTop:10,borderTop:'1px solid #f3f4f6'}}>
+            <p style={{fontSize:12,color:'#6b7280'}}>
+              {fmtC(inv.amount)} − <span style={{color:'#ef4444'}}>{fmtC(inv.amount - inv.effectiveCost)} fees</span> = <span style={{color:'#10b981',fontWeight:600}}>{fmtC(inv.effectiveCost)} effective equity</span>
+            </p>
           </div>
         )}
       </div>
