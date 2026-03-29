@@ -1070,31 +1070,44 @@ const ValueChart = ({ deal, allDeals, mode = 'deal' }) => {
 // Claude extracts structured insights — confirm before saving to deal.
 const PrimaryInsight = ({ deal, onUpdate, setToast }) => {
   const [open, setOpen] = useState(true);
-  const [inputMode, setInputMode] = useState(null); // null | 'text' | 'file'
   const [draft, setDraft] = useState('');
   const [extracting, setExtracting] = useState(false);
-  const [extracted, setExtracted] = useState(null); // pending confirmation
-  const [approved, setApproved] = useState({}); // which items user approved
+  const [extracted, setExtracted] = useState(null);
+  const [approved, setApproved] = useState({});
+  const [editingId, setEditingId] = useState(null);
+  const [editText, setEditText] = useState('');
   const fileRef = useRef(null);
   const updates = (deal.founderUpdates || []).sort((a,b) => new Date(b.date) - new Date(a.date));
+
+  const fmtTs = (iso) => {
+    const d = new Date(iso);
+    const diff = Math.floor((Date.now() - d) / 86400000);
+    if (diff === 0) return 'Today ' + d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+    if (diff === 1) return 'Yesterday ' + d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+    return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) + ' ' + d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+  };
+
+  const sentColor = { positive:'#10b981', negative:'#ef4444', neutral:'#9ca3af', mixed:'#f59e0b' };
+
+  const saveRaw = (content) => {
+    if (!content?.trim()) return;
+    const entry = { id: genId(), type: 'text', content: content.trim(), date: new Date().toISOString() };
+    onUpdate({ ...deal, founderUpdates: [...(deal.founderUpdates||[]), entry] });
+    setDraft('');
+  };
 
   const extract = async (content) => {
     if (!content?.trim()) return;
     setExtracting(true);
-    setInputMode(null);
+    setDraft('');
     try {
       const resp = await fetch('/api/extract', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content,
-          dealName: deal.companyName,
-          existingData: { revenueLog: deal.revenueLog, fundraiseHistory: deal.fundraiseHistory },
-        }),
+        body: JSON.stringify({ content, dealName: deal.companyName, existingData: { revenueLog: deal.revenueLog, fundraiseHistory: deal.fundraiseHistory } }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const result = await resp.json();
-      // Pre-approve all findings
       const initial = {};
       if (result.navUpdate?.nav) initial['nav_update'] = true;
       (result.revenuePoints||[]).forEach((_,i) => initial[`rev_${i}`] = true);
@@ -1112,354 +1125,247 @@ const PrimaryInsight = ({ deal, onUpdate, setToast }) => {
     }
   };
 
-  const saveRaw = (content) => {
-    const entry = { id: genId(), type: 'text', content, date: new Date().toISOString() };
-    onUpdate({ ...deal, founderUpdates: [...(deal.founderUpdates||[]), entry] });
-    setDraft('');
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (draft.trim().length < 3) return;
+      draft.trim().length > 80 ? extract(draft) : saveRaw(draft);
+    }
+  };
+
+  const submitDraft = () => {
+    if (draft.trim().length < 3) return;
+    draft.trim().length > 80 ? extract(draft) : saveRaw(draft);
+  };
+
+  const saveEdit = (id) => {
+    if (!editText.trim()) return;
+    const updated = (deal.founderUpdates||[]).map(u =>
+      u.id === id ? { ...u, content: editText.trim(), date: new Date().toISOString(), keyTakeaway: undefined, sentiment: undefined } : u
+    );
+    onUpdate({ ...deal, founderUpdates: updated });
+    setEditingId(null); setEditText('');
+    setToast('Note updated');
+  };
+
+  const deleteUpdate = (id) => {
+    onUpdate({ ...deal, founderUpdates: (deal.founderUpdates||[]).filter(u => u.id !== id) });
   };
 
   const confirmExtracted = () => {
     if (!extracted) return;
     let updated = { ...deal };
     const now = new Date().toISOString();
-
-    // Save raw entry
-    const entry = { id: genId(), type: 'text', content: extracted.rawContent, date: now,
-      sentiment: extracted.sentiment, keyTakeaway: extracted.keyTakeaway };
+    const entry = { id: genId(), type: 'text', content: extracted.rawContent, date: now, sentiment: extracted.sentiment, keyTakeaway: extracted.keyTakeaway };
     updated.founderUpdates = [...(updated.founderUpdates||[]), entry];
     updated.investment = { ...(updated.investment||{}), lastUpdateReceived: now };
-
-    // Apply approved revenue points
     (extracted.revenuePoints||[]).forEach((r, i) => {
       if (!approved[`rev_${i}`]) return;
       const date = r.date ? new Date(r.date).toISOString() : now;
       const existingDates = new Set((updated.revenueLog||[]).map(x => x.date?.substring(0,7)));
       if (existingDates.has(date.substring(0,7))) return;
-      updated.revenueLog = [...(updated.revenueLog||[]),
-        { id: genId(), date, metric: r.metric, value: r.value, numericValue: r.numericValue, source: 'Founder update', fromPrimary: true }
-      ].sort((a,b) => new Date(a.date)-new Date(b.date));
+      updated.revenueLog = [...(updated.revenueLog||[]), { id: genId(), date, metric: r.metric, value: r.value, numericValue: r.numericValue, source: 'Founder update', fromPrimary: true }].sort((a,b) => new Date(a.date)-new Date(b.date));
     });
-
-    // Apply approved funding signals
     (extracted.fundingSignals||[]).forEach((f, i) => {
       if (!approved[`fund_${i}`]) return;
       if (f.type === 'active_raise' || f.type === 'exploring') {
-        updated.activeRaise = {
-          roundName: f.roundName || '',
-          targetAmount: f.amount || null,
-          leadInvestor: f.leadInvestor || '',
-          leadStatus: f.leadInvestor ? 'rumored' : 'none',
-          participants: (f.participants||[]).join(', '),
-          timeline: f.timeline || '',
-          dilutionPct: '20',
-        };
+        updated.activeRaise = { roundName: f.roundName||'', targetAmount: f.amount||null, leadInvestor: f.leadInvestor||'', leadStatus: f.leadInvestor?'rumored':'none', participants: (f.participants||[]).join(', '), timeline: f.timeline||'', dilutionPct: '20' };
         updated.monitoring = { ...(updated.monitoring||{}), fundraisingStatus: 'raising' };
       } else if (f.type === 'closed_round') {
-        const round = {
-          id: genId(), roundName: f.roundName||'Unknown round', date: now,
-          amountRaised: f.amount||null, leadInvestor: f.leadInvestor||null,
-          followOns: f.participants||[], source: 'Founder update', fromPrimary: true,
-        };
-        updated.fundraiseHistory = [...(updated.fundraiseHistory||[]), round];
+        updated.fundraiseHistory = [...(updated.fundraiseHistory||[]), { id: genId(), roundName: f.roundName||'Unknown round', date: now, amountRaised: f.amount||null, leadInvestor: f.leadInvestor||null, followOns: f.participants||[], source: 'Founder update', fromPrimary: true }];
       }
     });
-
-    // Apply risks + positives + team changes as milestones
     const newMilestones = [];
     const existing = new Set((updated.milestones||[]).map(m => m.title));
-    (extracted.risks||[]).forEach((r, i) => {
-      if (!approved[`risk_${i}`] || existing.has(r.title)) return;
-      newMilestones.push({ id: genId(), type: 'update', title: r.title, description: r.description,
-        date: now, sentiment: 'negative', fromPrimary: true });
-    });
-    (extracted.positives||[]).forEach((p, i) => {
-      if (!approved[`pos_${i}`] || existing.has(p.title)) return;
-      newMilestones.push({ id: genId(), type: 'update', title: p.title, description: p.description,
-        date: now, sentiment: 'positive', fromPrimary: true });
-    });
-    (extracted.teamChanges||[]).forEach((t, i) => {
-      if (!approved[`team_${i}`] || existing.has(t.title)) return;
-      newMilestones.push({ id: genId(), type: 'update', title: `${t.type === 'hire' ? 'New hire' : t.type === 'departure' ? 'Departure' : 'Promotion'}: ${t.role}`,
-        description: t.description, date: now, sentiment: t.type === 'departure' ? 'negative' : 'positive', fromPrimary: true });
-    });
+    (extracted.risks||[]).forEach((r, i) => { if (!approved[`risk_${i}`] || existing.has(r.title)) return; newMilestones.push({ id: genId(), type: 'update', title: r.title, description: r.description, date: now, sentiment: 'negative', fromPrimary: true }); });
+    (extracted.positives||[]).forEach((p, i) => { if (!approved[`pos_${i}`] || existing.has(p.title)) return; newMilestones.push({ id: genId(), type: 'update', title: p.title, description: p.description, date: now, sentiment: 'positive', fromPrimary: true }); });
+    (extracted.teamChanges||[]).forEach((t, i) => { if (!approved[`team_${i}`] || existing.has(t.title)) return; newMilestones.push({ id: genId(), type: 'update', title: `${t.type==='hire'?'New hire':t.type==='departure'?'Departure':'Promotion'}: ${t.role}`, description: t.description, date: now, sentiment: t.type==='departure'?'negative':'positive', fromPrimary: true }); });
     if (newMilestones.length) updated.milestones = [...(updated.milestones||[]), ...newMilestones];
-
-    // Apply NAV update for SPV/fund financial statements (Carta, AngelList, etc.)
     if (extracted.navUpdate?.nav && approved['nav_update'] !== false) {
-      const navDate = extracted.navUpdate.date
-        ? new Date(extracted.navUpdate.date).toISOString()
-        : now;
-      updated.investment = {
-        ...(updated.investment||{}),
-        impliedValue: extracted.navUpdate.nav,
-        lastValuationDate: navDate,
-        valuationMethod: 'nav-lp',
-        ...(extracted.navUpdate.costBasis ? { costBasis: extracted.navUpdate.costBasis } : {}),
-      };
+      updated.investment = { ...(updated.investment||{}), impliedValue: extracted.navUpdate.nav, lastValuationDate: extracted.navUpdate.date ? new Date(extracted.navUpdate.date).toISOString() : now, valuationMethod: 'nav-lp', ...(extracted.navUpdate.costBasis ? { costBasis: extracted.navUpdate.costBasis } : {}) };
     }
-
     onUpdate(updated);
-    setExtracted(null);
-    setApproved({});
-    setDraft('');
+    setExtracted(null); setApproved({});
     setToast('Founder update saved');
   };
 
   const toggle = (key) => setApproved(prev => ({ ...prev, [key]: !prev[key] }));
 
-  const sentColor = { positive: '#10b981', negative: '#ef4444', neutral: '#9ca3af', mixed: '#f59e0b' };
+  const handlePDFUpload = async (file) => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = '';
+    const chunkSize = 8192;
+    for (let i = 0; i < bytes.length; i += chunkSize) binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    const base64 = btoa(binary);
+    setExtracting(true);
+    try {
+      const resp = await fetch('/api/extract', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: null, pdfBase64: base64, dealName: deal.companyName, existingData: { revenueLog: deal.revenueLog, fundraiseHistory: deal.fundraiseHistory } }) });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const result = await resp.json();
+      if (result.error) throw new Error(result.error);
+      const initial = {};
+      if (result.navUpdate?.nav) initial['nav_update'] = true;
+      (result.revenuePoints||[]).forEach((_,i) => initial[`rev_${i}`] = true);
+      (result.fundingSignals||[]).forEach((_,i) => initial[`fund_${i}`] = true);
+      (result.risks||[]).forEach((_,i) => initial[`risk_${i}`] = true);
+      (result.positives||[]).forEach((_,i) => initial[`pos_${i}`] = true);
+      (result.teamChanges||[]).forEach((_,i) => initial[`team_${i}`] = true);
+      const hasAnything = result.navUpdate?.nav || (result.revenuePoints||[]).length || (result.fundingSignals||[]).length || (result.positives||[]).length || (result.risks||[]).length;
+      if (!hasAnything) { setToast('PDF parsed but no data found — try pasting the text'); return; }
+      setExtracted({ ...result, rawContent: `[PDF: ${file.name}]` });
+      setApproved(initial);
+    } catch (err) {
+      setToast(`PDF failed: ${err.message}`);
+    } finally {
+      setExtracting(false);
+    }
+  };
 
   return (
-    <div style={{ background: 'white', borderRadius: 16, overflow: 'hidden', marginBottom: 12 }}>
+    <div style={{ background:'white', borderRadius:16, overflow:'hidden', marginBottom:12 }}>
       <button onClick={() => setOpen(v => !v)}
-        style={{ width: '100%', padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'none', border: 'none', cursor: 'pointer' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        style={{ width:'100%', padding:'14px 20px', display:'flex', alignItems:'center', justifyContent:'space-between', background:'none', border:'none', cursor:'pointer' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-          <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>Founder Updates</span>
-          <span style={{ fontSize: 11, color: '#9ca3af' }}>emails · call notes · updates</span>
-          {updates.length > 0 && <span style={{ fontSize: 12, color: '#9ca3af' }}>({updates.length})</span>}
+          <span style={{ fontWeight:600, fontSize:14, color:'#111827' }}>Founder Updates</span>
+          <span style={{ fontSize:11, color:'#9ca3af' }}>emails · call notes · updates</span>
+          {updates.length > 0 && <span style={{ fontSize:12, color:'#9ca3af' }}>({updates.length})</span>}
         </div>
-        <span style={{ color: '#9ca3af', fontSize: 11 }}>{open ? '▲' : '▼'}</span>
+        <span style={{ color:'#9ca3af', fontSize:11 }}>{open ? '▲' : '▼'}</span>
       </button>
 
-      {open && <div style={{ padding: '0 20px 20px', borderTop: '1px solid #f3f4f6' }}>
+      {open && (
+        <div style={{ padding:'0 20px 20px', borderTop:'1px solid #f3f4f6' }}>
 
-        {/* Input buttons */}
-        {!inputMode && !extracting && !extracted && (
-          <div style={{ display: 'flex', gap: 8, paddingTop: 14, marginBottom: updates.length ? 16 : 0 }}>
-            <button onClick={() => setInputMode('text')}
-              style={{ flex: 1, padding: '10px', background: '#eef2ff', color: '#5B6DC4', border: 'none', borderRadius: 10, fontWeight: 600, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-              Paste update / notes
-            </button>
-            <button onClick={() => fileRef.current?.click()}
-              style={{ flex: 1, padding: '10px', background: '#f0fdf4', color: '#10b981', border: 'none', borderRadius: 10, fontWeight: 600, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-              Upload file
-            </button>
-            <input ref={fileRef} type="file" accept=".txt,.pdf,.md,.eml,.doc,.docx" style={{ display: 'none' }}
-              onChange={e => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = async ev => {
+          {/* Composer — always visible when not extracting */}
+          {!extracting && !extracted && (
+            <div style={{ marginTop:14, position:'relative' }}>
+              <textarea
+                value={draft}
+                onChange={e => setDraft(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Add a note, paste a founder email, or drop in call notes… Press Enter to save, Shift+Enter for new line."
+                rows={3}
+                style={{ width:'100%', padding:'10px 44px 32px 12px', border:'1px solid #e5e7eb', borderRadius:12, fontSize:13, resize:'vertical', outline:'none', boxSizing:'border-box', fontFamily:'inherit', lineHeight:1.6, color:'#374151' }}
+              />
+              <button onClick={submitDraft} disabled={draft.trim().length < 3}
+                title="Save (or press Enter)"
+                style={{ position:'absolute', bottom:8, right:36, background:draft.trim().length >= 3 ? '#5B6DC4' : '#e5e7eb', border:'none', borderRadius:7, width:26, height:26, display:'flex', alignItems:'center', justifyContent:'center', cursor:draft.trim().length >= 3 ? 'pointer' : 'default', transition:'background .15s' }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+              </button>
+              <button onClick={() => fileRef.current?.click()}
+                title="Upload file (PDF, email, doc)"
+                style={{ position:'absolute', bottom:8, right:8, background:'#f3f4f6', border:'none', borderRadius:7, width:26, height:26, display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer' }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              </button>
+              <input ref={fileRef} type="file" accept=".txt,.pdf,.md,.eml,.doc,.docx" style={{ display:'none' }}
+                onChange={e => {
+                  const file = e.target.files[0];
+                  if (!file) return;
                   if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
-                    // Convert ArrayBuffer to base64 in chunks to avoid call stack overflow on large files
-                    const bytes = new Uint8Array(ev.target.result);
-                    let binary = '';
-                    const chunkSize = 8192;
-                    for (let i = 0; i < bytes.length; i += chunkSize) {
-                      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-                    }
-                    const base64 = btoa(binary);
-                    setExtracting(true);
-                    setInputMode(null);
-                    try {
-                      const resp = await fetch('/api/extract', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          content: null,
-                          pdfBase64: base64,
-                          dealName: deal.companyName,
-                          existingData: { revenueLog: deal.revenueLog, fundraiseHistory: deal.fundraiseHistory },
-                        }),
-                      });
-                      if (!resp.ok) {
-                        const errBody = await resp.json().catch(() => ({}));
-                        throw new Error(errBody.error || `HTTP ${resp.status}`);
-                      }
-                      const result = await resp.json();
-                      if (result.error) throw new Error(result.error);
-                      const initial = {};
-                      if (result.navUpdate?.nav) initial['nav_update'] = true;
-                      (result.revenuePoints||[]).forEach((_,i) => initial[`rev_${i}`] = true);
-                      (result.fundingSignals||[]).forEach((_,i) => initial[`fund_${i}`] = true);
-                      (result.risks||[]).forEach((_,i) => initial[`risk_${i}`] = true);
-                      (result.positives||[]).forEach((_,i) => initial[`pos_${i}`] = true);
-                      (result.teamChanges||[]).forEach((_,i) => initial[`team_${i}`] = true);
-                      const hasAnything = result.navUpdate?.nav || (result.revenuePoints||[]).length || (result.fundingSignals||[]).length || (result.positives||[]).length || (result.risks||[]).length;
-                      if (!hasAnything) {
-                        setToast('PDF parsed but no data found — try pasting the text');
-                        setExtracting(false);
-                        return;
-                      }
-                      setExtracted({ ...result, rawContent: `[PDF: ${file.name}]` });
-                      setApproved(initial);
-                    } catch (err) {
-                      console.error('PDF extract error:', err);
-                      setToast(`PDF failed: ${err.message}`);
-                      setExtracting(false);
-                    } finally {
-                      setExtracting(false);
-                    }
+                    handlePDFUpload(file);
                   } else {
-                    extract(ev.target.result);
+                    const reader = new FileReader();
+                    reader.onload = ev => extract(ev.target.result);
+                    reader.readAsText(file);
                   }
-                };
-                if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
-                  reader.readAsArrayBuffer(file);
-                } else {
-                  reader.readAsText(file);
-                }
-                e.target.value = '';
-              }}/>
-          </div>
-        )}
-
-        {/* Text input */}
-        {inputMode === 'text' && (
-          <div style={{ paddingTop: 14 }}>
-            <textarea value={draft} onChange={e => setDraft(e.target.value)} autoFocus
-              placeholder="Paste a founder email, call notes, or any update here... Claude will extract revenue figures, funding signals, risks, and key highlights for you to confirm."
-              rows={8} style={{ width: '100%', padding: '10px 12px', border: '1px solid #5B6DC4', borderRadius: 12, fontSize: 13, resize: 'vertical', outline: 'none', boxSizing: 'border-box', fontFamily: 'inherit', lineHeight: 1.7 }}/>
-            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-              <button onClick={() => extract(draft)} disabled={draft.trim().length < 10}
-                style={{ flex: 2, padding: '9px', background: '#5B6DC4', color: 'white', border: 'none', borderRadius: 10, fontWeight: 600, fontSize: 13, cursor: 'pointer', opacity: draft.trim().length >= 10 ? 1 : .4 }}>
-                Extract insights
-              </button>
-              <button onClick={() => saveRaw(draft)} disabled={draft.trim().length < 5}
-                style={{ flex: 1, padding: '9px', background: '#f3f4f6', color: '#6b7280', border: 'none', borderRadius: 10, fontWeight: 500, fontSize: 13, cursor: 'pointer', opacity: draft.trim().length >= 5 ? 1 : .4 }}>
-                Save as-is
-              </button>
-              <button onClick={() => { setInputMode(null); setDraft(''); }}
-                style={{ padding: '9px 14px', background: 'none', border: 'none', color: '#9ca3af', fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+                  e.target.value = '';
+                }}/>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Extracting spinner */}
-        {extracting && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '16px 0', color: '#6b7280' }}>
-            <div style={{ width: 16, height: 16, border: '2px solid #e5e7eb', borderTopColor: '#5B6DC4', borderRadius: '50%', animation: 'spin 0.8s linear infinite', flexShrink: 0 }}/>
-            <span style={{ fontSize: 13 }}>Extracting insights from update…</span>
-          </div>
-        )}
-
-        {/* Confirmation card */}
-        {extracted && !extracting && (
-          <div style={{ paddingTop: 14 }}>
-            {/* Key takeaway */}
-            <div style={{ background: '#f9fafb', borderRadius: 12, padding: '10px 14px', marginBottom: 14, display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-              <span style={{ width: 8, height: 8, borderRadius: 99, background: sentColor[extracted.sentiment] || '#9ca3af', display: 'inline-block', marginTop: 4, flexShrink: 0 }}/>
-              <p style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, flex: 1 }}>{extracted.keyTakeaway || 'Update logged.'}</p>
+          {/* Spinner */}
+          {extracting && (
+            <div style={{ display:'flex', alignItems:'center', gap:10, padding:'16px 0', color:'#6b7280' }}>
+              <div style={{ width:16, height:16, border:'2px solid #e5e7eb', borderTopColor:'#5B6DC4', borderRadius:'50%', animation:'spin 0.8s linear infinite', flexShrink:0 }}/>
+              <span style={{ fontSize:13 }}>Extracting insights…</span>
             </div>
+          )}
 
-            {/* Extracted items to confirm */}
-            {[
-              ...(extracted.revenuePoints||[]).map((r,i) => ({
-                key: `rev_${i}`, icon: '📈', label: 'Revenue data point',
-                title: r.value, sub: `${r.metric} · ${r.date} · ${r.confidence} confidence`,
-                color: '#10b981', bg: '#f0fdf4',
-              })),
-              ...(extracted.fundingSignals||[]).map((f,i) => ({
-                key: `fund_${i}`, icon: '💰', label: f.type === 'active_raise' ? 'Active raise → Fundraise History' : 'Funding signal',
-                title: `${f.roundName || 'Round'}${f.amount ? ` · ${fmtC(f.amount)}` : ''}`,
-                sub: `${f.leadInvestor ? `Lead: ${f.leadInvestor} · ` : ''}${f.timeline || ''}`,
-                color: '#5B6DC4', bg: '#eef2ff',
-              })),
-              ...(extracted.positives||[]).map((p,i) => ({
-                key: `pos_${i}`, icon: '✦', label: 'Positive signal',
-                title: p.title, sub: p.description,
-                color: '#10b981', bg: '#f0fdf4',
-              })),
-              ...(extracted.risks||[]).map((r,i) => ({
-                key: `risk_${i}`, icon: '⚠', label: `Risk · ${r.severity}`,
-                title: r.title, sub: r.description,
-                color: '#ef4444', bg: '#fef2f2',
-              })),
-              ...(extracted.teamChanges||[]).map((t,i) => ({
-                key: `team_${i}`, icon: '👤', label: `Team · ${t.type}`,
-                title: `${t.role}${t.name ? ` — ${t.name}` : ''}`, sub: t.description,
-                color: '#7c3aed', bg: '#f5f3ff',
-              })),
-            ].length === 0 ? (
-              <p style={{ fontSize: 13, color: '#9ca3af', textAlign: 'center', padding: '8px 0' }}>No structured data found — update will be saved as a note.</p>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
-                <p style={{ fontSize: 10, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: .5, marginBottom: 2 }}>Confirm what to save</p>
-                {[
-                  ...(extracted.navUpdate?.nav ? [{
-                    key: 'nav_update', icon: '🏦', label: 'NAV update → Fund position',
-                    title: `${fmtC(extracted.navUpdate.nav)} members' equity`,
-                    sub: `as of ${extracted.navUpdate.date || 'Dec 2025'}${extracted.navUpdate.totalFees ? ` · ${fmtC(extracted.navUpdate.totalFees)} in fees` : ''}`,
-                    color: '#7c3aed', bg: '#f5f3ff',
-                  }] : []),
-                  ...(extracted.revenuePoints||[]).map((r,i) => ({
-                    key: `rev_${i}`, icon: '📈', label: 'Revenue data point',
-                    title: r.value, sub: `${r.metric} · ${r.date} · ${r.confidence} confidence`,
-                    color: '#10b981', bg: '#f0fdf4',
-                  })),
-                  ...(extracted.fundingSignals||[]).map((f,i) => ({
-                    key: `fund_${i}`, icon: '💰', label: f.type === 'active_raise' ? 'Active raise → Fundraise History' : 'Funding signal',
-                    title: `${f.roundName || 'Round'}${f.amount ? ` · ${fmtC(f.amount)}` : ''}`,
-                    sub: `${f.leadInvestor ? `Lead: ${f.leadInvestor} · ` : ''}${f.timeline || ''}`,
-                    color: '#5B6DC4', bg: '#eef2ff',
-                  })),
-                  ...(extracted.positives||[]).map((p,i) => ({
-                    key: `pos_${i}`, icon: '✦', label: 'Positive signal',
-                    title: p.title, sub: p.description,
-                    color: '#10b981', bg: '#f0fdf4',
-                  })),
-                  ...(extracted.risks||[]).map((r,i) => ({
-                    key: `risk_${i}`, icon: '⚠', label: `Risk · ${r.severity}`,
-                    title: r.title, sub: r.description,
-                    color: '#ef4444', bg: '#fef2f2',
-                  })),
-                  ...(extracted.teamChanges||[]).map((t,i) => ({
-                    key: `team_${i}`, icon: '👤', label: `Team · ${t.type}`,
-                    title: `${t.role}${t.name ? ` — ${t.name}` : ''}`, sub: t.description,
-                    color: '#7c3aed', bg: '#f5f3ff',
-                  })),
-                ].map(item => (
-                  <div key={item.key} onClick={() => toggle(item.key)}
-                    style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', borderRadius: 12,
-                      background: approved[item.key] ? item.bg : '#f9fafb',
-                      border: `1.5px solid ${approved[item.key] ? item.color + '40' : '#e5e7eb'}`,
-                      cursor: 'pointer', opacity: approved[item.key] ? 1 : 0.5 }}>
-                    <div style={{ width: 18, height: 18, borderRadius: 5, border: `2px solid ${approved[item.key] ? item.color : '#d1d5db'}`,
-                      background: approved[item.key] ? item.color : 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1 }}>
-                      {approved[item.key] && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                        <span style={{ fontSize: 10, color: item.color, fontWeight: 700, textTransform: 'uppercase', letterSpacing: .5 }}>{item.label}</span>
-                      </div>
-                      <p style={{ fontSize: 13, fontWeight: 600, color: '#111827', marginBottom: 2 }}>{item.title}</p>
-                      {item.sub && <p style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.5 }}>{item.sub}</p>}
-                    </div>
+          {/* Extraction confirmation */}
+          {extracted && !extracting && (
+            <div style={{ paddingTop:14 }}>
+              <div style={{ background:'#f9fafb', borderRadius:12, padding:'10px 14px', marginBottom:14, display:'flex', alignItems:'flex-start', gap:10 }}>
+                <span style={{ width:8, height:8, borderRadius:99, background:sentColor[extracted.sentiment]||'#9ca3af', display:'inline-block', marginTop:4, flexShrink:0 }}/>
+                <p style={{ fontSize:13, color:'#374151', lineHeight:1.6, flex:1 }}>{extracted.keyTakeaway || 'Update logged.'}</p>
+              </div>
+              {[
+                ...(extracted.navUpdate?.nav ? [{ key:'nav_update', label:'NAV update → Fund position', title:`${fmtC(extracted.navUpdate.nav)} members' equity`, sub:`as of ${extracted.navUpdate.date||'latest'}${extracted.navUpdate.totalFees?` · ${fmtC(extracted.navUpdate.totalFees)} in fees`:''}`, color:'#7c3aed', bg:'#f5f3ff' }] : []),
+                ...(extracted.revenuePoints||[]).map((r,i) => ({ key:`rev_${i}`, label:'Revenue', title:r.value, sub:`${r.metric} · ${r.date}`, color:'#10b981', bg:'#f0fdf4' })),
+                ...(extracted.fundingSignals||[]).map((f,i) => ({ key:`fund_${i}`, label:f.type==='active_raise'?'Active raise':'Funding signal', title:`${f.roundName||'Round'}${f.amount?` · ${fmtC(f.amount)}`:''}`, sub:f.leadInvestor?`Lead: ${f.leadInvestor}`:'', color:'#5B6DC4', bg:'#eef2ff' })),
+                ...(extracted.positives||[]).map((p,i) => ({ key:`pos_${i}`, label:'Positive', title:p.title, sub:p.description, color:'#10b981', bg:'#f0fdf4' })),
+                ...(extracted.risks||[]).map((r,i) => ({ key:`risk_${i}`, label:`Risk · ${r.severity}`, title:r.title, sub:r.description, color:'#ef4444', bg:'#fef2f2' })),
+                ...(extracted.teamChanges||[]).map((t,i) => ({ key:`team_${i}`, label:`Team · ${t.type}`, title:`${t.role}${t.name?` — ${t.name}`:''}`, sub:t.description, color:'#7c3aed', bg:'#f5f3ff' })),
+              ].map(item => (
+                <div key={item.key} onClick={() => toggle(item.key)}
+                  style={{ display:'flex', alignItems:'flex-start', gap:10, padding:'10px 12px', borderRadius:12, marginBottom:8,
+                    background:approved[item.key] ? item.bg : '#f9fafb',
+                    border:`1.5px solid ${approved[item.key] ? item.color+'40' : '#e5e7eb'}`,
+                    cursor:'pointer', opacity:approved[item.key] ? 1 : 0.5 }}>
+                  <div style={{ width:18, height:18, borderRadius:5, border:`2px solid ${approved[item.key] ? item.color : '#d1d5db'}`, background:approved[item.key] ? item.color : 'white', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, marginTop:1 }}>
+                    {approved[item.key] && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
                   </div>
-                ))}
-              </div>
-            )}
-
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={confirmExtracted}
-                style={{ flex: 2, padding: '9px', background: '#5B6DC4', color: 'white', border: 'none', borderRadius: 10, fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
-                Save {Object.values(approved).filter(Boolean).length} item{Object.values(approved).filter(Boolean).length !== 1 ? 's' : ''} + note
-              </button>
-              <button onClick={() => { setExtracted(null); setApproved({}); }}
-                style={{ padding: '9px 14px', background: '#f3f4f6', color: '#6b7280', border: 'none', borderRadius: 10, fontSize: 13, cursor: 'pointer' }}>Discard</button>
-            </div>
-          </div>
-        )}
-
-        {/* Past updates log */}
-        {updates.length > 0 && !extracted && !extracting && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: inputMode ? 0 : 4 }}>
-            {updates.slice(0, 5).map((u, i) => (
-              <div key={u.id || i} style={{ padding: '10px 12px', borderRadius: 12, background: '#f9fafb', display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                {u.sentiment && <span style={{ width: 6, height: 6, borderRadius: 99, background: sentColor[u.sentiment] || '#9ca3af', display: 'inline-block', marginTop: 5, flexShrink: 0 }}/>}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  {u.keyTakeaway && <p style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 3 }}>{u.keyTakeaway}</p>}
-                  <p style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.5, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>{u.content}</p>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <span style={{ fontSize:10, color:item.color, fontWeight:700, textTransform:'uppercase', letterSpacing:.5 }}>{item.label}</span>
+                    <p style={{ fontSize:13, fontWeight:600, color:'#111827', marginBottom:2 }}>{item.title}</p>
+                    {item.sub && <p style={{ fontSize:12, color:'#6b7280', lineHeight:1.5 }}>{item.sub}</p>}
+                  </div>
                 </div>
-                <span style={{ fontSize: 11, color: '#d1d5db', flexShrink: 0 }}>{dAgo(u.date)}d</span>
+              ))}
+              <div style={{ display:'flex', gap:8, marginTop:4 }}>
+                <button onClick={confirmExtracted}
+                  style={{ flex:2, padding:'9px', background:'#5B6DC4', color:'white', border:'none', borderRadius:10, fontWeight:600, fontSize:13, cursor:'pointer' }}>
+                  Save {Object.values(approved).filter(Boolean).length} item{Object.values(approved).filter(Boolean).length !== 1 ? 's' : ''} + note
+                </button>
+                <button onClick={() => { setExtracted(null); setApproved({}); }}
+                  style={{ padding:'9px 14px', background:'#f3f4f6', color:'#6b7280', border:'none', borderRadius:10, fontSize:13, cursor:'pointer' }}>Discard</button>
               </div>
-            ))}
-          </div>
-        )}
-      </div>}
+            </div>
+          )}
+
+          {/* Past notes */}
+          {updates.length > 0 && !extracted && !extracting && (
+            <div style={{ display:'flex', flexDirection:'column', gap:6, marginTop:14 }}>
+              {updates.map((u, i) => (
+                <div key={u.id || i} style={{ borderRadius:12, border:'1px solid #f3f4f6', overflow:'hidden' }}>
+                  {editingId === u.id ? (
+                    <div style={{ padding:'10px 12px' }}>
+                      <textarea value={editText} onChange={e => setEditText(e.target.value)} autoFocus
+                        onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(u.id); } if (e.key === 'Escape') { setEditingId(null); setEditText(''); } }}
+                        rows={3}
+                        style={{ width:'100%', padding:'8px 10px', border:'1px solid #5B6DC4', borderRadius:8, fontSize:13, resize:'vertical', outline:'none', boxSizing:'border-box', fontFamily:'inherit', lineHeight:1.6 }}
+                      />
+                      <div style={{ display:'flex', gap:6, marginTop:6 }}>
+                        <button onClick={() => saveEdit(u.id)} style={{ padding:'5px 14px', background:'#5B6DC4', color:'white', border:'none', borderRadius:7, fontSize:12, fontWeight:600, cursor:'pointer' }}>Save</button>
+                        <button onClick={() => { setEditingId(null); setEditText(''); }} style={{ padding:'5px 10px', background:'none', border:'none', color:'#9ca3af', fontSize:12, cursor:'pointer' }}>Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ padding:'10px 12px', display:'flex', alignItems:'flex-start', gap:10 }}>
+                      {u.sentiment && <span style={{ width:6, height:6, borderRadius:99, background:sentColor[u.sentiment]||'#9ca3af', display:'inline-block', marginTop:5, flexShrink:0 }}/>}
+                      <div style={{ flex:1, minWidth:0 }}>
+                        {u.keyTakeaway && <p style={{ fontSize:12, fontWeight:600, color:'#374151', marginBottom:3 }}>{u.keyTakeaway}</p>}
+                        <p style={{ fontSize:12, color:'#6b7280', lineHeight:1.5 }}>{u.content}</p>
+                        <p style={{ fontSize:11, color:'#d1d5db', marginTop:4 }}>{fmtTs(u.date)}</p>
+                      </div>
+                      <div style={{ display:'flex', gap:4, flexShrink:0 }}>
+                        <button onClick={() => { setEditingId(u.id); setEditText(u.content||''); }} title="Edit"
+                          style={{ background:'none', border:'none', color:'#d1d5db', cursor:'pointer', padding:3 }}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                        </button>
+                        <button onClick={() => deleteUpdate(u.id)} title="Delete"
+                          style={{ background:'none', border:'none', color:'#d1d5db', cursor:'pointer', padding:3 }}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6M9 6V4h6v2"/></svg>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -2000,12 +1906,6 @@ const DetailView = ({deal,onUpdate,setToast}) => {
 
         {deal.overview&&<p style={{fontSize:14,color:'#374151',lineHeight:1.6,marginBottom:12}}>{deal.overview}</p>}
 
-        {/* Investment quick stats — vehicle + date only; amount/ownership live in Valuation card */}
-        <div style={{display:'flex',gap:20,paddingTop:12,borderTop:'1px solid #f3f4f6',flexWrap:'wrap'}}>
-          <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:2}}>Vehicle</p><p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{inv.vehicle||'—'}</p></div>
-          <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:2}}>Date</p><p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{inv.date?new Date(inv.date).toLocaleDateString('en-US',{month:'short',year:'numeric'}):'—'}</p></div>
-        </div>
-
         {/* Compact deal terms strip — collapsible */}
         {(()=>{
           const [open, setOpen] = useState(false);
@@ -2056,11 +1956,19 @@ const DetailView = ({deal,onUpdate,setToast}) => {
               </button>
               {/* Expanded content */}
               {open && !editing && (
-                <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center',marginTop:8}}>
+                <div style={{marginTop:10}}>
+                  <div style={{display:'flex',gap:20,marginBottom:10}}>
+                    <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:2}}>Vehicle</p><p style={{fontSize:13,fontWeight:500,color:'#374151'}}>{inv.vehicle||'—'}</p></div>
+                    <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:2}}>Date</p><p style={{fontSize:13,fontWeight:500,color:'#374151'}}>{inv.date?new Date(inv.date).toLocaleDateString('en-US',{month:'short',year:'numeric'}):'—'}</p></div>
+                    <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:2}}>Invested</p><p style={{fontSize:13,fontWeight:500,color:'#374151'}}>{fmtC(cb)}</p></div>
+                    {currentOwnership&&<div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:2}}>Ownership</p><p style={{fontSize:13,fontWeight:500,color:'#374151'}}>{currentOwnership}%</p></div>}
+                  </div>
+                  <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
                   {pills.length ? pills.map((p,i) => (
                     <span key={i} style={{fontSize:11,fontWeight:500,color:'#374151',background:'#f3f4f6',borderRadius:99,padding:'2px 8px'}}>{p}</span>
-                  )) : <span style={{fontSize:11,color:'#d1d5db',fontStyle:'italic'}}>not set</span>}
+                  )) : <span style={{fontSize:11,color:'#d1d5db',fontStyle:'italic'}}>no deal terms set</span>}
                   <button onClick={()=>setEditing(true)} style={{marginLeft:'auto',fontSize:11,color:'#5B6DC4',background:'none',border:'none',cursor:'pointer',padding:0,flexShrink:0}}>Edit</button>
+                </div>
                 </div>
               )}
               {open && editing && (
