@@ -2045,7 +2045,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
         })()}
       </div>
 
-      {/* ── AI INTELLIGENCE BAR — always present, drives ambient signals ── */}
+      {/* ── AI INTELLIGENCE BAR ── */}
       <div style={{marginBottom:12}}>
         {sigFetching && !signals && (
           <div style={{background:'#f8f7ff',borderRadius:14,padding:'10px 16px',display:'flex',alignItems:'center',gap:10,border:'1px solid #e0e7ff'}}>
@@ -2053,7 +2053,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
             <p style={{fontSize:13,color:'#6b7280'}}>Scanning web for latest signals on {deal.companyName}…</p>
           </div>
         )}
-        {sigFetchFailed && !sigFetching && (
+        {sigFetchFailed && !sigFetching && !signals && (
           <div style={{background:'#fef2f2',borderRadius:14,padding:'10px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',border:'1px solid #fecaca'}}>
             <div style={{display:'flex',alignItems:'center',gap:8}}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
@@ -2062,6 +2062,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
             <button onClick={()=>refreshSignals()} style={{fontSize:11,color:'#ef4444',background:'none',border:'none',cursor:'pointer',padding:0,flexShrink:0,marginLeft:12}}>↻ Retry</button>
           </div>
         )}
+        {signals && !sigFetching && !signals.summary && (
           <div style={{background:'#f9fafb',borderRadius:14,padding:'10px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',border:'1px solid #f3f4f6'}}>
             <div style={{display:'flex',alignItems:'center',gap:8}}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
