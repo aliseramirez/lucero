@@ -1606,6 +1606,7 @@ const useSignals = (deal) => {
   const [signals, setSignals] = useState(null);
   const [fetching, setFetching] = useState(false);
   const [lastFetched, setLastFetched] = useState(null);
+  const [fetchFailed, setFetchFailed] = useState(false);
 
   useEffect(() => {
     if (!deal?.id) return;
@@ -1625,6 +1626,7 @@ const useSignals = (deal) => {
   const refresh = async (d) => {
     if (fetching) return;
     setFetching(true);
+    setFetchFailed(false);
     try {
       const result = await fetchExternalSignals(d || deal);
       const entry = { ...result, fetchedAt: new Date().toISOString() };
@@ -1635,12 +1637,13 @@ const useSignals = (deal) => {
       setLastFetched(new Date());
     } catch (e) {
       console.error('Signal refresh failed:', e);
+      setFetchFailed(true);
     } finally {
       setFetching(false);
     }
   };
 
-  return { signals, fetching, lastFetched, refresh };
+  return { signals, fetching, lastFetched, fetchFailed, refresh };
 };
 
 // ── AI SUGGESTION CHIP ────────────────────────────────────────────────────────
@@ -1686,7 +1689,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
   const [generatingMemo, setGeneratingMemo] = useState(false);
   const [memo, setMemo] = useState(deal.memo || '');
   const [showMemo, setShowMemo] = useState(!!deal.memo);
-  const { signals, fetching: sigFetching, lastFetched: sigLastFetched, refresh: refreshSignals } = useSignals(deal);
+  const { signals, fetching: sigFetching, lastFetched: sigLastFetched, fetchFailed: sigFetchFailed, refresh: refreshSignals } = useSignals(deal);
 
   const generateMemo = async () => {
     setGeneratingMemo(true);
@@ -2048,6 +2051,23 @@ const DetailView = ({deal,onUpdate,setToast}) => {
           <div style={{background:'#f8f7ff',borderRadius:14,padding:'10px 16px',display:'flex',alignItems:'center',gap:10,border:'1px solid #e0e7ff'}}>
             <div style={{width:14,height:14,border:'2px solid #c7d2fe',borderTopColor:'#5B6DC4',borderRadius:'50%',animation:'spin 0.8s linear infinite',flexShrink:0}}/>
             <p style={{fontSize:13,color:'#6b7280'}}>Scanning web for latest signals on {deal.companyName}…</p>
+          </div>
+        )}
+        {sigFetchFailed && !sigFetching && (
+          <div style={{background:'#fef2f2',borderRadius:14,padding:'10px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',border:'1px solid #fecaca'}}>
+            <div style={{display:'flex',alignItems:'center',gap:8}}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <p style={{fontSize:13,color:'#ef4444'}}>Couldn't fetch signals — check your API key or try again.</p>
+            </div>
+            <button onClick={()=>refreshSignals()} style={{fontSize:11,color:'#ef4444',background:'none',border:'none',cursor:'pointer',padding:0,flexShrink:0,marginLeft:12}}>↻ Retry</button>
+          </div>
+        )}
+          <div style={{background:'#f9fafb',borderRadius:14,padding:'10px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',border:'1px solid #f3f4f6'}}>
+            <div style={{display:'flex',alignItems:'center',gap:8}}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <p style={{fontSize:13,color:'#9ca3af'}}>No public signals found for {deal.companyName} — they may be in stealth or too early-stage for coverage.</p>
+            </div>
+            <button onClick={()=>refreshSignals()} style={{fontSize:11,color:'#9ca3af',background:'none',border:'none',cursor:'pointer',padding:0,flexShrink:0,marginLeft:12}}>↻ Retry</button>
           </div>
         )}
         {signals?.summary && (
