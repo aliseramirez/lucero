@@ -3,7 +3,12 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
 
 // ── UTILS ────────────────────────────────────────────────────────────────────
-const fmtC = (n) => n >= 1e6 ? `$${(n/1e6).toFixed(1)}M` : n >= 1000 ? `$${(n/1000).toFixed(0)}K` : `$${n ?? 0}`;
+const fmtC = (n) => {
+  if (n == null) return '$0';
+  if (n >= 1e6) return `$${(n/1e6).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')}M`;
+  if (n >= 1000) return `$${(n/1000).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')}K`;
+  return `$${n}`;
+};
 const toM = (n) => n ? (Number(n) / 1e6) : '';  // stored dollars → display millions
 const fromM = (v) => v ? Math.round(Number(v) * 1e6) : null;  // display millions → stored dollars
 const dAgo = (d) => Math.floor((Date.now() - new Date(d)) / 86400000);
