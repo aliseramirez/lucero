@@ -1878,14 +1878,36 @@ const DetailView = ({deal,onUpdate,setToast}) => {
               )}
             </div>
           </div>
-          {/* Generate Memo button — top right */}
-          <button onClick={generatingMemo ? undefined : generateMemo} disabled={generatingMemo}
-            style={{flexShrink:0,padding:'7px 12px',background:generatingMemo?'#f3f4f6':'#f5f3ff',color:generatingMemo?'#9ca3af':'#7c3aed',border:`1px solid ${generatingMemo?'#e5e7eb':'#e9d5ff'}`,borderRadius:10,fontWeight:600,fontSize:12,cursor:generatingMemo?'not-allowed':'pointer',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}}>
-            {generatingMemo
-              ? <><div style={{width:10,height:10,border:'1.5px solid #d1d5db',borderTopColor:'#7c3aed',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}/> Generating…</>
-              : <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>{memo ? 'Regenerate memo' : 'Generate memo'}</>
-            }
-          </button>
+          {/* Buttons — top right */}
+          <div style={{display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
+            {!sigFetching && !signals && (
+              <button onClick={()=>refreshSignals()}
+                style={{padding:'7px 10px',background:'#eef2ff',color:'#5B6DC4',border:'1px solid #c7d2fe',borderRadius:10,fontWeight:500,fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:4,whiteSpace:'nowrap'}}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                AI signals
+              </button>
+            )}
+            {sigFetching && (
+              <div style={{padding:'7px 10px',background:'#eef2ff',borderRadius:10,border:'1px solid #c7d2fe',display:'flex',alignItems:'center',gap:4}}>
+                <div style={{width:10,height:10,border:'1.5px solid #c7d2fe',borderTopColor:'#5B6DC4',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}/>
+                <span style={{fontSize:12,color:'#5B6DC4'}}>Fetching…</span>
+              </div>
+            )}
+            {signals && !sigFetching && (
+              <button onClick={()=>refreshSignals()} title="Refresh signals"
+                style={{padding:'7px 10px',background:'#f3f4f6',color:'#9ca3af',border:'1px solid #e5e7eb',borderRadius:10,fontWeight:500,fontSize:12,cursor:'pointer',display:'flex',alignItems:'center',gap:4}}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.18-5"/></svg>
+                Refresh
+              </button>
+            )}
+            <button onClick={generatingMemo ? undefined : generateMemo} disabled={generatingMemo}
+              style={{padding:'7px 12px',background:generatingMemo?'#f3f4f6':'#f5f3ff',color:generatingMemo?'#9ca3af':'#7c3aed',border:`1px solid ${generatingMemo?'#e5e7eb':'#e9d5ff'}`,borderRadius:10,fontWeight:600,fontSize:12,cursor:generatingMemo?'not-allowed':'pointer',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}}>
+              {generatingMemo
+                ? <><div style={{width:10,height:10,border:'1.5px solid #d1d5db',borderTopColor:'#7c3aed',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}/> Generating…</>
+                : <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>{memo ? 'Regenerate memo' : 'Generate memo'}</>
+              }
+            </button>
+          </div>
         </div>
 
         {/* Memo display — shows after generation */}
@@ -2064,13 +2086,6 @@ const DetailView = ({deal,onUpdate,setToast}) => {
               )}
             </div>
           </div>
-        )}
-        {!sigFetching && !signals && (
-          <button onClick={()=>refreshSignals()}
-            style={{width:'100%',padding:'10px',background:'#f8f7ff',borderRadius:14,border:'1px dashed #c7d2fe',color:'#5B6DC4',fontSize:13,fontWeight:500,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',gap:6}}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-            Fetch AI signals for {deal.companyName}
-          </button>
         )}
       </div>
 
