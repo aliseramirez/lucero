@@ -4,6 +4,8 @@ import { useAuth } from '../hooks/useAuth';
 
 // ── UTILS ────────────────────────────────────────────────────────────────────
 const fmtC = (n) => n >= 1e6 ? `$${(n/1e6).toFixed(1)}M` : n >= 1000 ? `$${(n/1000).toFixed(0)}K` : `$${n ?? 0}`;
+const toM = (n) => n ? (Number(n) / 1e6) : '';  // stored dollars → display millions
+const fromM = (v) => v ? Math.round(Number(v) * 1e6) : null;  // display millions → stored dollars
 const dAgo = (d) => Math.floor((Date.now() - new Date(d)) / 86400000);
 const dUntil = (d) => Math.ceil((new Date(d) - Date.now()) / 86400000);
 const genId = () => Math.random().toString(36).substr(2,9);
@@ -345,7 +347,7 @@ const ActiveRaiseCard = ({deal, onUpdate, setToast}) => {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
     roundName: raise.roundName||'',
-    targetAmount: raise.targetAmount||'',
+    targetAmount: toM(raise.targetAmount)||'',
     leadInvestor: raise.leadInvestor||'',
     leadStatus: raise.leadStatus||'rumored',
     participants: raise.participants||'',
@@ -401,7 +403,7 @@ const ActiveRaiseCard = ({deal, onUpdate, setToast}) => {
   };
 
   const save = () => {
-    const updated = {...form, targetAmount:form.targetAmount?Number(form.targetAmount):null, dilutionPct:Number(form.dilutionPct)||20};
+    const updated = {...form, targetAmount:fromM(form.targetAmount), dilutionPct:Number(form.dilutionPct)||20};
     onUpdate({...deal, activeRaise:updated, monitoring:{...(deal.monitoring||{}), fundraisingStatus:'raising'}});
     setEditing(false);
     setToast('Raise details saved');
@@ -418,7 +420,7 @@ const ActiveRaiseCard = ({deal, onUpdate, setToast}) => {
           {raise.expectedClose&&<span style={{fontSize:12,color:'rgba(255,255,255,.75)'}}>· Close {new Date(raise.expectedClose).toLocaleDateString('en-US',{month:'short',year:'numeric'})}</span>}
         </div>
         <div style={{display:'flex',gap:6}}>
-          <button onClick={()=>{setForm({roundName:raise.roundName||'',targetAmount:raise.targetAmount||'',leadInvestor:raise.leadInvestor||'',leadStatus:raise.leadStatus||'rumored',participants:raise.participants||'',expectedClose:raise.expectedClose||'',dilutionPct:raise.dilutionPct||'20'});setEditing(v=>!v);}} style={{background:'rgba(255,255,255,.2)',border:'none',borderRadius:8,padding:'4px 10px',color:'white',fontSize:12,cursor:'pointer',fontWeight:500}}>{editing?'Cancel':'Edit'}</button>
+          <button onClick={()=>{setForm({roundName:raise.roundName||'',targetAmount:toM(raise.targetAmount)||'',leadInvestor:raise.leadInvestor||'',leadStatus:raise.leadStatus||'rumored',participants:raise.participants||'',expectedClose:raise.expectedClose||'',dilutionPct:raise.dilutionPct||'20'});setEditing(v=>!v);}} style={{background:'rgba(255,255,255,.2)',border:'none',borderRadius:8,padding:'4px 10px',color:'white',fontSize:12,cursor:'pointer',fontWeight:500}}>{editing?'Cancel':'Edit'}</button>
           <button onClick={closeRound} style={{background:'white',border:'none',borderRadius:8,padding:'4px 10px',color:'#5B6DC4',fontSize:12,cursor:'pointer',fontWeight:700}}>Close round ✓</button>
         </div>
       </div>
@@ -427,7 +429,7 @@ const ActiveRaiseCard = ({deal, onUpdate, setToast}) => {
         <div style={{padding:16,display:'flex',flexDirection:'column',gap:10}}>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
             <div><p style={{fontSize:11,color:'#6b7280',marginBottom:3}}>Round name</p><input value={form.roundName} onChange={e=>setForm(f=>({...f,roundName:e.target.value}))} placeholder="Series B" style={{width:'100%',padding:'7px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,boxSizing:'border-box'}}/></div>
-            <div><p style={{fontSize:11,color:'#6b7280',marginBottom:3}}>Target amount ($)</p><input type="number" value={form.targetAmount} onChange={e=>setForm(f=>({...f,targetAmount:e.target.value}))} placeholder="10000000" style={{width:'100%',padding:'7px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,boxSizing:'border-box'}}/></div>
+            <div><p style={{fontSize:11,color:'#6b7280',marginBottom:3}}>Target amount (M)</p><input type="number" value={form.targetAmount} onChange={e=>setForm(f=>({...f,targetAmount:e.target.value}))} placeholder="25" step="0.1" style={{width:'100%',padding:'7px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,boxSizing:'border-box'}}/></div>
           </div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
             <div><p style={{fontSize:11,color:'#6b7280',marginBottom:3}}>Lead investor</p><input value={form.leadInvestor} onChange={e=>setForm(f=>({...f,leadInvestor:e.target.value}))} placeholder="Investor name" style={{width:'100%',padding:'7px 10px',border:'1px solid #e5e7eb',borderRadius:8,fontSize:13,boxSizing:'border-box'}}/></div>
@@ -493,8 +495,8 @@ const FundraiseHistory = ({deal, onUpdate, setToast}) => {
     setAdding(false);
     setForm({
       roundName:r.roundName||'', date:r.date||'',
-      amountRaised:r.amountRaised||'', preMoneyVal:r.preMoneyVal||'',
-      postMoneyVal:r.postMoneyVal||'', leadInvestor:r.leadInvestor||'',
+      amountRaised:toM(r.amountRaised), preMoneyVal:toM(r.preMoneyVal),
+      postMoneyVal:toM(r.postMoneyVal), leadInvestor:r.leadInvestor||'',
       followOns:(r.followOns||[]).join(', '), dilutionPct:r.dilutionPct||'20',
       ownershipBefore:r.ownershipBefore||'', ownershipAfter:r.ownershipAfter||'',
     });
@@ -506,9 +508,9 @@ const FundraiseHistory = ({deal, onUpdate, setToast}) => {
     const updated = {
       id: editingId,
       roundName:form.roundName, date:form.date,
-      amountRaised:form.amountRaised?Number(form.amountRaised):null,
-      preMoneyVal:form.preMoneyVal?Number(form.preMoneyVal):null,
-      postMoneyVal:form.postMoneyVal?Number(form.postMoneyVal):null,
+      amountRaised:fromM(form.amountRaised),
+      preMoneyVal:fromM(form.preMoneyVal),
+      postMoneyVal:fromM(form.postMoneyVal),
       leadInvestor:form.leadInvestor||null,
       followOns:form.followOns?form.followOns.split(',').map(s=>s.trim()).filter(Boolean):[],
       dilutionPct:Number(form.dilutionPct)||20,
@@ -535,9 +537,9 @@ const FundraiseHistory = ({deal, onUpdate, setToast}) => {
       id: genId(),
       roundName: form.roundName,
       date: form.date,
-      amountRaised: form.amountRaised ? Number(form.amountRaised) : null,
-      preMoneyVal: form.preMoneyVal ? Number(form.preMoneyVal) : null,
-      postMoneyVal: form.postMoneyVal ? Number(form.postMoneyVal) : null,
+      amountRaised: fromM(form.amountRaised),
+      preMoneyVal: fromM(form.preMoneyVal),
+      postMoneyVal: fromM(form.postMoneyVal),
       leadInvestor: form.leadInvestor || null,
       followOns: form.followOns ? form.followOns.split(',').map(s=>s.trim()).filter(Boolean) : [],
       dilutionPct: Number(form.dilutionPct)||20,
@@ -590,9 +592,9 @@ const FundraiseHistory = ({deal, onUpdate, setToast}) => {
                     <div><p style={lbl}>Date *</p><input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={inp}/></div>
                   </div>
                   <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:8}}>
-                    <div><p style={lbl}>Amount ($)</p><input type="number" value={form.amountRaised} onChange={e=>setForm(f=>({...f,amountRaised:e.target.value}))} style={inp}/></div>
-                    <div><p style={lbl}>Pre-money ($)</p><input type="number" value={form.preMoneyVal} onChange={e=>setForm(f=>({...f,preMoneyVal:e.target.value}))} style={inp}/></div>
-                    <div><p style={lbl}>Post-money ($)</p><input type="number" value={form.postMoneyVal} onChange={e=>setForm(f=>({...f,postMoneyVal:e.target.value}))} style={inp}/></div>
+                    <div><p style={lbl}>Amount (M)</p><input type="number" value={form.amountRaised} onChange={e=>setForm(f=>({...f,amountRaised:e.target.value}))} style={inp}/></div>
+                    <div><p style={lbl}>Pre-money (M)</p><input type="number" value={form.preMoneyVal} onChange={e=>setForm(f=>({...f,preMoneyVal:e.target.value}))} style={inp}/></div>
+                    <div><p style={lbl}>Post-money (M)</p><input type="number" value={form.postMoneyVal} onChange={e=>setForm(f=>({...f,postMoneyVal:e.target.value}))} style={inp}/></div>
                   </div>
                   <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
                     <div><p style={lbl}>Lead</p><input value={form.leadInvestor} onChange={e=>setForm(f=>({...f,leadInvestor:e.target.value}))} style={inp}/></div>
@@ -649,9 +651,9 @@ const FundraiseHistory = ({deal, onUpdate, setToast}) => {
               <div><p style={lbl}>Date *</p><input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} style={inp}/></div>
             </div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:8}}>
-              <div><p style={lbl}>Amount raised ($)</p><input type="number" value={form.amountRaised} onChange={e=>setForm(f=>({...f,amountRaised:e.target.value}))} placeholder="5000000" style={inp}/></div>
-              <div><p style={lbl}>Pre-money val ($)</p><input type="number" value={form.preMoneyVal} onChange={e=>setForm(f=>({...f,preMoneyVal:e.target.value}))} placeholder="20000000" style={inp}/></div>
-              <div><p style={lbl}>Post-money val ($)</p><input type="number" value={form.postMoneyVal} onChange={e=>setForm(f=>({...f,postMoneyVal:e.target.value}))} placeholder="25000000" style={inp}/></div>
+              <div><p style={lbl}>Amount raised (M)</p><input type="number" value={form.amountRaised} onChange={e=>setForm(f=>({...f,amountRaised:e.target.value}))} placeholder="5" style={inp}/></div>
+              <div><p style={lbl}>Pre-money (M)</p><input type="number" value={form.preMoneyVal} onChange={e=>setForm(f=>({...f,preMoneyVal:e.target.value}))} placeholder="20" style={inp}/></div>
+              <div><p style={lbl}>Post-money (M)</p><input type="number" value={form.postMoneyVal} onChange={e=>setForm(f=>({...f,postMoneyVal:e.target.value}))} placeholder="25" style={inp}/></div>
             </div>
             <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
               <div><p style={lbl}>Lead investor</p><input value={form.leadInvestor} onChange={e=>setForm(f=>({...f,leadInvestor:e.target.value}))} placeholder="Breakthrough Energy" style={inp}/></div>
@@ -2608,8 +2610,8 @@ const AddModal = ({onClose,onAdd}) => {
       const mgmtFeeTotal=((Number(f.mgmtFee)||0)/100)*(Number(f.mgmtFeeYears)||0);
       const totalUpfrontFeeRate=expRes+mgmtFeeTotal;
       const effectiveCost=totalUpfrontFeeRate>0?Math.round(amount*(1-totalUpfrontFeeRate)):amount;
-      const postMoney = Number(f.postMoney)||0;
-      const roundSize = Number(f.roundSize)||0;
+      const postMoney = fromM(f.postMoney) || 0;
+      const roundSize = fromM(f.roundSize) || 0;
       // Ownership: for SPV, ownership = (SPV size / postMoney), then your slice = check / SPV size * SPV ownership
       // For direct: ownership = check / postMoney
       const ownershipPercent = postMoney > 0
@@ -2690,8 +2692,8 @@ const AddModal = ({onClose,onAdd}) => {
               <option value="SAFE">SAFE</option><option value="Convertible Note">Conv. Note</option><option value="Equity">Equity</option>
             </select>
           </div>
-          <div><label style={lbl}>Round size ($) <span style={{fontWeight:400,color:'#9ca3af'}}>total raise</span></label><input type="number" value={f.roundSize} onChange={e=>setF({...f,roundSize:e.target.value})} placeholder="25000000" style={inp}/></div>
-          <div><label style={lbl}>Post-money val ($)</label><input type="number" value={f.postMoney} onChange={e=>setF({...f,postMoney:e.target.value})} placeholder="600000000" style={inp}/></div>
+          <div><label style={lbl}>Round size (M) <span style={{fontWeight:400,color:'#9ca3af'}}>total raise</span></label><input type="number" value={f.roundSize} onChange={e=>setF({...f,roundSize:e.target.value})} placeholder="25" step="0.1" style={inp}/></div>
+          <div><label style={lbl}>Post-money (M)</label><input type="number" value={f.postMoney} onChange={e=>setF({...f,postMoney:e.target.value})} placeholder="600" step="0.1" style={inp}/></div>
           <div style={{gridColumn:'1/-1'}}><label style={lbl}>Investment date</label><input type="date" value={f.investDate} onChange={e=>setF({...f,investDate:e.target.value})} style={inp}/></div>
           {/* Live ownership preview */}
           {f.amount && f.postMoney && Number(f.postMoney) > 0 && (()=>{
