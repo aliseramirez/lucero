@@ -427,7 +427,7 @@ const CompanyLogo = ({name, website, size=44, radius=12, fallbackBg='#f3f4f6', f
 const MetricsTracker = () => null;
 
 // ── SECTIONS ─────────────────────────────────────────────────────────────────
-const DOC_TYPES = ['SAFE','Term Sheet','Cap Table','Pitch Deck','Due Diligence','Financial Model','Legal','Other'];
+const DOC_TYPES = ['K-1 / Tax Doc','Wire Confirmation','SAFE','Convertible Note','Side Letter','Cap Table Notice','409A Valuation','Term Sheet','Legal','Other'];
 
 const DocumentsSection = ({deal, onUpdate, setToast}) => {
   const [open, setOpen] = useState(false);
@@ -448,14 +448,14 @@ const DocumentsSection = ({deal, onUpdate, setToast}) => {
 
   const remove = (id) => onUpdate({...deal, documents:docs.filter(d=>d.id!==id)});
 
-  const typeIcon = (type) => ({'SAFE':'📄','Term Sheet':'📋','Cap Table':'📊','Pitch Deck':'📑','Due Diligence':'🔍','Financial Model':'💹','Legal':'⚖️','Other':'📎'}[type]||'📎');
+  const typeIcon = (type) => ({'K-1 / Tax Doc':'🧾','Wire Confirmation':'🏦','SAFE':'📄','Convertible Note':'📄','Side Letter':'⚖️','Cap Table Notice':'📊','409A Valuation':'💹','Term Sheet':'📋','Legal':'⚖️','Other':'📎'}[type]||'📎');
 
   return (
     <div style={{background:'white',borderRadius:16,overflow:'hidden',marginBottom:12}}>
       <button onClick={()=>setOpen(v=>!v)} style={{width:'100%',padding:'14px 20px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'none',border:'none',cursor:'pointer'}}>
         <div style={{display:'flex',alignItems:'center',gap:8}}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-          <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Documents</span>
+          <span style={{fontWeight:600,fontSize:14,color:'#111827'}}>Deal Records</span>
           {docs.length>0&&<span style={{fontSize:12,color:'#9ca3af'}}>({docs.length})</span>}
         </div>
         <div style={{display:'flex',alignItems:'center',gap:8}}>
@@ -464,7 +464,7 @@ const DocumentsSection = ({deal, onUpdate, setToast}) => {
         </div>
       </button>
       {open&&<div style={{padding:'0 20px 20px',borderTop:'1px solid #f3f4f6'}}>
-        {docs.length===0&&!adding&&<p style={{fontSize:13,color:'#9ca3af',textAlign:'center',padding:'8px 0'}}>No documents yet — paste a Google Drive or Dropbox link</p>}
+        {docs.length===0&&!adding&&<p style={{fontSize:13,color:'#9ca3af',textAlign:'center',padding:'8px 0'}}>No records yet — add K-1s, wire confirmations, SAFEs, or side letters</p>}
         {docs.map(doc=>(
           <div key={doc.id} style={{display:'flex',alignItems:'center',gap:12,paddingTop:12}}>
             <span style={{fontSize:16,flexShrink:0}}>{typeIcon(doc.type)}</span>
@@ -1860,58 +1860,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
   const dUntilNext=inv.nextUpdateExpected?dUntil(inv.nextUpdateExpected):null;
   const overdue=dUntilNext!==null&&dUntilNext<-7;
   const health=calcHealth(deal,[]);
-  const [generatingMemo, setGeneratingMemo] = useState(false);
-  const [memo, setMemo] = useState(deal.memo || '');
-  const [showMemo, setShowMemo] = useState(!!deal.memo);
   const { signals, fetching: sigFetching, lastFetched: sigLastFetched, fetchFailed: sigFetchFailed, refresh: refreshSignals } = useSignals(deal);
-
-  const generateMemo = async () => {
-    setGeneratingMemo(true);
-    setShowMemo(true);
-    try {
-      const signalCache = loadSignalCache()[deal.id];
-      const context = {
-        company: deal.companyName,
-        stage: deal.stage,
-        industry: deal.industry,
-        invested: getCB(inv),
-        vehicle: inv.vehicle,
-        date: inv.date,
-        cap: deal.terms?.cap,
-        revenueLog: deal.revenueLog,
-        fundraiseHistory: deal.fundraiseHistory,
-        founderUpdates: (deal.founderUpdates||[]).slice(0,3).map(u=>u.content?.substring(0,500)),
-        signals: signalCache ? { activity: signalCache.activity?.status, momentum: signalCache.momentum?.trend, risk: signalCache.risk?.level, summary: signalCache.summary } : null,
-        milestones: (deal.milestones||[]).slice(0,5),
-      };
-      const resp = await fetch('/api/extract', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content: `Generate an investment memo for: ${JSON.stringify(context)}`,
-          dealName: deal.companyName,
-          existingData: {},
-          mode: 'memo',
-        }),
-      });
-      // Use signals API instead for memo generation
-      const memoResp = await fetch('/api/memo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deal: context }),
-      });
-      if (!memoResp.ok) throw new Error('Memo generation failed');
-      const { memo: generated } = await memoResp.json();
-      setMemo(generated);
-      onUpdate({ ...deal, memo: generated });
-      setToast('Investment memo generated');
-    } catch (e) {
-      console.error('Memo generation failed:', e);
-      setToast('Memo generation failed — check API connection');
-    } finally {
-      setGeneratingMemo(false);
-    }
-  };
 
   // Ownership + implied value: fundraise history takes precedence over manual fields
   const currentOwnership = getCurrentOwnership(deal);
@@ -2084,31 +2033,8 @@ const DetailView = ({deal,onUpdate,setToast}) => {
                 Refresh
               </button>
             )}
-            <button onClick={generatingMemo ? undefined : generateMemo} disabled={generatingMemo}
-              style={{padding:'7px 12px',background:generatingMemo?'#f3f4f6':'#f5f3ff',color:generatingMemo?'#9ca3af':'#7c3aed',border:`1px solid ${generatingMemo?'#e5e7eb':'#e9d5ff'}`,borderRadius:10,fontWeight:600,fontSize:12,cursor:generatingMemo?'not-allowed':'pointer',display:'flex',alignItems:'center',gap:5,whiteSpace:'nowrap'}}>
-              {generatingMemo
-                ? <><div style={{width:10,height:10,border:'1.5px solid #d1d5db',borderTopColor:'#7c3aed',borderRadius:'50%',animation:'spin 0.8s linear infinite'}}/> Generating…</>
-                : <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>{memo ? 'Regenerate memo' : 'Generate memo'}</>
-              }
-            </button>
           </div>
         </div>
-
-        {/* Memo display — shows after generation */}
-        {showMemo && memo && (
-          <div style={{background:'#faf5ff',border:'1px solid #e9d5ff',borderRadius:12,padding:'12px 16px',marginBottom:12}}>
-            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
-              <span style={{fontSize:11,color:'#7c3aed',fontWeight:700,textTransform:'uppercase',letterSpacing:.6}}>Investment Memo</span>
-              <button onClick={()=>setShowMemo(false)} style={{background:'none',border:'none',color:'#c4b5fd',cursor:'pointer',fontSize:11}}>hide</button>
-            </div>
-            <p style={{fontSize:13,color:'#374151',lineHeight:1.8,whiteSpace:'pre-wrap'}}>{memo}</p>
-          </div>
-        )}
-        {!showMemo && memo && (
-          <button onClick={()=>setShowMemo(true)} style={{fontSize:12,color:'#7c3aed',background:'none',border:'none',cursor:'pointer',padding:0,marginBottom:12,display:'block'}}>
-            Show investment memo ↓
-          </button>
-        )}
 
         {deal.overview&&<p style={{fontSize:14,color:'#374151',lineHeight:1.6,marginBottom:12}}>{deal.overview}</p>}
 
@@ -2382,90 +2308,55 @@ const DetailView = ({deal,onUpdate,setToast}) => {
       {/* Return Outlook */}
       <ReturnOutlook deal={deal} compact={false}/>
 
-      {/* Chart — below valuation */}
-
-
       <ActiveRaiseCard deal={deal} onUpdate={onUpdate} setToast={setToast}/>
 
-      {/* AI: active raise suggestion from signals */}
-      {signals?.momentum?.fundingRounds?.some(r => r.roundName && !(deal.activeRaise?.roundName)) &&
-        !signals.momentum.fundingRounds.some(r => (deal.fundraiseHistory||[]).some(h => h.roundName?.toLowerCase() === r.roundName?.toLowerCase())) && (
-        <AISuggestion
-          icon="🔔"
-          label={`${signals.momentum.fundingRounds[0].roundName} may be open — signals suggest active raise`}
-          detail={`${signals.momentum.fundingRounds[0].amountRaised ? fmtC(signals.momentum.fundingRounds[0].amountRaised) + ' target' : 'Amount unknown'} · Check if you have pro-rata rights`}
-          source={signals.momentum.fundingRounds[0].source}
-          sourceUrl={signals.momentum.fundingRounds[0].sourceUrl}
-          color="#7c3aed" bg="#f5f3ff"
-          onAccept={() => {
-            const r = signals.momentum.fundingRounds[0];
-            onUpdate({ ...deal, activeRaise: { roundName: r.roundName, targetAmount: r.amountRaised||null, leadInvestor: r.leadInvestor||'', leadStatus:'rumored', participants:'', timeline:'', dilutionPct:'20', fromAgent: true }, monitoring: {...(deal.monitoring||{}), fundraisingStatus:'raising'} });
-            setToast('Active raise logged from signals');
-          }}
-        />
-      )}
+      {/* ── AI SIGNAL SUGGESTIONS — consolidated under valuation ── */}
+      {signals && <div style={{display:'flex',flexDirection:'column',gap:0}}>
+        {signals.momentum?.fundingRounds?.filter(r => {
+          const existing = new Set((deal.fundraiseHistory||[]).map(x => x.roundName?.toLowerCase()));
+          return r.roundName && !existing.has(r.roundName.toLowerCase()) && r.postMoneyVal;
+        }).map((r, i) => (
+          <AISuggestion key={`round_${i}`}
+            label={`New round detected: ${r.roundName}${r.amountRaised ? ` · ${fmtC(r.amountRaised)}` : ''}`}
+            detail={r.postMoneyVal ? `Post-money: ${fmtC(r.postMoneyVal)}${r.leadInvestor ? ` · Lead: ${r.leadInvestor}` : ''} — update implied value?` : null}
+            source={r.source} sourceUrl={r.sourceUrl}
+            onAccept={() => {
+              const own = inv.ownershipPercent || getCurrentOwnership(deal);
+              const newIV = own && r.postMoneyVal ? Math.round((own/100)*r.postMoneyVal) : null;
+              onUpdate({ ...deal, investment: { ...inv, ...(newIV?{impliedValue:newIV}:{}), impliedValuation:r.postMoneyVal, lastValuationDate:r.date||new Date().toISOString(), valuationMethod:'last-round' }, fundraiseHistory:[...(deal.fundraiseHistory||[]),{id:genId(),roundName:r.roundName,date:r.date||new Date().toISOString(),amountRaised:r.amountRaised||null,postMoneyVal:r.postMoneyVal,leadInvestor:r.leadInvestor||null,source:r.source,sourceUrl:r.sourceUrl,fromAgent:true}].sort((a,b)=>new Date(a.date)-new Date(b.date)) });
+              setToast('Mark updated from signals');
+            }}
+          />
+        ))}
+        {signals.momentum?.fundingRounds?.some(r => r.roundName && !(deal.activeRaise?.roundName)) &&
+          !signals.momentum.fundingRounds.some(r => (deal.fundraiseHistory||[]).some(h => h.roundName?.toLowerCase()===r.roundName?.toLowerCase())) && (
+          <AISuggestion
+            label={`${signals.momentum.fundingRounds[0].roundName} may be open — signals suggest active raise`}
+            detail={`${signals.momentum.fundingRounds[0].amountRaised?fmtC(signals.momentum.fundingRounds[0].amountRaised)+' target':'Amount unknown'} · Check if you have pro-rata rights`}
+            source={signals.momentum.fundingRounds[0].source} sourceUrl={signals.momentum.fundingRounds[0].sourceUrl}
+            onAccept={() => { const r=signals.momentum.fundingRounds[0]; onUpdate({...deal,activeRaise:{roundName:r.roundName,targetAmount:r.amountRaised||null,leadInvestor:r.leadInvestor||'',leadStatus:'rumored',participants:'',timeline:'',dilutionPct:'20',fromAgent:true},monitoring:{...(deal.monitoring||{}),fundraisingStatus:'raising'}}); setToast('Active raise logged from signals'); }}
+          />
+        )}
+        {signals.momentum?.signals?.filter(s => { const ex=new Set((deal.milestones||[]).map(m=>m.title)); return s.title&&!ex.has(s.title); }).slice(0,3).map((s,i) => (
+          <AISuggestion key={`mom_${i}`} label={s.title} detail={s.description} source={s.source} sourceUrl={s.sourceUrl}
+            onAccept={() => { const ms={id:genId(),type:s.type||'update',title:s.title,description:s.description||'',date:s.date?new Date(s.date).toISOString():new Date().toISOString(),source:s.source,sourceUrl:s.sourceUrl||null,fromAgent:true,sentiment:'positive'}; onUpdate({...deal,milestones:[...(deal.milestones||[]),ms]}); setToast('Milestone added from signals'); }}
+          />
+        ))}
+        {signals.risk?.level!=='none' && signals.risk?.signals?.filter(s => { const ex=new Set((deal.milestones||[]).map(m=>m.title)); return s.title&&!ex.has(s.title); }).slice(0,2).map((s,i) => (
+          <AISuggestion key={`risk_${i}`} label={s.title} detail={s.description} source={s.source} sourceUrl={s.sourceUrl}
+            onAccept={() => { const ms={id:genId(),type:'update',title:s.title,description:s.description||'',date:new Date().toISOString(),source:s.source,fromAgent:true,sentiment:'negative'}; onUpdate({...deal,milestones:[...(deal.milestones||[]),ms]}); setToast('Risk flag logged'); }}
+          />
+        ))}
+        {signals.momentum?.signals?.filter(s=>(s.type==='funding'||s.description?.toLowerCase().includes('led by')||s.description?.toLowerCase().includes('investor'))&&s.title&&!(deal.coInvestors||[]).some(ci=>s.title.toLowerCase().includes(ci.name?.toLowerCase()))).slice(0,2).map((s,i) => (
+          <AISuggestion key={`coinv_${i}`} label={`Investor signal: ${s.title}`} detail={s.description} source={s.source} sourceUrl={s.sourceUrl}
+            onAccept={() => { onUpdate({...deal,coInvestors:[...(deal.coInvestors||[]),{id:genId(),name:s.title,fund:null,role:'co-investor',checkSize:null,fromAgent:true}]}); setToast('Investor added from signals'); }}
+          />
+        ))}
+      </div>}
 
       <div id="section-updates"><PrimaryInsight deal={deal} onUpdate={onUpdate} setToast={setToast} signals={signals}/></div>
 
-      {/* AI: momentum signals injected as milestone suggestions */}
-      {signals?.momentum?.signals?.filter(s => {
-        const existing = new Set((deal.milestones||[]).map(m => m.title));
-        return s.title && !existing.has(s.title);
-      }).slice(0,3).map((s, i) => (
-        <AISuggestion key={i}
-          icon={s.type==='partnership'?'🤝':s.type==='product'?'🚀':s.type==='team'?'👤':'✦'}
-          label={s.title}
-          detail={s.description}
-          source={s.source} sourceUrl={s.sourceUrl}
-          color={s.type==='partnership'?'#10b981':s.type==='product'?'#f59e0b':'#5B6DC4'}
-          bg={s.type==='partnership'?'#f0fdf4':s.type==='product'?'#fffbeb':'#eef2ff'}
-          onAccept={() => {
-            const milestone = { id:genId(), type:s.type||'update', title:s.title, description:s.description||'', date:s.date?new Date(s.date).toISOString():new Date().toISOString(), source:s.source, sourceUrl:s.sourceUrl||null, fromAgent:true, sentiment:'positive' };
-            onUpdate({ ...deal, milestones: [...(deal.milestones||[]), milestone] });
-            setToast('Milestone added from signals');
-          }}
-        />
-      ))}
-
-      {/* AI: risk signals */}
-      {signals?.risk?.level !== 'none' && signals?.risk?.signals?.filter(s => {
-        const existing = new Set((deal.milestones||[]).map(m => m.title));
-        return s.title && !existing.has(s.title);
-      }).slice(0,2).map((s, i) => (
-        <AISuggestion key={i}
-          icon="⚠"
-          label={s.title}
-          detail={s.description}
-          source={s.source} sourceUrl={s.sourceUrl}
-          color="#ef4444" bg="#fef2f2"
-          onAccept={() => {
-            const milestone = { id:genId(), type:'update', title:s.title, description:s.description||'', date:new Date().toISOString(), source:s.source, fromAgent:true, sentiment:'negative' };
-            onUpdate({ ...deal, milestones: [...(deal.milestones||[]), milestone] });
-            setToast('Risk flag logged');
-          }}
-        />
-      ))}
-
       <div id="section-fundraise"><FundraiseHistory deal={deal} onUpdate={onUpdate} setToast={setToast}/></div>
-
-      {/* AI: co-investor suggestions from signals — inject into co-investor record */}
-      {signals?.momentum?.signals?.filter(s =>
-        (s.type === 'funding' || s.description?.toLowerCase().includes('led by') || s.description?.toLowerCase().includes('investor')) &&
-        s.title && !(deal.coInvestors||[]).some(ci => s.title.toLowerCase().includes(ci.name?.toLowerCase()))
-      ).slice(0,2).map((s, i) => (
-        <AISuggestion key={`coinv_${i}`}
-          icon="👤"
-          label={`Investor signal: ${s.title}`}
-          detail={s.description}
-          source={s.source} sourceUrl={s.sourceUrl}
-          color="#7c3aed" bg="#f5f3ff"
-          onAccept={() => {
-            const entry = { id:genId(), name: s.title, fund: null, role:'co-investor', checkSize:null, fromAgent:true };
-            onUpdate({ ...deal, coInvestors:[...(deal.coInvestors||[]), entry] });
-            setToast('Investor added from signals');
-          }}
-        />
-      ))}
 
       <div style={{marginTop:12}}><DocumentsSection deal={deal} onUpdate={onUpdate} setToast={setToast}/></div>
     </div>
