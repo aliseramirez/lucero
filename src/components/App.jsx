@@ -180,6 +180,145 @@ const calcPortHealth = (deals) => {
   return {score,label:score>=80?'On Track':score>=62?'Steady':score>=42?'Investigate':'Critical',color:score>=80?'#10b981':score>=62?'#5B6DC4':score>=42?'#f59e0b':'#ef4444'};
 };
 
+// ── RETURN OUTLOOK ENGINE ─────────────────────────────────────────────────────
+const calcReturnOutlook = (deal) => {
+  const inv = deal.investment || {};
+  const method = getMethod(deal);
+  const staleness = getStaleness(deal);
+  const mat = STAGE_MAT[deal.stage] || 'lab';
+  const moic = calcMOIC(deal);
+  const sigs = getUpdateSigs(deal);
+  const positiveSigs = sigs.filter(s => s.sentiment === 'positive');
+  const negativeSigs = sigs.filter(s => s.sentiment === 'negative');
+
+  // ── Confidence tier ───────────────────────────────────────────────────────
+  const missing = [];
+  let confidenceScore = 0;
+
+  if (inv.lastValuationDate) confidenceScore += 2; else missing.push('Log a valuation date');
+  if (method !== 'mark-at-cost' && method !== 'nav-lp') confidenceScore += 2;
+  if (staleness === 'fresh') confidenceScore += 2;
+  else if (staleness === 'ok') confidenceScore += 1;
+  else if (staleness === 'stale' || staleness === 'very-stale') missing.push('Update valuation mark');
+  if (positiveSigs.length > 0) confidenceScore += 2;
+  if ((deal.milestones||[]).filter(m => dAgo(m.date) < 180).length > 0) confidenceScore += 1;
+  if (inv.ownershipPercent) confidenceScore += 1;
+  else missing.push('Add ownership %');
+  if (!inv.lastUpdateReceived || dAgo(inv.lastUpdateReceived) > 180) missing.push('Log a founder update');
+
+  const confidence = confidenceScore >= 7 ? 'High' : confidenceScore >= 4 ? 'Medium' : 'Low';
+  const confColor = confidence === 'High' ? '#10b981' : confidence === 'Medium' ? '#f59e0b' : '#9ca3af';
+
+  // ── Directional outlook ───────────────────────────────────────────────────
+  let direction = 'neutral';
+  let dirLabel = 'Unclear';
+  let dirColor = '#9ca3af';
+  let dirReason = 'Insufficient data to project return direction.';
+
+  if (method === 'nav-lp') {
+    if (!inv.lastValuationDate) {
+      direction = 'unknown'; dirLabel = 'No NAV data'; dirColor = '#9ca3af';
+      dirReason = 'NAV has not been updated — request LP update from fund manager.';
+      missing.push('Request LP update from fund manager');
+    } else if (moic && moic > 1) {
+      direction = 'positive'; dirLabel = 'Trending up'; dirColor = '#10b981';
+      dirReason = `Fund NAV is ${moic.toFixed(2)}x committed capital.`;
+    } else {
+      direction = 'neutral'; dirLabel = 'At cost'; dirColor = '#9ca3af';
+      dirReason = 'Fund NAV is at or below committed capital.';
+    }
+  } else if (negativeSigs.length >= 2) {
+    direction = 'negative'; dirLabel = 'At risk'; dirColor = '#ef4444';
+    dirReason = 'Multiple negative signals detected in recent updates.';
+  } else if (positiveSigs.length >= 2 && (staleness === 'fresh' || staleness === 'ok')) {
+    direction = 'positive'; dirLabel = 'Trending up'; dirColor = '#10b981';
+    dirReason = positiveSigs[0]?.title || 'Positive signals in recent updates.';
+  } else if (moic && moic > 1.3 && staleness !== 'very-stale') {
+    direction = 'positive'; dirLabel = 'Marked up'; dirColor = '#10b981';
+    dirReason = `Last-round mark is ${moic.toFixed(2)}x cost basis.`;
+  } else if (moic && moic < 0.8) {
+    direction = 'negative'; dirLabel = 'Below cost'; dirColor = '#ef4444';
+    dirReason = `Current mark is ${moic.toFixed(2)}x — below cost basis.`;
+  } else if (method === 'mark-at-cost' && mat === 'lab') {
+    direction = 'neutral'; dirLabel = 'Pre-revenue'; dirColor = '#6b7280';
+    dirReason = 'Too early for valuation signal — tracking at cost is appropriate.';
+  } else if (staleness === 'very-stale' || staleness === 'unknown') {
+    direction = 'unknown'; dirLabel = 'Stale data'; dirColor = '#9ca3af';
+    dirReason = 'No valuation update in over a year — mark may not reflect reality.';
+  } else {
+    direction = 'neutral'; dirLabel = 'Holding'; dirColor = '#5B6DC4';
+    dirReason = 'No strong positive or negative signals. Monitor for next round.';
+  }
+
+  return { confidence, confColor, direction, dirLabel, dirColor, dirReason, missing };
+};
+
+// ── RETURN OUTLOOK COMPONENT ──────────────────────────────────────────────────
+const ReturnOutlook = ({ deal, compact = false }) => {
+  const { confidence, confColor, dirLabel, dirColor, dirReason, missing } = calcReturnOutlook(deal);
+  const [expanded, setExpanded] = useState(false);
+
+  if (compact) {
+    // Card-level: just two pills + click to expand
+    return (
+      <div onClick={e => { e.stopPropagation(); setExpanded(v => !v); }}
+        style={{ borderTop: '1px solid #f3f4f6', padding: '8px 16px', cursor: 'pointer' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 10, color: '#9ca3af', fontWeight: 500, letterSpacing: .3 }}>OUTLOOK</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: dirColor, background: dirColor + '14', padding: '2px 8px', borderRadius: 99 }}>{dirLabel}</span>
+          <span style={{ fontSize: 11, fontWeight: 500, color: confColor, background: confColor + '14', padding: '2px 8px', borderRadius: 99 }}>{confidence} confidence</span>
+          {missing.length > 0 && <span style={{ marginLeft: 'auto', fontSize: 10, color: '#9ca3af' }}>{missing.length} signal{missing.length > 1 ? 's' : ''} needed ›</span>}
+        </div>
+        {expanded && (
+          <div style={{ marginTop: 8 }}>
+            <p style={{ fontSize: 12, color: '#374151', lineHeight: 1.5, marginBottom: missing.length ? 6 : 0 }}>{dirReason}</p>
+            {missing.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {missing.map((m, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 10, color: '#f59e0b' }}>◆</span>
+                    <span style={{ fontSize: 11, color: '#6b7280' }}>{m}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Detail-view: full card
+  return (
+    <div style={{ background: 'white', borderRadius: 16, overflow: 'hidden', marginBottom: 12 }}>
+      <div style={{ padding: '14px 20px', borderBottom: '1px solid #f3f4f6', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#5B6DC4" strokeWidth="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+        <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>Return Outlook</span>
+      </div>
+      <div style={{ padding: '14px 20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: dirColor, background: dirColor + '14', padding: '4px 12px', borderRadius: 99 }}>{dirLabel}</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: confColor, background: confColor + '14', padding: '4px 12px', borderRadius: 99 }}>{confidence} confidence</span>
+        </div>
+        <p style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, marginBottom: missing.length ? 12 : 0 }}>{dirReason}</p>
+        {missing.length > 0 && (
+          <div>
+            <p style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: .6, marginBottom: 6 }}>To improve confidence</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {missing.map((m, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: '#fffbeb', borderRadius: 8, border: '1px solid #fef3c7' }}>
+                  <span style={{ fontSize: 12, color: '#f59e0b' }}>◆</span>
+                  <span style={{ fontSize: 12, color: '#92400e' }}>{m}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // ── DEMO DATA ────────────────────────────────────────────────────────────────
 const DEALS = [
   {id:'1',companyName:'Form Energy',status:'invested',stage:'series-e',industry:'Long-Duration Storage',website:'https://formenergy.com',overview:'Iron-air battery technology enabling multi-day energy storage at 1/10th the cost of lithium-ion.',founders:[{name:'Mateo Jaramillo',role:'CEO'},{name:'Yet-Ming Chiang',role:'Co-Founder'}],terms:{instrument:'Equity'},investment:{amount:25000,costBasis:25000,vehicle:'Equity',date:new Date(Date.now()-365*864e5).toISOString(),ownershipPercent:0.01,entryPostMoneyValuation:800000000,impliedValuation:1500000000,impliedValue:45000,lastValuationDate:new Date(Date.now()-90*864e5).toISOString(),valuationMethod:'last-round',trlAtInvestment:8,lastUpdateReceived:new Date(Date.now()-14*864e5).toISOString(),nextUpdateExpected:new Date(Date.now()+20*864e5).toISOString()},coInvestors:[{id:'a',name:'ArcelorMittal',fund:'XCarb',role:'lead'},{id:'b',name:'GIC',fund:'GIC',role:'co-investor'},{id:'c',name:'Bill Gates',fund:'Breakthrough Energy',role:'co-investor'}],liquidityEvents:[],monitoring:{healthStatus:'thriving',fundraisingStatus:'not-raising',runwayMonths:24},memo:'Invested at Series E because iron-air is the only credible path to multi-day storage at grid scale. ArcelorMittal as lead investor is the key signal — they are a direct customer and strategic buyer, not just financial. Core bet: if they hit $50/kWh at scale, they win the long-duration market outright. Key risks: manufacturing scale-up, competition from other chemistries, utility procurement cycles are slow.',founderUpdates:[{id:'fu1',type:'text',content:'Q3 update from Mateo: first battery systems are rolling off the Weirton line. On track for Georgia Power delivery in Q3. Cost curve tracking ahead of plan at $142/kWh — targeting $100 by end of 2025. Team is 280 people now, hiring 40 more in manufacturing.',date:new Date(Date.now()-14*864e5).toISOString(),signals:['hardware_milestone']},{id:'fu2',type:'text',content:'Q2 update: Georgia Power offtake signed for 1.5 GWh. This is the first utility-scale agreement. Woodside also in late-stage discussions for Australian deployment. Revenue recognized on first delivery expected Q4.',date:new Date(Date.now()-90*864e5).toISOString(),signals:['offtake','funding_signal']},],
@@ -2205,6 +2344,9 @@ const DetailView = ({deal,onUpdate,setToast}) => {
         )}
       </div>
 
+      {/* Return Outlook */}
+      <ReturnOutlook deal={deal} compact={false}/>
+
       {/* Chart — below valuation */}
       <ValueChart deal={deal} mode="deal"/>
 
@@ -2563,9 +2705,8 @@ const InvestedCard = ({deal,onClick}) => {
   );
 
   return (
-    <div onClick={onClick} style={{background:'white',borderRadius:16,border:'1px solid #e5e7eb',cursor:'pointer',overflow:'hidden'}}>
-
-      <div style={{padding:'14px 16px',display:'flex',alignItems:'center',gap:14}}>
+    <div style={{background:'white',borderRadius:16,border:'1px solid #e5e7eb',overflow:'hidden'}}>
+      <div onClick={onClick} style={{padding:'14px 16px',display:'flex',alignItems:'center',gap:14,cursor:'pointer'}}>
         <CompanyLogo name={deal.companyName} website={deal.website} size={44} radius={12} fallbackBg="#f59e0b" fallbackColor="white"/>
         <div style={{flex:1,minWidth:0}}>
           <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:2}}>
@@ -2579,6 +2720,7 @@ const InvestedCard = ({deal,onClick}) => {
         </div>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
       </div>
+      <ReturnOutlook deal={deal} compact={true}/>
     </div>
   );
 };
