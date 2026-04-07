@@ -253,7 +253,17 @@ const calcReturnOutlook = (deal) => {
   return { confidence, confColor, direction, dirLabel, dirColor, dirReason, missing };
 };
 
-// ── RETURN OUTLOOK COMPONENT ──────────────────────────────────────────────────
+const OUTLOOK_ACTIONS = {
+  'Log a valuation date':        'section-fundraise',
+  'Update valuation mark':       'section-fundraise',
+  'Add ownership %':             'section-fundraise',
+  'Log a founder update':        'section-updates',
+  'Request LP update from fund manager': 'section-updates',
+};
+const scrollToSection = (id) => {
+  const el = document.getElementById(id);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
 const ReturnOutlook = ({ deal, compact = false }) => {
   const { confidence, confColor, dirLabel, dirColor, dirReason, missing } = calcReturnOutlook(deal);
   const [expanded, setExpanded] = useState(false);
@@ -305,12 +315,17 @@ const ReturnOutlook = ({ deal, compact = false }) => {
           <div>
             <p style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: .6, marginBottom: 6 }}>To improve confidence</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-              {missing.map((m, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: '#fffbeb', borderRadius: 8, border: '1px solid #fef3c7' }}>
-                  <span style={{ fontSize: 12, color: '#f59e0b' }}>◆</span>
-                  <span style={{ fontSize: 12, color: '#92400e' }}>{m}</span>
-                </div>
-              ))}
+              {missing.map((m, i) => {
+                const target = OUTLOOK_ACTIONS[m];
+                return (
+                  <div key={i} onClick={target ? () => scrollToSection(target) : undefined}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: target ? '#fffbeb' : '#fafafa', borderRadius: 8, border: `1px solid ${target ? '#fef3c7' : '#f3f4f6'}`, cursor: target ? 'pointer' : 'default' }}>
+                    <span style={{ fontSize: 12, color: '#f59e0b' }}>◆</span>
+                    <span style={{ fontSize: 12, color: target ? '#92400e' : '#6b7280', flex: 1 }}>{m}</span>
+                    {target && <span style={{ fontSize: 11, color: '#f59e0b' }}>→</span>}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -1807,31 +1822,31 @@ const useSignals = (deal) => {
 
 // ── AI SUGGESTION CHIP ────────────────────────────────────────────────────────
 // Inline dismissible suggestion. Shows everywhere signals have context to add.
-const AISuggestion = ({ icon, label, detail, source, sourceUrl, onAccept, onDismiss, color = '#5B6DC4', bg = '#eef2ff' }) => {
+const AISuggestion = ({ icon, label, detail, source, sourceUrl, onAccept, onDismiss }) => {
   const [dismissed, setDismissed] = useState(false);
   if (dismissed) return null;
   return (
-    <div style={{ display:'flex', alignItems:'flex-start', gap:10, padding:'9px 12px', borderRadius:10,
-      background: bg, border:`1px solid ${color}22`, marginTop:8 }}>
-      <span style={{ fontSize:13, flexShrink:0 }}>{icon || '✦'}</span>
+    <div style={{ display:'flex', alignItems:'flex-start', gap:8, padding:'8px 12px', borderRadius:8,
+      background: '#f9fafb', border:'1px solid #f3f4f6', marginTop:6 }}>
+      <span style={{ fontSize:11, flexShrink:0, marginTop:1, color:'#9ca3af' }}>✦</span>
       <div style={{ flex:1, minWidth:0 }}>
-        <p style={{ fontSize:12, fontWeight:600, color, marginBottom:1 }}>{label}</p>
-        {detail && <p style={{ fontSize:12, color:'#374151', lineHeight:1.5 }}>{detail}</p>}
+        <p style={{ fontSize:12, fontWeight:600, color:'#374151', marginBottom:1 }}>{label}</p>
+        {detail && <p style={{ fontSize:11, color:'#9ca3af', lineHeight:1.5 }}>{detail}</p>}
         {source && (
-          <p style={{ fontSize:11, color:'#9ca3af', marginTop:2 }}>
+          <p style={{ fontSize:11, color:'#d1d5db', marginTop:2 }}>
             {sourceUrl
-              ? <a href={sourceUrl} target="_blank" rel="noopener noreferrer" style={{ color:'#5B6DC4' }}>via {source} →</a>
+              ? <a href={sourceUrl} target="_blank" rel="noopener noreferrer" style={{ color:'#9ca3af' }}>via {source} →</a>
               : `via ${source}`}
           </p>
         )}
       </div>
-      <div style={{ display:'flex', gap:6, flexShrink:0, alignItems:'center' }}>
+      <div style={{ display:'flex', gap:4, flexShrink:0, alignItems:'center' }}>
         {onAccept && (
-          <button onClick={onAccept} style={{ padding:'3px 10px', background:color, color:'white', border:'none',
+          <button onClick={onAccept} style={{ padding:'3px 8px', background:'white', color:'#5B6DC4', border:'1px solid #e0e7ff',
             borderRadius:6, fontSize:11, fontWeight:600, cursor:'pointer' }}>Apply</button>
         )}
         <button onClick={() => { setDismissed(true); if (onDismiss) onDismiss(); }}
-          style={{ background:'none', border:'none', color:'#9ca3af', cursor:'pointer', fontSize:13, padding:'2px 4px', lineHeight:1 }}>✕</button>
+          style={{ background:'none', border:'none', color:'#d1d5db', cursor:'pointer', fontSize:12, padding:'2px 4px', lineHeight:1 }}>✕</button>
       </div>
     </div>
   );
@@ -2019,7 +2034,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
   return (
     <div style={{padding:20}}>
       {deal.isFund && <FundNAVCard deal={deal} inv={inv} onUpdate={onUpdate} setToast={setToast}/>}
-      <div style={C.card}>
+      <div id="section-valuation" style={C.card}>
         <div style={{display:'flex',alignItems:'flex-start',gap:14,marginBottom:deal.overview?12:0}}>
           <CompanyLogo name={deal.companyName} website={deal.website} size={52} radius={14} fallbackBg="#f59e0b" fallbackColor="white"/>
           <div style={{flex:1}}>
@@ -2368,7 +2383,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
       <ReturnOutlook deal={deal} compact={false}/>
 
       {/* Chart — below valuation */}
-      <ValueChart deal={deal} mode="deal"/>
+
 
       <ActiveRaiseCard deal={deal} onUpdate={onUpdate} setToast={setToast}/>
 
@@ -2390,7 +2405,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
         />
       )}
 
-      <PrimaryInsight deal={deal} onUpdate={onUpdate} setToast={setToast} signals={signals}/>
+      <div id="section-updates"><PrimaryInsight deal={deal} onUpdate={onUpdate} setToast={setToast} signals={signals}/></div>
 
       {/* AI: momentum signals injected as milestone suggestions */}
       {signals?.momentum?.signals?.filter(s => {
@@ -2431,7 +2446,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
         />
       ))}
 
-      <FundraiseHistory deal={deal} onUpdate={onUpdate} setToast={setToast}/>
+      <div id="section-fundraise"><FundraiseHistory deal={deal} onUpdate={onUpdate} setToast={setToast}/></div>
 
       {/* AI: co-investor suggestions from signals — inject into co-investor record */}
       {signals?.momentum?.signals?.filter(s =>
