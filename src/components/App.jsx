@@ -1985,16 +1985,16 @@ const DetailView = ({deal,onUpdate,setToast}) => {
           const sc = loadSignalCache()[deal.id];
           if (!sc?.summary) return null;
           return (
-            <div style={{background:'#1e1b4b',borderRadius:14,padding:'12px 16px',marginBottom:12,display:'flex',gap:12,alignItems:'flex-start'}}>
-              <div style={{width:22,height:22,borderRadius:7,background:'#4338ca',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:1}}>
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            <div style={{background:'#f5f3ff',borderRadius:14,padding:'12px 16px',marginBottom:12,display:'flex',gap:12,alignItems:'flex-start',border:'1px solid #e9d5ff'}}>
+              <div style={{width:22,height:22,borderRadius:7,background:'#ede9fe',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:1}}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
               </div>
               <div style={{flex:1}}>
-                <p style={{fontSize:11,color:'#a5b4fc',fontWeight:600,textTransform:'uppercase',letterSpacing:.6,marginBottom:4}}>AI · Signals</p>
-                <p style={{fontSize:13,color:'#e0e7ff',lineHeight:1.5}}>{sc.summary}</p>
+                <p style={{fontSize:11,color:'#a78bfa',fontWeight:600,textTransform:'uppercase',letterSpacing:.6,marginBottom:4}}>AI · Signals</p>
+                <p style={{fontSize:13,color:'#4c1d95',lineHeight:1.5}}>{sc.summary}</p>
                 {sc.risk?.level==='alert'&&sc.risk?.signals?.length>0&&(
-                  <div style={{marginTop:6,padding:'5px 10px',background:'#7f1d1d44',borderRadius:8,border:'1px solid #ef444433'}}>
-                    <p style={{fontSize:12,color:'#fca5a5',fontWeight:500}}>⚠ {sc.risk.signals[0]?.title}</p>
+                  <div style={{marginTop:6,padding:'5px 10px',background:'#fef2f2',borderRadius:8,border:'1px solid #fecaca'}}>
+                    <p style={{fontSize:12,color:'#ef4444',fontWeight:500}}>⚠ {sc.risk.signals[0]?.title}</p>
                   </div>
                 )}
               </div>
@@ -2246,44 +2246,44 @@ const DetailView = ({deal,onUpdate,setToast}) => {
           </div>
         )}
         {signals?.summary && (
-          <div style={{background:'#1e1b4b',borderRadius:14,padding:'12px 16px',display:'flex',gap:12,alignItems:'flex-start'}}>
-            <div style={{width:24,height:24,borderRadius:8,background:'#4338ca',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:1}}>
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          <div style={{background:'#f5f3ff',borderRadius:14,padding:'12px 16px',display:'flex',gap:12,alignItems:'flex-start',border:'1px solid #e9d5ff'}}>
+            <div style={{width:24,height:24,borderRadius:8,background:'#ede9fe',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,marginTop:1}}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
             </div>
             <div style={{flex:1,minWidth:0}}>
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:4}}>
-                <p style={{fontSize:11,color:'#a5b4fc',fontWeight:600,textTransform:'uppercase',letterSpacing:.6}}>
+                <p style={{fontSize:11,color:'#a78bfa',fontWeight:600,textTransform:'uppercase',letterSpacing:.6}}>
                   AI · {sigLastFetched ? `updated ${dAgo(sigLastFetched)}d ago` : 'live signals'}
                 </p>
                 <button onClick={()=>refreshSignals()} disabled={sigFetching}
-                  style={{fontSize:11,color:'#818cf8',background:'none',border:'none',cursor:'pointer',padding:0,opacity:sigFetching?.5:1}}>
+                  style={{fontSize:11,color:'#a78bfa',background:'none',border:'none',cursor:'pointer',padding:0,opacity:sigFetching?.5:1}}>
                   {sigFetching?'…':'↻ Refresh'}
                 </button>
               </div>
-              <p style={{fontSize:13,color:'#e0e7ff',lineHeight:1.6}}>{signals.summary}</p>
+              <p style={{fontSize:13,color:'#4c1d95',lineHeight:1.6}}>{signals.summary}</p>
               <div style={{display:'flex',gap:6,marginTop:8,flexWrap:'wrap'}}>
                 {signals.activity?.status && (
-                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:99,background:signals.activity.status==='active'?'#064e3b66':'#78350f66',color:signals.activity.status==='active'?'#6ee7b7':'#fcd34d',fontWeight:500}}>
+                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:99,background:signals.activity.status==='active'?'#f0fdf4':'#fffbeb',color:signals.activity.status==='active'?'#10b981':'#f59e0b',fontWeight:500,border:`1px solid ${signals.activity.status==='active'?'#bbf7d0':'#fde68a'}`}}>
                     {signals.activity.status==='active'?'● Active':'◎ Low activity'}
                   </span>
                 )}
                 {signals.momentum?.trend && (
-                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:99,background:'#1e3a5f66',color:'#93c5fd',fontWeight:500}}>
+                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:99,background:'#ede9fe',color:'#7c3aed',fontWeight:500,border:'1px solid #ddd6fe'}}>
                     {signals.momentum.trend==='up'?'↑ Momentum':signals.momentum.trend==='down'?'↓ Declining':'→ Stable'}
                   </span>
                 )}
                 {signals.risk?.level && signals.risk.level !== 'none' && (
-                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:99,background:'#7f1d1d66',color:'#fca5a5',fontWeight:500}}>
+                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:99,background:'#fef2f2',color:'#ef4444',fontWeight:500,border:'1px solid #fecaca'}}>
                     {signals.risk.level==='alert'?'⚠ Risk alert':'⚑ Watch'}
                   </span>
                 )}
                 {signals.checkInRecommended && (
-                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:99,background:'#78350f66',color:'#fcd34d',fontWeight:500}}>☎ Check-in recommended</span>
+                  <span style={{fontSize:11,padding:'2px 8px',borderRadius:99,background:'#fffbeb',color:'#f59e0b',fontWeight:500,border:'1px solid #fde68a'}}>☎ Check-in recommended</span>
                 )}
               </div>
               {signals.risk?.level === 'alert' && signals.risk?.signals?.length > 0 && (
-                <div style={{marginTop:8,padding:'6px 10px',background:'#7f1d1d44',borderRadius:8,border:'1px solid #ef444433'}}>
-                  <p style={{fontSize:12,color:'#fca5a5',fontWeight:500}}>⚠ {signals.risk.signals[0]?.title}{signals.risk.signals[0]?.description ? ` — ${signals.risk.signals[0].description}` : ''}</p>
+                <div style={{marginTop:8,padding:'6px 10px',background:'#fef2f2',borderRadius:8,border:'1px solid #fecaca'}}>
+                  <p style={{fontSize:12,color:'#ef4444',fontWeight:500}}>⚠ {signals.risk.signals[0]?.title}{signals.risk.signals[0]?.description ? ` — ${signals.risk.signals[0].description}` : ''}</p>
                 </div>
               )}
             </div>
