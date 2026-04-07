@@ -72,7 +72,17 @@ Rules:
 - Only include fundingRounds and revenueData with high confidence from public sources
 - Use raw numbers for amounts (no $ signs), null if unknown
 - If nothing found for a section return empty arrays
-- Dates: YYYY-MM if month known, YYYY if only year`;
+- Dates: YYYY-MM if month known, YYYY if only year
+- Return ONLY the JSON object. No preamble, no explanation, no markdown fences.`;
+
+  const FALLBACK = {
+    activity: { status: 'unknown', websiteStatus: 'unknown', signals: [] },
+    momentum: { trend: 'unknown', fundingRounds: [], revenueData: [], signals: [] },
+    risk: { level: 'none', signals: [] },
+    summary: 'No data returned.',
+    checkInRecommended: false,
+    checkInReason: null,
+  };
 
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -85,6 +95,7 @@ Rules:
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 2000,
+        system: 'You are a JSON-only investment research API. You must respond with a single valid JSON object and absolutely nothing else — no preamble, no explanation, no markdown, no code fences. Your entire response must be parseable by JSON.parse().',
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
         messages: [{ role: 'user', content: prompt }],
       }),
@@ -97,19 +108,21 @@ Rules:
 
     const data = await response.json();
     const textBlock = data.content.filter(b => b.type === 'text').pop();
-    if (!textBlock?.text) {
-      return res.status(200).json({
-        activity: { status: 'unknown', websiteStatus: 'unknown', signals: [] },
-        momentum: { trend: 'unknown', fundingRounds: [], revenueData: [], signals: [] },
-        risk: { level: 'none', signals: [] },
-        summary: 'No data returned.',
-        checkInRecommended: false,
-        checkInReason: null,
-      });
+    if (!textBlock?.text) return res.status(200).json(FALLBACK);
+
+    // Robustly extract JSON: find the first { and last } in the response
+    // This handles any preamble or trailing text Claude might add
+    const raw = textBlock.text;
+    const start = raw.indexOf('{');
+    const end = raw.lastIndexOf('}');
+    if (start === -1 || end === -1 || end <= start) {
+      console.error('No JSON object found in response:', raw.slice(0, 200));
+      return res.status(200).json(FALLBACK);
     }
 
-    const parsed = JSON.parse(textBlock.text.replace(/```json|```/g, '').trim());
+    const parsed = JSON.parse(raw.slice(start, end + 1));
     return res.status(200).json(parsed);
+
   } catch (e) {
     console.error('Signals API error:', e);
     return res.status(500).json({ error: e.message });
