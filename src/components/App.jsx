@@ -828,7 +828,26 @@ const SIGNAL_TTL = 12 * 60 * 60 * 1000;
 const loadSignalCache = () => { try { return JSON.parse(localStorage.getItem(SIGNAL_CACHE_KEY) || '{}'); } catch { return {}; } };
 const saveSignalCache = (c) => { try { localStorage.setItem(SIGNAL_CACHE_KEY, JSON.stringify(c)); } catch {} };
 
-const fetchExternalSignals = async (deal) => {
+// ── SIGNAL REQUEST QUEUE ──────────────────────────────────────────────────────
+// Serializes all signal fetches so only one fires at a time, with a 2s gap
+// between calls. Prevents simultaneous requests that blow the 30k TPM limit.
+const _signalQueue = { running: false, queue: [] };
+const _enqueueSignal = (fn) => new Promise((resolve, reject) => {
+  _signalQueue.queue.push({ fn, resolve, reject });
+  if (!_signalQueue.running) _drainSignalQueue();
+});
+const _drainSignalQueue = async () => {
+  if (_signalQueue.running || _signalQueue.queue.length === 0) return;
+  _signalQueue.running = true;
+  while (_signalQueue.queue.length > 0) {
+    const { fn, resolve, reject } = _signalQueue.queue.shift();
+    try { resolve(await fn()); } catch (e) { reject(e); }
+    if (_signalQueue.queue.length > 0) await new Promise(r => setTimeout(r, 2000));
+  }
+  _signalQueue.running = false;
+};
+
+const fetchExternalSignals = (deal) => _enqueueSignal(async () => {
   const resp = await fetch('/api/signals', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -836,7 +855,7 @@ const fetchExternalSignals = async (deal) => {
   });
   if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error(err.error || `HTTP ${resp.status}`); }
   return resp.json();
-};
+});
 
 // ── STATUS DOTS ────────────────────────────────────────────────────────────────
 const ActivityDot = ({ status }) => {
@@ -1754,11 +1773,12 @@ const useSignals = (deal) => {
     if (cached) {
       setSignals(cached);
       setLastFetched(new Date(cached.fetchedAt));
-      // Auto-refresh in background if stale
+      // Auto-refresh in background only if stale AND queue is idle
       const age = Date.now() - new Date(cached.fetchedAt).getTime();
-      if (age > SIGNAL_TTL) refresh(deal);
+      if (age > SIGNAL_TTL && !_signalQueue.running && _signalQueue.queue.length === 0) refresh(deal);
     } else {
-      refresh(deal);
+      // Only auto-fetch if queue is short (≤1 pending) to avoid pile-up on navigation
+      if (_signalQueue.queue.length <= 1) refresh(deal);
     }
   }, [deal?.id]);
 
