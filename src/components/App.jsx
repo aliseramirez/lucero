@@ -1852,7 +1852,7 @@ const AISuggestion = ({ icon, label, detail, source, sourceUrl, onAccept, onDism
   );
 };
 
-const DetailView = ({deal,onUpdate,setToast}) => {
+const DetailView = ({deal,onUpdate,setToast,onNavigateFeed}) => {
   const inv=deal.investment||{};
   const method=getMethod(deal);
   const staleness=getStaleness(deal);
@@ -2209,6 +2209,12 @@ const DetailView = ({deal,onUpdate,setToast}) => {
                   <p style={{fontSize:12,color:'#ef4444',fontWeight:500}}>⚠ {signals.risk.signals[0]?.title}{signals.risk.signals[0]?.description ? ` — ${signals.risk.signals[0].description}` : ''}</p>
                 </div>
               )}
+              {onNavigateFeed && (
+                <button onClick={onNavigateFeed}
+                  style={{marginTop:10,background:'none',border:'none',padding:0,cursor:'pointer',fontSize:12,color:'#a78bfa',display:'flex',alignItems:'center',gap:4}}>
+                  See signals in Feed →
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -2306,50 +2312,6 @@ const DetailView = ({deal,onUpdate,setToast}) => {
       <ReturnOutlook deal={deal} compact={false}/>
 
       <ActiveRaiseCard deal={deal} onUpdate={onUpdate} setToast={setToast}/>
-
-      {/* ── AI SIGNAL SUGGESTIONS — consolidated under valuation ── */}
-      {signals && <div style={{display:'flex',flexDirection:'column',gap:0}}>
-        {signals.momentum?.fundingRounds?.filter(r => {
-          const existing = new Set((deal.fundraiseHistory||[]).map(x => x.roundName?.toLowerCase()));
-          return r.roundName && !existing.has(r.roundName.toLowerCase()) && r.postMoneyVal;
-        }).map((r, i) => (
-          <AISuggestion key={`round_${i}`}
-            label={`New round detected: ${r.roundName}${r.amountRaised ? ` · ${fmtC(r.amountRaised)}` : ''}`}
-            detail={r.postMoneyVal ? `Post-money: ${fmtC(r.postMoneyVal)}${r.leadInvestor ? ` · Lead: ${r.leadInvestor}` : ''} — update implied value?` : null}
-            source={r.source} sourceUrl={r.sourceUrl}
-            onAccept={() => {
-              const own = inv.ownershipPercent || getCurrentOwnership(deal);
-              const newIV = own && r.postMoneyVal ? Math.round((own/100)*r.postMoneyVal) : null;
-              onUpdate({ ...deal, investment: { ...inv, ...(newIV?{impliedValue:newIV}:{}), impliedValuation:r.postMoneyVal, lastValuationDate:r.date||new Date().toISOString(), valuationMethod:'last-round' }, fundraiseHistory:[...(deal.fundraiseHistory||[]),{id:genId(),roundName:r.roundName,date:r.date||new Date().toISOString(),amountRaised:r.amountRaised||null,postMoneyVal:r.postMoneyVal,leadInvestor:r.leadInvestor||null,source:r.source,sourceUrl:r.sourceUrl,fromAgent:true}].sort((a,b)=>new Date(a.date)-new Date(b.date)) });
-              setToast('Mark updated from signals');
-            }}
-          />
-        ))}
-        {signals.momentum?.fundingRounds?.some(r => r.roundName && !(deal.activeRaise?.roundName)) &&
-          !signals.momentum.fundingRounds.some(r => (deal.fundraiseHistory||[]).some(h => h.roundName?.toLowerCase()===r.roundName?.toLowerCase())) && (
-          <AISuggestion
-            label={`${signals.momentum.fundingRounds[0].roundName} may be open — signals suggest active raise`}
-            detail={`${signals.momentum.fundingRounds[0].amountRaised?fmtC(signals.momentum.fundingRounds[0].amountRaised)+' target':'Amount unknown'} · Check if you have pro-rata rights`}
-            source={signals.momentum.fundingRounds[0].source} sourceUrl={signals.momentum.fundingRounds[0].sourceUrl}
-            onAccept={() => { const r=signals.momentum.fundingRounds[0]; onUpdate({...deal,activeRaise:{roundName:r.roundName,targetAmount:r.amountRaised||null,leadInvestor:r.leadInvestor||'',leadStatus:'rumored',participants:'',timeline:'',dilutionPct:'20',fromAgent:true},monitoring:{...(deal.monitoring||{}),fundraisingStatus:'raising'}}); setToast('Active raise logged from signals'); }}
-          />
-        )}
-        {signals.momentum?.signals?.filter(s => { const ex=new Set((deal.milestones||[]).map(m=>m.title)); return s.title&&!ex.has(s.title); }).slice(0,3).map((s,i) => (
-          <AISuggestion key={`mom_${i}`} label={s.title} detail={s.description} source={s.source} sourceUrl={s.sourceUrl}
-            onAccept={() => { const ms={id:genId(),type:s.type||'update',title:s.title,description:s.description||'',date:s.date?new Date(s.date).toISOString():new Date().toISOString(),source:s.source,sourceUrl:s.sourceUrl||null,fromAgent:true,sentiment:'positive'}; onUpdate({...deal,milestones:[...(deal.milestones||[]),ms]}); setToast('Milestone added from signals'); }}
-          />
-        ))}
-        {signals.risk?.level!=='none' && signals.risk?.signals?.filter(s => { const ex=new Set((deal.milestones||[]).map(m=>m.title)); return s.title&&!ex.has(s.title); }).slice(0,2).map((s,i) => (
-          <AISuggestion key={`risk_${i}`} label={s.title} detail={s.description} source={s.source} sourceUrl={s.sourceUrl}
-            onAccept={() => { const ms={id:genId(),type:'update',title:s.title,description:s.description||'',date:new Date().toISOString(),source:s.source,fromAgent:true,sentiment:'negative'}; onUpdate({...deal,milestones:[...(deal.milestones||[]),ms]}); setToast('Risk flag logged'); }}
-          />
-        ))}
-        {signals.momentum?.signals?.filter(s=>(s.type==='funding'||s.description?.toLowerCase().includes('led by')||s.description?.toLowerCase().includes('investor'))&&s.title&&!(deal.coInvestors||[]).some(ci=>s.title.toLowerCase().includes(ci.name?.toLowerCase()))).slice(0,2).map((s,i) => (
-          <AISuggestion key={`coinv_${i}`} label={`Investor signal: ${s.title}`} detail={s.description} source={s.source} sourceUrl={s.sourceUrl}
-            onAccept={() => { onUpdate({...deal,coInvestors:[...(deal.coInvestors||[]),{id:genId(),name:s.title,fund:null,role:'co-investor',checkSize:null,fromAgent:true}]}); setToast('Investor added from signals'); }}
-          />
-        ))}
-      </div>}
 
       <div id="section-updates"><PrimaryInsight deal={deal} onUpdate={onUpdate} setToast={setToast} signals={signals}/></div>
 
@@ -3641,7 +3603,7 @@ export default function App() {
           </div>
         </div>
       </div>
-      <DetailView deal={selected} onUpdate={updateDeal} setToast={setToast}/>
+      <DetailView deal={selected} onUpdate={updateDeal} setToast={setToast} onNavigateFeed={() => { setSelected(null); setPage('feed'); }}/>
       {toast && <Toast msg={typeof toast === 'string' ? toast : toast.message} onClose={() => setToast(null)}/>}
     </div>
   );
