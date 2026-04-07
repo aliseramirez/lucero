@@ -1606,7 +1606,7 @@ const LiquiditySection = ({deal,onUpdate,setToast}) => {
         <div style={{display:'flex',alignItems:'center',gap:8}}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="16 12 12 8 8 12"/><line x1="12" y1="16" x2="12" y2="8"/></svg>
           <span style={{fontWeight:500,fontSize:14,color:'#374151'}}>Liquidity events</span>
-          {events.length>0&&<Pill color="#10b981" bg="#f0fdf4">{fmtC(realized)} realized · {dpi.toFixed(2)}x DPI</Pill>}
+          {events.length>0&&<Pill color="#10b981" bg="#f0fdf4">{fmtC(realized)} realized · {dpi.toFixed(1)}x DPI</Pill>}
         </div>
         <span style={{color:'#9ca3af',fontSize:12}}>{open?'▲':'▼'}</span>
       </button>
@@ -2294,7 +2294,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
           <div><p style={C.label}>TVPI</p>
             {method==='mark-at-cost'
               ? <p style={{...C.val,color:'#9ca3af'}}>1.0x</p>
-              : moic ? <p style={{...C.val,color:moic>=1.5?'#10b981':moic>=1?'#5B6DC4':'#ef4444'}}>{moic.toFixed(2)}x</p>
+              : moic ? <p style={{...C.val,color:moic>=1.5?'#10b981':moic>=1?'#5B6DC4':'#ef4444'}}>{moic.toFixed(1)}x</p>
               : <p style={{...C.val,color:'#9ca3af'}}>—</p>}
           </div>
           <div><p style={C.label}>Ownership</p>
@@ -2310,7 +2310,7 @@ const DetailView = ({deal,onUpdate,setToast}) => {
               <p style={{fontSize:14,fontWeight:700,color:projected.projectedIV&&projected.projectedIV>=cb?'#7c3aed':'#ef4444'}}>{projected.projectedIV?fmtC(projected.projectedIV):'—'}</p>
             </div>
             <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:3}}>Proj. TVPI</p>
-              <p style={{fontSize:14,fontWeight:700,color:projected.projectedMOIC>=1.5?'#7c3aed':projected.projectedMOIC>=1?'#5B6DC4':'#ef4444'}}>{projected.projectedMOIC?`${projected.projectedMOIC.toFixed(2)}x`:'—'}</p>
+              <p style={{fontSize:14,fontWeight:700,color:projected.projectedMOIC>=1.5?'#7c3aed':projected.projectedMOIC>=1?'#5B6DC4':'#ef4444'}}>{projected.projectedMOIC?`${projected.projectedMOIC.toFixed(1)}x`:'—'}</p>
             </div>
             <div><p style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.6,marginBottom:3}}>Proj. ownership</p>
               <p style={{fontSize:14,fontWeight:700,color:'#7c3aed'}}>{projected.projectedOwn.toFixed(3)}%</p>
@@ -2564,7 +2564,7 @@ const FeedPage = ({ deals, onUpdate, setToast, onNavigate }) => {
     // Mark/NAV changes
     if (inv.lastValuationDate && inv.impliedValue && inv.impliedValue !== getCB(inv)) {
       const pct = ((inv.impliedValue - getCB(inv)) / getCB(inv) * 100).toFixed(1);
-      const moic = (inv.impliedValue / getCB(inv)).toFixed(2);
+      const moic = (inv.impliedValue / getCB(inv)).toFixed(1);
       allItems.push({
         id: `mark_${deal.id}_${inv.lastValuationDate}`,
         category: deal.isFund ? 'nav' : 'valuation',
@@ -2736,7 +2736,7 @@ const InvestedCard = ({deal,onClick}) => {
         </div>
         <div style={{textAlign:'right',flexShrink:0}}>
           <p style={{fontSize:14,fontWeight:600,color:'#111827'}}>{fmtC(cb)}</p>
-          {method!=='mark-at-cost'&&moic?<p style={{fontSize:12,fontWeight:500,color:moic>=1?'#10b981':'#ef4444'}}>{moic.toFixed(2)}x</p>:<p style={{fontSize:12,color:'#9ca3af'}}>at cost</p>}
+          <p style={{fontSize:12,fontWeight:500,color:moic&&moic<1?'#ef4444':'#10b981'}}>{moic?moic.toFixed(1):'1.0'}x</p>
         </div>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>
       </div>
@@ -3722,8 +3722,8 @@ export default function App() {
                 { l: 'Paid-In', v: fmtC(totalDep), sub: 'total deployed', c: '#111827' },
                 { l: 'RVPI', v: fmtC(totalUnrealizedImp), sub: 'residual value / paid-in', c: '#111827' },
                 { l: 'Unrealized G/L', v: fmtPnL(netPnL), sub: `${totalProceeds > 0 ? fmtC(totalProceeds) + ' returned · ' : ''}${totalWritedowns > 0 ? fmtC(totalWritedowns) + ' written down' : 'no exits yet'}`, c: statC(netPnL) },
-                { l: 'TVPI', v: moic ? `${moic.toFixed(2)}x` : '—', sub: 'total value / paid-in', c: moic >= 1.5 ? '#10b981' : moic >= 1 ? '#5B6DC4' : '#9ca3af' },
-                { l: 'DPI', v: dpi > 0 ? `${dpi.toFixed(2)}x` : '0.00x', sub: 'distributed / paid-in', c: dpi >= 1 ? '#10b981' : dpi > 0 ? '#5B6DC4' : '#9ca3af' },
+                { l: 'TVPI', v: moic ? `${moic.toFixed(1)}x` : '—', sub: 'total value / paid-in', c: moic >= 1.5 ? '#10b981' : moic >= 1 ? '#5B6DC4' : '#9ca3af' },
+                { l: 'DPI', v: dpi > 0 ? `${dpi.toFixed(1)}x` : '0.0x', sub: 'distributed / paid-in', c: dpi >= 1 ? '#10b981' : dpi > 0 ? '#5B6DC4' : '#9ca3af' },
                 { l: 'NAV', v: fmtC(totalProceeds + totalUnrealizedImp), sub: 'proceeds + live marks', c: totalProceeds + totalUnrealizedImp >= totalDep ? '#10b981' : '#5B6DC4' },
               ];
               return (
