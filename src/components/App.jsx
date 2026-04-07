@@ -1973,9 +1973,6 @@ const DetailView = ({deal,onUpdate,setToast}) => {
           </div>
         </div>}
 
-        {/* Documents */}
-        <DocumentsSection deal={deal} onUpdate={onUpdate} setToast={setToast}/>
-
       </div>
     );
   }
@@ -2356,9 +2353,6 @@ const DetailView = ({deal,onUpdate,setToast}) => {
 
       <div id="section-updates"><PrimaryInsight deal={deal} onUpdate={onUpdate} setToast={setToast} signals={signals}/></div>
 
-      <div id="section-fundraise"><FundraiseHistory deal={deal} onUpdate={onUpdate} setToast={setToast}/></div>
-
-      <div style={{marginTop:12}}><DocumentsSection deal={deal} onUpdate={onUpdate} setToast={setToast}/></div>
     </div>
   );
 };
@@ -3290,6 +3284,107 @@ function ImportModal({ onClose, onImport }) {
   );
 }
 
+// ── RECORDS PAGE ──────────────────────────────────────────────────────────────
+const RecordsPage = ({ deals, onUpdate, setToast }) => {
+  const [adding, setAdding] = useState(null);
+  const [form, setForm] = useState({ label:'', url:'', type:'K-1 / Tax Doc' });
+
+  const allDocs = deals.flatMap(d =>
+    (d.documents||[]).map(doc => ({ ...doc, dealName: d.companyName, dealId: d.id }))
+  ).sort((a,b) => new Date(b.addedAt) - new Date(a.addedAt));
+
+  const byType = allDocs.reduce((acc, doc) => {
+    const t = doc.type || 'Other';
+    if (!acc[t]) acc[t] = [];
+    acc[t].push(doc);
+    return acc;
+  }, {});
+
+  const typeIcon = (type) => ({'K-1 / Tax Doc':'🧾','Wire Confirmation':'🏦','SAFE':'📄','Convertible Note':'📄','Side Letter':'⚖️','Cap Table Notice':'📊','409A Valuation':'💹','Term Sheet':'📋','Legal':'⚖️','Other':'📎'}[type]||'📎');
+
+  const addDoc = (deal) => {
+    if (!form.label.trim() || !form.url.trim()) return;
+    let url = form.url.trim();
+    if (!url.startsWith('http')) url = 'https://' + url;
+    const entry = { id:genId(), label:form.label.trim(), url, type:form.type, addedAt:new Date().toISOString() };
+    onUpdate({ ...deal, documents:[...(deal.documents||[]), entry] });
+    setForm({ label:'', url:'', type:'K-1 / Tax Doc' });
+    setAdding(null);
+    setToast('Record added');
+  };
+
+  const removeDoc = (deal, docId) => onUpdate({ ...deal, documents:(deal.documents||[]).filter(d=>d.id!==docId) });
+  const invested = deals.filter(d => d.status === 'invested');
+
+  return (
+    <div style={{maxWidth:640,margin:'0 auto',padding:'20px 16px'}}>
+      <div style={{marginBottom:20}}>
+        <p style={{fontSize:17,fontWeight:700,color:'#111827',marginBottom:3}}>Deal Records</p>
+        <p style={{fontSize:13,color:'#9ca3af'}}>K-1s, wire confirmations, SAFEs, side letters — all in one place</p>
+      </div>
+      <div style={{background:'white',borderRadius:16,border:'1px solid #e5e7eb',padding:'14px 16px',marginBottom:16}}>
+        <p style={{fontSize:12,fontWeight:600,color:'#6b7280',marginBottom:10}}>ADD RECORD</p>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
+          <select value={adding||''} onChange={e=>setAdding(e.target.value||null)}
+            style={{padding:'8px 10px',border:'1px solid #e5e7eb',borderRadius:10,fontSize:13,color:adding?'#111827':'#9ca3af'}}>
+            <option value="">Select company…</option>
+            {invested.map(d=><option key={d.id} value={d.id}>{d.companyName}</option>)}
+          </select>
+          <select value={form.type} onChange={e=>setForm(f=>({...f,type:e.target.value}))}
+            style={{padding:'8px 10px',border:'1px solid #e5e7eb',borderRadius:10,fontSize:13}}>
+            {DOC_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        {adding && <>
+          <input placeholder="Label (e.g. 2024 K-1)" value={form.label} onChange={e=>setForm(f=>({...f,label:e.target.value}))}
+            style={{width:'100%',padding:'8px 10px',border:'1px solid #e5e7eb',borderRadius:10,fontSize:13,marginBottom:8,boxSizing:'border-box'}}/>
+          <input placeholder="Google Drive, Dropbox, or DocSend URL" value={form.url} onChange={e=>setForm(f=>({...f,url:e.target.value}))}
+            style={{width:'100%',padding:'8px 10px',border:'1px solid #e5e7eb',borderRadius:10,fontSize:13,marginBottom:8,boxSizing:'border-box'}}/>
+          <div style={{display:'flex',gap:8}}>
+            <button onClick={()=>{ const deal=deals.find(d=>d.id===adding); if(deal) addDoc(deal); }}
+              disabled={!form.label.trim()||!form.url.trim()}
+              style={{flex:1,padding:'8px',background:'#5B6DC4',color:'white',border:'none',borderRadius:10,fontWeight:600,fontSize:13,cursor:'pointer',opacity:form.label.trim()&&form.url.trim()?1:.4}}>
+              Add record
+            </button>
+            <button onClick={()=>setAdding(null)} style={{padding:'8px 14px',background:'none',border:'none',color:'#6b7280',fontSize:13,cursor:'pointer'}}>Cancel</button>
+          </div>
+        </>}
+      </div>
+      {allDocs.length === 0 ? (
+        <div style={{textAlign:'center',padding:'60px 20px',color:'#9ca3af'}}>
+          <p style={{fontWeight:500,marginBottom:4}}>No records yet</p>
+          <p style={{fontSize:13}}>Add K-1s, wire confirmations, and legal docs above</p>
+        </div>
+      ) : (
+        Object.entries(byType).map(([type, docs]) => (
+          <div key={type} style={{marginBottom:16}}>
+            <p style={{fontSize:11,fontWeight:600,color:'#9ca3af',textTransform:'uppercase',letterSpacing:.8,marginBottom:8}}>
+              {typeIcon(type)} {type} · {docs.length}
+            </p>
+            <div style={{background:'white',borderRadius:16,border:'1px solid #e5e7eb',overflow:'hidden'}}>
+              {docs.map((doc, i) => (
+                <div key={doc.id} style={{display:'flex',alignItems:'center',gap:12,padding:'12px 16px',borderTop:i>0?'1px solid #f3f4f6':'none'}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <a href={doc.url} target="_blank" rel="noopener noreferrer"
+                      style={{fontWeight:500,fontSize:13,color:'#5B6DC4',textDecoration:'none',display:'block',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                      {doc.label}
+                    </a>
+                    <p style={{fontSize:11,color:'#9ca3af',marginTop:2}}>{doc.dealName} · Added {dAgo(doc.addedAt)}d ago</p>
+                  </div>
+                  <button onClick={()=>{ const deal=deals.find(d=>d.id===doc.dealId); if(deal) removeDoc(deal,doc.id); }}
+                    style={{color:'#d1d5db',background:'none',border:'none',cursor:'pointer',padding:4,flexShrink:0}}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+};
+
 // ── ROOT APP ──────────────────────────────────────────────────────────────────
 export default function App() {
   const { user, isLoading, isAuthenticated, signInWithProvider, signOut } = useAuth();
@@ -3496,19 +3591,37 @@ export default function App() {
             <span style={{fontWeight:800,fontSize:16,color:'#111827',letterSpacing:'-0.3px'}}>Lucero</span>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:4,background:'#f3f4f6',borderRadius:10,padding:'4px'}}>
-            <button onClick={()=>setPage('list')}
-              style={{padding:'6px 14px',borderRadius:7,border:'none',cursor:'pointer',fontSize:13,fontWeight:600,background:'transparent',color:'#6b7280'}}>
-              Portfolio
-            </button>
-            <button onClick={()=>setPage('feed')}
-              style={{padding:'6px 14px',borderRadius:7,border:'none',cursor:'pointer',fontSize:13,fontWeight:600,background:'white',color:'#111827',boxShadow:'0 1px 3px rgba(0,0,0,.08)'}}>
-              Feed
-            </button>
+            <button onClick={()=>setPage('list')} style={{padding:'6px 14px',borderRadius:7,border:'none',cursor:'pointer',fontSize:13,fontWeight:600,background:'transparent',color:'#6b7280'}}>Portfolio</button>
+            <button onClick={()=>setPage('feed')} style={{padding:'6px 14px',borderRadius:7,border:'none',cursor:'pointer',fontSize:13,fontWeight:600,background:'white',color:'#111827',boxShadow:'0 1px 3px rgba(0,0,0,.08)'}}>Feed</button>
+            <button onClick={()=>setPage('records')} style={{padding:'6px 14px',borderRadius:7,border:'none',cursor:'pointer',fontSize:13,fontWeight:600,background:'transparent',color:'#6b7280'}}>Records</button>
           </div>
           <UserMenu user={user} onLogout={signOut}/>
         </div>
       </div>
       <FeedPage deals={deals} onUpdate={updateDeal} setToast={setToast} onNavigate={(deal)=>{ setSelected(deal); setPage('detail'); }}/>
+      {toast && <Toast msg={typeof toast === 'string' ? toast : toast.message} onClose={() => setToast(null)}/>}
+    </div>
+  );
+
+  if (page === 'records') return (
+    <div style={{minHeight:'100vh',background:'#f9fafb',fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif'}}>
+      <div style={{background:'white',borderBottom:'1px solid #e5e7eb',position:'sticky',top:0,zIndex:10}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'14px 32px'}}>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <div style={{width:34,height:34,borderRadius:10,background:'#4A1942',display:'flex',alignItems:'center',justifyContent:'center'}}>
+              <svg width="18" height="18" viewBox="0 0 38 38" fill="none"><circle cx="19" cy="19" r="4.5" fill="#F5DFA0"/><line x1="19" y1="3" x2="19" y2="10" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/><line x1="19" y1="28" x2="19" y2="35" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/><line x1="3" y1="19" x2="10" y2="19" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/><line x1="28" y1="19" x2="35" y2="19" stroke="#F5DFA0" strokeWidth="2.5" strokeLinecap="round"/></svg>
+            </div>
+            <span style={{fontWeight:800,fontSize:16,color:'#111827',letterSpacing:'-0.3px'}}>Lucero</span>
+          </div>
+          <div style={{display:'flex',alignItems:'center',gap:4,background:'#f3f4f6',borderRadius:10,padding:'4px'}}>
+            <button onClick={()=>setPage('list')} style={{padding:'6px 14px',borderRadius:7,border:'none',cursor:'pointer',fontSize:13,fontWeight:600,background:'transparent',color:'#6b7280'}}>Portfolio</button>
+            <button onClick={()=>setPage('feed')} style={{padding:'6px 14px',borderRadius:7,border:'none',cursor:'pointer',fontSize:13,fontWeight:600,background:'transparent',color:'#6b7280'}}>Feed</button>
+            <button onClick={()=>setPage('records')} style={{padding:'6px 14px',borderRadius:7,border:'none',cursor:'pointer',fontSize:13,fontWeight:600,background:'white',color:'#111827',boxShadow:'0 1px 3px rgba(0,0,0,.08)'}}>Records</button>
+          </div>
+          <UserMenu user={user} onLogout={signOut}/>
+        </div>
+      </div>
+      <RecordsPage deals={deals} onUpdate={updateDeal} setToast={setToast}/>
       {toast && <Toast msg={typeof toast === 'string' ? toast : toast.message} onClose={() => setToast(null)}/>}
     </div>
   );
@@ -3555,12 +3668,16 @@ export default function App() {
           </div>
           <div style={{display:'flex',alignItems:'center',gap:4,background:'#f3f4f6',borderRadius:10,padding:'4px'}}>
             <button onClick={()=>setPage('list')}
-              style={{padding:'6px 14px',borderRadius:7,border:'none',cursor:'pointer',fontSize:13,fontWeight:600,background:'white',color:'#111827',boxShadow:'0 1px 3px rgba(0,0,0,.08)'}}>
+              style={{padding:'6px 14px',borderRadius:7,border:'none',cursor:'pointer',fontSize:13,fontWeight:600,background:page==='list'?'white':'transparent',color:page==='list'?'#111827':'#6b7280',boxShadow:page==='list'?'0 1px 3px rgba(0,0,0,.08)':'none'}}>
               Portfolio
             </button>
             <button onClick={()=>setPage('feed')}
-              style={{padding:'6px 14px',borderRadius:7,border:'none',cursor:'pointer',fontSize:13,fontWeight:600,background:'transparent',color:'#6b7280'}}>
+              style={{padding:'6px 14px',borderRadius:7,border:'none',cursor:'pointer',fontSize:13,fontWeight:600,background:page==='feed'?'white':'transparent',color:page==='feed'?'#111827':'#6b7280',boxShadow:page==='feed'?'0 1px 3px rgba(0,0,0,.08)':'none'}}>
               Feed
+            </button>
+            <button onClick={()=>setPage('records')}
+              style={{padding:'6px 14px',borderRadius:7,border:'none',cursor:'pointer',fontSize:13,fontWeight:600,background:page==='records'?'white':'transparent',color:page==='records'?'#111827':'#6b7280',boxShadow:page==='records'?'0 1px 3px rgba(0,0,0,.08)':'none'}}>
+              Records
             </button>
           </div>
           <div style={{display:'flex',alignItems:'center',gap:10}}>
