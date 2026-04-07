@@ -5,8 +5,8 @@ import { useAuth } from '../hooks/useAuth';
 // ── UTILS ────────────────────────────────────────────────────────────────────
 const fmtC = (n) => {
   if (n == null) return '$0';
-  if (n >= 1e6) return `$${(n/1e6).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')}M`;
-  if (n >= 1000) return `$${(n/1000).toFixed(2).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1')}K`;
+  if (n >= 1e6) return `$${(n/1e6).toFixed(1).replace(/\.0$/, '')}M`;
+  if (n >= 1000) return `$${(n/1000).toFixed(1).replace(/\.0$/, '')}K`;
   return `$${n}`;
 };
 const toM = (n) => n ? (Number(n) / 1e6) : '';  // stored dollars → display millions
